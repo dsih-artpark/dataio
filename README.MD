@@ -1,13 +1,13 @@
 # dataio
 
-DataIO is a Python package designed to simplify data access within the Data Science Innovation Hub at ARTPARK.
+dataio is a Python package designed to simplify data access within the Data Science Innovation Hub at ARTPARK.
 
 ## Installation
 
-You can install DataIO using [Poetry](https://python-poetry.org/) and Git SSH by running the following command:
+You can install dataio using [Poetry](https://python-poetry.org/) and Git SSH by running the following command:
 
 ```bash
-poetry add git+ssh://git@github.com:dsih-artpark/dataio.git#v0.1.0
+poetry add git+ssh://git@github.com:dsih-artpark/dataio.git
 ```
 
 ## Usage

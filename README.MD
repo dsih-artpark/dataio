@@ -15,10 +15,11 @@ poetry add git+ssh://git@github.com:dsih-artpark/dataio.git
 from dataio.download import fetch_data_documentation, download_dataset_v2
 
 # Example usage of fetch_data_documentation to get metadata
-metadata, datadict = fetch_data_documentation(dsid="your_dataset_id")
+metadata, datadict = fetch_data_documentation(dsid="DSID01")
 
-# Example usage of download_dataset_v2 to download the dataset
-download_dataset_v2(dsid="your_dataset_id", data_state="standardised")
+# Example usage of download_dataset_v2 to download your dataset with ID "DSID01" only for files for the year "2023"
+# This assumes the files for that year contain the year in the name, or are in a folder with the same name
+download_dataset_v2(dsid="DSID01", data_state="standardised", contains = "2023")
 ```
 The ```download_dataset_v2``` has more advanced functionality, to download specific files based on your need. Read about it [here][download_dataset_v2].
 

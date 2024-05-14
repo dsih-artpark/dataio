@@ -10,7 +10,8 @@ import platform
 import logging
 
 # Set up logging
-logger = logging.getLogger(__name__)
+# Set up logging
+logger = logging.getLogger("dataio.download")
 
 # Capture warnings and redirect them to the logging system
 logging.captureWarnings(True)

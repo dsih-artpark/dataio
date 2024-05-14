@@ -2,7 +2,9 @@ import dataio.download  # noqa: F401
 import dataio.upload  # noqa: F401
 import importlib.metadata
 import logging
+from dataio.logging_config import setup_logging
 
+setup_logging()
 
 __version__ = importlib.metadata.version("dataio")
 

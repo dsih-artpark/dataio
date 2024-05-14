@@ -10,7 +10,6 @@ import platform
 import logging
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Capture warnings and redirect them to the logging system

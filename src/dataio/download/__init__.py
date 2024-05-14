@@ -7,7 +7,14 @@ import yaml
 from typing import Tuple, Dict, Optional, Union
 import pkg_resources
 import platform
+import logging
 
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Capture warnings and redirect them to the logging system
+logging.captureWarnings(True)
 
 def download_file_from_URI(URI: str, path: str = None, temp: bool = False):
     """Downloads a file from a URI.
@@ -93,12 +100,13 @@ def fetch_data_documentation(*, dsid: str,
         binary (bool): If True, returns binary content of metadata and data dictionary.
 
     Returns:
-        Tuple[bytes, bytes]: A tuple containing binary content of metadata and data dictionary.
+        Tuple[Dict, Dict]: A tuple containing metadata and data dictionary.
 
     Raises:
         ValueError: If metadata or data dictionary files are not found for the specified dataset ID.
         TypeError: If dsid is not a string.
     """
+    logger.info(f"Fetching data documentation for dataset ID '{dsid}'...")
 
     # Validate repo_info dictionary
     if repo_info is not None:
@@ -146,7 +154,6 @@ def fetch_data_documentation(*, dsid: str,
     repo = repo_info.get('repo', "data-documentation")
     branch = repo_info.get('branch', "production")
     catalogue_path = repo_info.get('catalogue_path', "info")
-    datadict_fname = repo_info.get('datadict_fname', "datadictionary.yaml")
     metadata_fname = repo_info.get('metadata_fname', "metadata.yaml")
 
     # Construct URL to fetch the tree of files
@@ -169,22 +176,18 @@ def fetch_data_documentation(*, dsid: str,
     dsid_path_prefix = f"{catalogue_path}/{dsid[0:2]}/{dsid}-"
 
     # Find data dictionary file in the tree
-    gh_datadict_path = None
+    gh_metadata_path = None
     for file_info in tree:
-        if file_info['path'].startswith(dsid_path_prefix) and file_info['path'].endswith(datadict_fname):
-            gh_datadict_path = file_info['path']
+        if file_info['path'].startswith(dsid_path_prefix) and file_info['path'].endswith(metadata_fname):
+            gh_metadata_path = file_info['path']
             break
 
     # Raise error if data dictionary file not found
-    if not gh_datadict_path:
+    if not gh_metadata_path:
         raise ValueError(f"Data dictionary file not found for dataset ID '{dsid}'.")
 
-    # Construct paths for metadata files
-    gh_metadata_path = gh_datadict_path.replace(datadict_fname, metadata_fname)
-
-    # Construct URLs to fetch raw content of metadata and data dictionary files
+    # Construct URLs to fetch raw content of metadata file
     gh_raw_metadata_url = f"{gh_raw_base_url}{owner}/{repo}/{branch}/{gh_metadata_path}"
-    gh_raw_datadict_url = f"{gh_raw_base_url}{owner}/{repo}/{branch}/{gh_datadict_path}"
 
     # Retrieve and parse metadata
     raw_metadata_response = requests.get(gh_raw_metadata_url)
@@ -193,20 +196,11 @@ def fetch_data_documentation(*, dsid: str,
     elif raw_metadata_response.status_code != 200:
         raise ValueError(f"Failed to retrieve metadata for dataset ID '{dsid}'. Request failed.")
 
-    # Retrieve and parse data dictionary
-    raw_datadict_response = requests.get(gh_raw_datadict_url)
-    if raw_datadict_response.status_code == 404:
-        raise ValueError(f"Data dictionary file not found for dataset ID '{dsid}'.")
-    elif raw_datadict_response.status_code != 200:
-        raise ValueError(f"Failed to retrieve data dictionary for dataset ID '{dsid}'. Request failed.")
-
     if binary:
-        return raw_metadata_response.content, raw_datadict_response.content
+        return raw_metadata_response.content
     else:
         metadata = yaml.safe_load(raw_metadata_response.content.decode('utf-8'))
-        datadict = yaml.safe_load(raw_datadict_response.content.decode('utf-8'))
-
-        return metadata, datadict
+        return metadata
 
 
 def download_dataset_v2(*,

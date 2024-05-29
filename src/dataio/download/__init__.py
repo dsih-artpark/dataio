@@ -291,6 +291,7 @@ def download_dataset_v2(*,
             files_containing_this_item = [file for file in files_found if item in file]
             if firstLoop:
                 files_containing_any = set(files_containing_this_item)
+                firstLoop = False
             else:
                 if files_containing_any.isdisjoint(files_containing_this_item):
                     files_containing_any.update(files_containing_this_item)

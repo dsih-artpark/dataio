@@ -436,3 +436,5 @@ def download_dataset_v2(*,
             # Dump the dictionary to the metadata YAML file
             with open(datadict_file_path, 'wb') as file:
                 file.write(datadict)
+    
+    return dsid_name

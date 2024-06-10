@@ -523,6 +523,7 @@ def compare_files(*,
     if prefix1 or prefix2:
         if not isinstance(prefix1, str) or not isinstance(prefix2, str):
             raise TypeError("prefix must be a string")
+            
     if superdsid:
         if superdsid not in [1, 2]:
             raise ValueError("Superdsid must be int 1 or 2")

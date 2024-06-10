@@ -486,74 +486,86 @@ def download_dataset_v2(*,
 
 
 def compare_files(*,
-                  super_dsid: str,
-                  super_data_state: str,
-                  sub_dsid: str,
-                  sub_data_state: str,
-                  contains_all: Union[str, List[str], None] = None,
-                  contains_any: Union[str, List[str], None] = None,
-                  suffixes: Union[str, List[str], None] = None,
-                  verbose: bool = False):
-    """Lists files that are in the super dataset id folder, that are not in the sub dataset id folder
+                  dsid1: str,
+                  data_state1: str,
+                  prefix1: str = None,
+                  dsid2: str,
+                  data_state2: str,
+                  prefix2: str = None,
+                  superdsid: int = None) -> Tuple[List[str], List[str]]:
+    """Compares file names (without file extension) in two folders, and returns files in dsid1 not in dsid2, and files in dsid2 not in dsid1.
+    If superdsid is provided, it returns a list of files in superdsid that are not in the other dsid.  
 
     Args:
-        super_dsid (str): dsid of super folder
-        super_data_state (str): data state of super folder (raw, preprocessed, standardised)
-        sub_dsid (str): dsid of sub folder
-        sub_data_state (str): data state of sub folder (raw, preprocessed, standardised)
-        contains_all (Union[str, List[str], None], optional): list of keywords that should all appear in the filename. Defaults to None.
-        contains_any (Union[str, List[str], None], optional): list of keywords, any of which may appear in the filename. Defaults to None.
-        suffixes (Union[str, List[str], None], optional): .xlsx, or other file suffixes to filter by. Defaults to None.
-        verbose (bool, optional): Boolean for verbose printing. Defaults to False.
+        dsid1 (str): DSID of the first folder
+        data_state1 (str): whether DSID1 is raw, preprocessed or standardised
+        dsid2 (str): DSID of the second folder
+        data_state2 (str): whether DSID2 is raw, preprocessed or standardised
+        prefix1 (str, optional): folder path with or without file prefix for DSID1. Defaults to None.
+        prefix2 (str, optional): folder path with or without file prefix for DSID2. Defaults to None.
+        superdsid (int, optional): whether 1 or 2 if DSID1 or DSID2 is the super folder. Defaults to None.
+
+    Raises:
+        TypeError: dsids must be strings
+        TypeError: data_states must be strings
+        TypeError: prefixes must be strings
+        ValueError: superdsid must be an int 1 or 2
+
+    Returns:
+        Tuple[List[str], List[str]]: List of files in DSID1 not in DSID1, List of files in DSID2 not in DSID1
     """
 
-    def list_files(*,
-                   dsid: str,
-                   data_state: str,
-                   contains_all: Union[str, List[str], None] = None,
-                   contains_any: Union[str, List[str], None] = None,
-                   suffixes: Union[str, List[str], None] = None,
-                   verbose: bool = False) -> Set[str]:
+    if not isinstance(dsid1, str) or not isinstance(dsid2, str):
+        raise TypeError("dsid must be a string.")
+    if not isinstance(data_state1, str) or not isinstance(data_state2, str):
+        raise TypeError("data_state must be a string.")
 
-        def load_settings(file_path: str) -> dict:
-            with open(file_path, 'r') as f:
-                return yaml.safe_load(f)
+    if prefix1 or prefix2:
+        if not isinstance(prefix1, str) or not isinstance(prefix2, str):
+            raise TypeError("prefix must be a string")
+    if superdsid:
+        if superdsid not in [1, 2]:
+            raise ValueError("Superdsid must be int 1 or 2")
 
-        def validate_str_input(var: str, var_name: str):
-            if not isinstance(var, str):
-                raise TypeError(f"{var_name} must be a string.")
+    def fetch_file_list(*,
+                        dsid: str,
+                        data_state: str,
+                        prefix: str = None) -> Set[str]:
+        """Fetches list of files in DSID, with input prefix 
 
-        def ensure_list(var: Union[str, List[str], None]) -> List[str]:
-            if isinstance(var, str):
-                return [var]
-            elif isinstance(var, list) or var is None:
-                return var
-            else:
-                raise TypeError(f"{var} must be a string, list, or None.")
+        Args:
+            dsid (str): DSID
+            data_state (str): whether raw, preprocessed or standardised
+            prefix (str, optional): folder path with or without file path. Defaults to None.
 
-        # Load settings
-        settings = load_settings(
-            pkg_resources.resource_filename(__name__, 'settings.yaml'))
 
-        # Validate inputs
-        validate_str_input(dsid, "dsid")
-        validate_str_input(data_state, "data_state")
+        Raises:
+            ValueError: invalid data_state
+            ValueError: DSID not in data_state
 
-        # Get the bucket for the data_state
+        Returns:
+            Set[str]: list of files in DSID without file extension
+        """
+
+        # Open settings file which contains bucket names
+        with open(pkg_resources.resource_filename(__name__, 'settings.yaml'), 'r') as f:
+            settings = yaml.safe_load(f)
+
+        # Validating data state with standard bucket names
         Bucket = settings["data_state_buckets"].get(data_state)
         if Bucket is None:
             raise ValueError(f"{data_state} is not a valid data state. Must be one of {
                              list(settings['data_state_buckets'].keys())}")
 
-        # Initialize S3 client and paginator
+        # Initialize the S3 client
         client = boto3.client('s3')
-        paginator = client.get_paginator('list_objects_v2')
+        listobjv2_paginator = client.get_paginator('list_objects_v2')
 
         # Get the common prefixes (folders) from the bucket
         dsid_names = {}
-        for result in paginator.paginate(Bucket=Bucket, Delimiter='/'):
-            for prefix in result.get('CommonPrefixes', []):
-                folder = prefix.get('Prefix')
+        for result in listobjv2_paginator.paginate(Bucket=Bucket, Delimiter='/'):
+            for pre in result.get('CommonPrefixes', []):
+                folder = pre.get('Prefix')
                 dsid_names[folder.split("-")[0]] = folder
 
         # Determine the prefix for the specified dsid
@@ -562,49 +574,37 @@ def compare_files(*,
             raise ValueError(f"Dataset {dsid} not found in specified state {
                              data_state} on Bucket.")
 
+        # Add prefix provided by user
+        if prefix:
+            if prefix.startswith("/"):
+                prefix = prefix[1:]
+            path = dsid_name + prefix
+        else:
+            path = dsid_name
+
         # List objects in the dsid prefix
         files_found = []
-        for result in paginator.paginate(Bucket=Bucket, Prefix=dsid_name):
-            files_found += [item['Key']
-                            for item in result.get('Contents', []) if not item['Key'].endswith("/")]
+        for result in listobjv2_paginator.paginate(Bucket=Bucket, Prefix=path):
+            if 'Contents' in result:
+                files_found += [item['Key']
+                                for item in result['Contents'] if not item['Key'].endswith("/")]
 
-        # Helper to filter files based on criteria
-        def filter_files(files: List[str], criteria: Union[str, List[str], None], include_all: bool = True) -> Set[str]:
-            if criteria is None:
-                return set(files)
-            criteria = ensure_list(criteria)
-            if include_all:
-                return set(file for file in files if all(item in file for item in criteria))
-            else:
-                return set(file for file in files if any(item in file for item in criteria))
+        if not files_found:
+            warnings.warn(f"No files found in {dsid} with prefix {prefix}")
 
-        # Apply filters
-        files_containing_any = filter_files(
-            files_found, contains_any, include_all=False)
-        files_containing_all = filter_files(files_found, contains_all)
-        files_with_suffixes = filter_files(files_found, suffixes)
+        # Removing extensions and extracting file names
+        files_set = {item.split("/")[-1].split(".")[0] for item in files_found}
 
-        # Get the intersection of all filtered sets
-        filtered_files = files_containing_any.intersection(
-            files_containing_all, files_with_suffixes)
+        return files_set
 
-        if verbose:
-            print(f"Files found: {files_found}")
-            print(f"Files containing any: {files_containing_any}")
-            print(f"Files containing all: {files_containing_all}")
-            print(f"Files with suffixes: {files_with_suffixes}")
-            print(f"Filtered files: {filtered_files}")
+    file_list1 = fetch_file_list(
+        dsid=dsid1, data_state=data_state1, prefix=prefix1)
+    file_list2 = fetch_file_list(
+        dsid=dsid2, data_state=data_state2, prefix=prefix2)
 
-        return filtered_files
-
-    superlist = list_files(dsid=super_dsid, data_state=super_data_state, contains_all=contains_all,
-                           contains_any=contains_any, suffixes=suffixes, verbose=verbose)
-    sublist = list_files(dsid=sub_dsid, data_state=sub_data_state, contains_all=contains_all,
-                         contains_any=contains_any, suffixes=suffixes, verbose=verbose)
-
-    diff = superlist.difference(sublist)
-
-    if not diff:
-        return "Folder match: No files to return"
+    if superdsid == 1:
+        return (file_list1 - file_list2)
+    elif superdsid == 2:
+        return (file_list2 - file_list1)
     else:
-        return diff
+        return (file_list1 - file_list2, file_list2 - file_list1)

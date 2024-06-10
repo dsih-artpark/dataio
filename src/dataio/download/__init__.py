@@ -605,8 +605,8 @@ def compare_files(*,
         dsid=dsid2, data_state=data_state2, prefix=prefix2)
 
     if superdsid == 1:
-        return (file_list1 - file_list2)
+        return (file_list1 - file_list2, None)
     elif superdsid == 2:
-        return (file_list2 - file_list1)
+        return (None, file_list2 - file_list1)
     else:
         return (file_list1 - file_list2, file_list2 - file_list1)

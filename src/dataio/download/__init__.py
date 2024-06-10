@@ -588,6 +588,8 @@ def compare_files(*,
             if 'Contents' in result:
                 files_found += [item['Key']
                                 for item in result['Contents'] if not item['Key'].endswith("/")]
+            else:
+                raise FileNotFoundError("Prefix does not exist.")
 
         if not files_found:
             warnings.warn(f"No files found in {dsid} with prefix {prefix}")

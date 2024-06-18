@@ -513,8 +513,7 @@ def compare_files(*,
         # Validating data state with standard bucket names
         Bucket = settings["data_state_buckets"].get(data_state)
         if Bucket is None:
-            raise ValueError(f"{data_state} is not a valid data state. Must be one of {
-                             list(settings['data_state_buckets'].keys())}")
+            raise ValueError(f"{data_state} is not a valid data state. Must be one of {list(settings['data_state_buckets'].keys())}")
 
         # Initialize the S3 client
         client = boto3.client('s3')

@@ -116,48 +116,38 @@ def fetch_data_documentation(*, dsid: str,
     # Validate repo_info dictionary
     if repo_info is not None:
         # Check for unexpected keys in repo_info
-        unexpected_keys = set(repo_info.keys(
-        )) - {'owner', 'repo', 'branch', 'catalogue_path', 'datadict_fname', 'metadata_fname'}
+        unexpected_keys = set(repo_info.keys()) - {'owner', 'repo', 'branch', 'catalogue_path', 'datadict_fname', 'metadata_fname'}
         if unexpected_keys:
-            warnings.warn(f"Ignoring unexpected keys in repo_info: {
-                          unexpected_keys}", UserWarning)
+            warnings.warn(f"Ignoring unexpected keys in repo_info: {unexpected_keys}", UserWarning)
 
         # Check for missing keys in repo_info
-        missing_keys = {'owner', 'repo', 'branch', 'catalogue_path',
-                        'datadict_fname', 'metadata_fname'} - set(repo_info.keys())
+        missing_keys = {'owner', 'repo', 'branch', 'catalogue_path','datadict_fname', 'metadata_fname'} - set(repo_info.keys())
         if missing_keys and not default:
-            warnings.warn(f"Missing keys in repo_info, using default values for: {
-                          missing_keys}", UserWarning)
+            warnings.warn(f"Missing keys in repo_info, using default values for: {missing_keys}", UserWarning)
         elif missing_keys and default:
-            warnings.warn(f"Missing keys in repo_info, using default values for: {
-                          missing_keys}", UserWarning, stacklevel=2)
+            warnings.warn(f"Missing keys in repo_info, using default values for: {missing_keys}", UserWarning, stacklevel=2)
+            
     # Issue warning if custom values not provided for repo_info and default values are used.
     elif not default:
-        warnings.warn(
-            "No custom values provided for repo_info, using default values", UserWarning)
+        warnings.warn("No custom values provided for repo_info, using default values", UserWarning)
 
     # Validate gh_urls dictionary
     if gh_urls is not None:
         # Check for unexpected keys in gh_urls
-        unexpected_keys = set(gh_urls.keys()) - \
-            {'api_base_url', 'raw_base_url'}
+        unexpected_keys = set(gh_urls.keys()) - {'api_base_url', 'raw_base_url'}
         if unexpected_keys:
-            warnings.warn(f"Ignoring unexpected keys in gh_urls: {
-                          unexpected_keys}", UserWarning)
+            warnings.warn(f"Ignoring unexpected keys in gh_urls: {unexpected_keys}", UserWarning)
 
         # Check for missing keys in gh_urls
         missing_keys = {'api_base_url', 'raw_base_url'} - set(gh_urls.keys())
         if missing_keys and not default:
-            warnings.warn(f"Missing keys in gh_urls, using default values for: {
-                          missing_keys}", UserWarning)
+            warnings.warn(f"Missing keys in gh_urls, using default values for: {missing_keys}", UserWarning)
         elif missing_keys and default:
-            warnings.warn(f"Missing keys in gh_urls, using default values for: {
-                          missing_keys}", UserWarning, stacklevel=2)
+            warnings.warn(f"Missing keys in gh_urls, using default values for: {missing_keys}", UserWarning, stacklevel=2)
 
     # Issue warning if custom values not provided for gh_urls and default values are used.
     elif not default:
-        warnings.warn(
-            "No custom values provided for gh_urls, using default values", UserWarning)
+        warnings.warn("No custom values provided for gh_urls, using default values", UserWarning)
 
     # Set default GitHub URLs if not provided
     gh_urls = gh_urls or {}

@@ -529,8 +529,7 @@ def compare_files(*,
         # Determine the prefix for the specified dsid
         dsid_name = dsid_names.get(dsid)
         if dsid_name is None:
-            raise ValueError(f"Dataset {dsid} not found in specified state {
-                             data_state} on Bucket.")
+            raise ValueError(f"Dataset {dsid} not found in specified state {data_state} on Bucket.")
 
         # Add prefix provided by user
         if prefix:

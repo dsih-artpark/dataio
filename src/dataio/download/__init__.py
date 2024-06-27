@@ -9,6 +9,8 @@ import pkg_resources
 import platform
 import logging
 
+from helper import extract_url
+
 # Set up logging
 # Set up logging
 logger = logging.getLogger("dataio.download")
@@ -176,48 +178,36 @@ def fetch_data_documentation(*, dsid: str,
     catalogue_path = repo_info.get('catalogue_path', "info")
     metadata_fname = repo_info.get('metadata_fname', "metadata.yaml")
 
+    # Set default nesting
+    nesting = [catalogue_path, dsid[0:2], dsid, metadata_fname]
+
     # Construct URL to fetch the tree of files
-    tree_url = f"{gh_api_base_url}{
-        owner}/{repo}/git/trees/{branch}?recursive = 1"
+    url = f"{gh_api_base_url}{owner}/{repo}/git/trees/{branch}"
 
-    # Make request to GitHub tree API endpoint
-    response = requests.get(tree_url)
+    # Iterative requests to get first-level nesting
+    for nest in nesting:
+        try:
+            response = requests.get(url)
+            if response.status_code == 200:
+                tree = response.json().get('tree', [])
+                url_dict = extract_url(tree)
+                url = url_dict[nest]
+            elif response.status_code == 404:
+                raise ValueError(
+                    "Resource not found. Please check if the repository or branch exists.")
+            elif response.status_code == 422:
+                raise ValueError(
+                    "Validation failed or the endpoint has been spammed.")
+            else:
+                raise ValueError(
+                    "Unknown error occurred while fetching tree data from GitHub.")
 
-    # Check status code of the response
-    if response.status_code == 200:
-        tree = response.json().get('tree', [])
-    elif response.status_code == 404:
-        raise ValueError(
-            "Resource not found. Please check if the repository or branch exists.")
-    elif response.status_code == 422:
-        raise ValueError("Validation failed or the endpoint has been spammed.")
-    else:
-        raise ValueError(
-            "Unknown error occurred while fetching tree data from GitHub.")
-
-    # Construct path prefix based on dataset ID
-    dsid_path_prefix = f"{catalogue_path}/{dsid[0:2]}/{dsid}-"
-
-    print(dsid_path_prefix)
-
-    # Find data dictionary file in the tree
-    gh_metadata_path = None
-    for file_info in tree:
-        if file_info['path'].startswith(dsid_path_prefix) and file_info['path'].endswith(metadata_fname):
-            gh_metadata_path = file_info['path']
-            break
-
-    # Raise error if data dictionary file not found
-    if not gh_metadata_path:
-        raise ValueError(
-            f"Metadata file (metadata.yaml) file not found for dataset ID '{dsid}'.")
-
-    # Construct URLs to fetch raw content of metadata file
-    gh_raw_metadata_url = f"{gh_raw_base_url}{
-        owner}/{repo}/{branch}/{gh_metadata_path}"
+        except Exception as e:
+            raise (
+                f"Unknown error occurred while fetching tree data from GitHub {e}")
 
     # Retrieve and parse metadata
-    raw_metadata_response = requests.get(gh_raw_metadata_url)
+    raw_metadata_response = requests.get(url)
     if raw_metadata_response.status_code == 404:
         raise ValueError(f"Metadata file not found for dataset ID '{dsid}'.")
     elif raw_metadata_response.status_code != 200:

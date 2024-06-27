@@ -42,18 +42,22 @@ def download_file_from_URI(URI: str, path: str = None, temp: bool = False):
 
     # Check if there are characters between "s3://" and the next "/"
     if first_slash_index == -1 or first_slash_index == 5:
-        raise ValueError("Invalid URI. URI should contain characters between 's3://' and the subsequent '/'.")
+        raise ValueError(
+            "Invalid URI. URI should contain characters between 's3://' and the subsequent '/'.")
 
     # Check if there are characters after the third "/"
     if first_slash_index == len(URI) - 1:
-        raise ValueError("Invalid URI. URI should contain characters after the subsequent '/'.")
+        raise ValueError(
+            "Invalid URI. URI should contain characters after the subsequent '/'.")
 
     if path is None:
         if not temp:
-            raise ValueError("Either temp must be True or a path must be provided.")
+            raise ValueError(
+                "Either temp must be True or a path must be provided.")
     else:
         if temp:
-            warnings.warn("Since path is provided, a temporary directory will not be created.")
+            warnings.warn(
+                "Since path is provided, a temporary directory will not be created.")
 
         if not os.path.exists(path):
             raise ValueError("The provided path does not exist.")
@@ -112,43 +116,56 @@ def fetch_data_documentation(*, dsid: str,
     # Validate repo_info dictionary
     if repo_info is not None:
         # Check for unexpected keys in repo_info
-        unexpected_keys = set(repo_info.keys()) - {'owner', 'repo', 'branch', 'catalogue_path', 'datadict_fname', 'metadata_fname'}
+        unexpected_keys = set(repo_info.keys(
+        )) - {'owner', 'repo', 'branch', 'catalogue_path', 'datadict_fname', 'metadata_fname'}
         if unexpected_keys:
-            warnings.warn(f"Ignoring unexpected keys in repo_info: {unexpected_keys}", UserWarning)
+            warnings.warn(f"Ignoring unexpected keys in repo_info: {
+                          unexpected_keys}", UserWarning)
 
         # Check for missing keys in repo_info
-        missing_keys = {'owner', 'repo', 'branch', 'catalogue_path','datadict_fname', 'metadata_fname'} - set(repo_info.keys())
+        missing_keys = {'owner', 'repo', 'branch', 'catalogue_path',
+                        'datadict_fname', 'metadata_fname'} - set(repo_info.keys())
         if missing_keys and not default:
-            warnings.warn(f"Missing keys in repo_info, using default values for: {missing_keys}", UserWarning)
+            warnings.warn(f"Missing keys in repo_info, using default values for: {
+                          missing_keys}", UserWarning)
         elif missing_keys and default:
-            warnings.warn(f"Missing keys in repo_info, using default values for: {missing_keys}", UserWarning, stacklevel=2)
-            
+            warnings.warn(f"Missing keys in repo_info, using default values for: {
+                          missing_keys}", UserWarning, stacklevel=2)
+
     # Issue warning if custom values not provided for repo_info and default values are used.
     elif not default:
-        warnings.warn("No custom values provided for repo_info, using default values", UserWarning)
+        warnings.warn(
+            "No custom values provided for repo_info, using default values", UserWarning)
 
     # Validate gh_urls dictionary
     if gh_urls is not None:
         # Check for unexpected keys in gh_urls
-        unexpected_keys = set(gh_urls.keys()) - {'api_base_url', 'raw_base_url'}
+        unexpected_keys = set(gh_urls.keys()) - \
+            {'api_base_url', 'raw_base_url'}
         if unexpected_keys:
-            warnings.warn(f"Ignoring unexpected keys in gh_urls: {unexpected_keys}", UserWarning)
+            warnings.warn(f"Ignoring unexpected keys in gh_urls: {
+                          unexpected_keys}", UserWarning)
 
         # Check for missing keys in gh_urls
         missing_keys = {'api_base_url', 'raw_base_url'} - set(gh_urls.keys())
         if missing_keys and not default:
-            warnings.warn(f"Missing keys in gh_urls, using default values for: {missing_keys}", UserWarning)
+            warnings.warn(f"Missing keys in gh_urls, using default values for: {
+                          missing_keys}", UserWarning)
         elif missing_keys and default:
-            warnings.warn(f"Missing keys in gh_urls, using default values for: {missing_keys}", UserWarning, stacklevel=2)
+            warnings.warn(f"Missing keys in gh_urls, using default values for: {
+                          missing_keys}", UserWarning, stacklevel=2)
 
     # Issue warning if custom values not provided for gh_urls and default values are used.
     elif not default:
-        warnings.warn("No custom values provided for gh_urls, using default values", UserWarning)
+        warnings.warn(
+            "No custom values provided for gh_urls, using default values", UserWarning)
 
     # Set default GitHub URLs if not provided
     gh_urls = gh_urls or {}
-    gh_api_base_url = gh_urls.get('api_base_url', "https://api.github.com/repos/")
-    gh_raw_base_url = gh_urls.get('raw_base_url', "https://raw.githubusercontent.com/")
+    gh_api_base_url = gh_urls.get(
+        'api_base_url', "https://api.github.com/repos/")
+    gh_raw_base_url = gh_urls.get(
+        'raw_base_url', "https://raw.githubusercontent.com/")
 
     # Set default repository information if not provided
     repo_info = repo_info or {}
@@ -159,7 +176,8 @@ def fetch_data_documentation(*, dsid: str,
     metadata_fname = repo_info.get('metadata_fname', "metadata.yaml")
 
     # Construct URL to fetch the tree of files
-    tree_url = f"{gh_api_base_url}{owner}/{repo}/git/trees/{branch}?recursive=1"
+    tree_url = f"{gh_api_base_url}{
+        owner}/{repo}/git/trees/{branch}?recursive=1"
 
     # Make request to GitHub tree API endpoint
     response = requests.get(tree_url)
@@ -168,11 +186,13 @@ def fetch_data_documentation(*, dsid: str,
     if response.status_code == 200:
         tree = response.json().get('tree', [])
     elif response.status_code == 404:
-        raise ValueError("Resource not found. Please check if the repository or branch exists.")
+        raise ValueError(
+            "Resource not found. Please check if the repository or branch exists.")
     elif response.status_code == 422:
         raise ValueError("Validation failed or the endpoint has been spammed.")
     else:
-        raise ValueError("Unknown error occurred while fetching tree data from GitHub.")
+        raise ValueError(
+            "Unknown error occurred while fetching tree data from GitHub.")
 
     # Construct path prefix based on dataset ID
     dsid_path_prefix = f"{catalogue_path}/{dsid[0:2]}/{dsid}-"
@@ -186,17 +206,20 @@ def fetch_data_documentation(*, dsid: str,
 
     # Raise error if data dictionary file not found
     if not gh_metadata_path:
-        raise ValueError(f"Data dictionary file not found for dataset ID '{dsid}'.")
+        raise ValueError(
+            f"Data dictionary file not found for dataset ID '{dsid}'.")
 
     # Construct URLs to fetch raw content of metadata file
-    gh_raw_metadata_url = f"{gh_raw_base_url}{owner}/{repo}/{branch}/{gh_metadata_path}"
+    gh_raw_metadata_url = f"{gh_raw_base_url}{
+        owner}/{repo}/{branch}/{gh_metadata_path}"
 
     # Retrieve and parse metadata
     raw_metadata_response = requests.get(gh_raw_metadata_url)
     if raw_metadata_response.status_code == 404:
         raise ValueError(f"Metadata file not found for dataset ID '{dsid}'.")
     elif raw_metadata_response.status_code != 200:
-        raise ValueError(f"Failed to retrieve metadata for dataset ID '{dsid}'. Request failed.")
+        raise ValueError(f"Failed to retrieve metadata for dataset ID '{
+                         dsid}'. Request failed.")
 
     if binary:
         return raw_metadata_response.content
@@ -255,7 +278,8 @@ def download_dataset_v2(*,
 
     Bucket = settings["data_state_buckets"].get(data_state)
     if Bucket is None:
-        raise ValueError(f"{data_state} is not a valid data state. Must be one of {str(settings['data_state_buckets'].keys())}")
+        raise ValueError(f"{data_state} is not a valid data state. Must be one of {
+                         str(settings['data_state_buckets'].keys())}")
 
     # Initialize the S3 client
     client = boto3.client('s3')
@@ -270,15 +294,18 @@ def download_dataset_v2(*,
     # Determine the prefix for the specified dsid
     dsid_name = dsid_names.get(dsid)
     if dsid_name is None:
-        raise ValueError(f"Dataset {dsid} not found in specified state {data_state} on Bucket.")
+        raise ValueError(f"Dataset {dsid} not found in specified state {
+                         data_state} on Bucket.")
 
     # List objects in the dsid prefix
-    listobjv2_files = listobjv2_paginator.paginate(Bucket=Bucket, Prefix=dsid_name)
+    listobjv2_files = listobjv2_paginator.paginate(
+        Bucket=Bucket, Prefix=dsid_name)
 
     # Collect files found by iterating through all tranches
     files_found = []
     for tranch in listobjv2_files:
-        files_found += [item['Key'] for item in tranch['Contents'] if not item['Key'].endswith("/")]
+        files_found += [item['Key']
+                        for item in tranch['Contents'] if not item['Key'].endswith("/")]
 
     # Filter files based on contains_any criteria and build the dictionary
     if contains_any is not None:
@@ -291,7 +318,8 @@ def download_dataset_v2(*,
         files_containing_any = set()
         firstLoop = True
         for item in contains_any:
-            files_containing_this_item = [file for file in files_found if item in file]
+            files_containing_this_item = [
+                file for file in files_found if item in file]
             if firstLoop:
                 files_containing_any = set(files_containing_this_item)
                 firstLoop = False
@@ -301,7 +329,8 @@ def download_dataset_v2(*,
                 else:
                     repeats = set.intersection(
                         files_containing_any, files_containing_this_item)
-                    raise ValueError(f"A file cannot contain more than one item from the contains_any list: {repeats}")
+                    raise ValueError(
+                        f"A file cannot contain more than one item from the contains_any list: {repeats}")
     else:
         files_containing_any = set(files_found)
 
@@ -316,13 +345,15 @@ def download_dataset_v2(*,
         files_containing_all = set()
         firstLoop = True
         for item in contains_all:
-            files_containing_this_item = set([file for file in files_found if item in file])
+            files_containing_this_item = set(
+                [file for file in files_found if item in file])
             # Set needs to be initialised if
             if firstLoop:
                 files_containing_all = files_containing_this_item
                 firstLoop = False
             else:
-                files_containing_all = files_containing_all.intersection(files_containing_this_item)
+                files_containing_all = files_containing_all.intersection(
+                    files_containing_this_item)
     else:
         files_containing_all = set(files_found)
 
@@ -336,17 +367,20 @@ def download_dataset_v2(*,
         files_with_suffixes = set()
         first_loop = True
         for suffix in suffixes:
-            files_with_this_suffix = set([file for file in files_found if file.endswith(suffix)])
+            files_with_this_suffix = set(
+                [file for file in files_found if file.endswith(suffix)])
             if first_loop:
                 files_with_suffixes = files_with_this_suffix
                 first_loop = False
             else:
-                files_with_suffixes = files_with_suffixes.intersection(files_with_this_suffix)
+                files_with_suffixes = files_with_suffixes.intersection(
+                    files_with_this_suffix)
     else:
         files_with_suffixes = set(files_found)
 
     # Get the intersection of files_containing_any, files_containing_all, and files_with_suffixes
-    files_to_download = files_containing_any.intersection(files_containing_all, files_with_suffixes)
+    files_to_download = files_containing_any.intersection(
+        files_containing_all, files_with_suffixes)
 
     # Check if the intersection is empty
     if not files_to_download:
@@ -362,7 +396,8 @@ def download_dataset_v2(*,
         destination_path = os.path.join(datadir, file_path)
 
         if platform.system() != 'Windows' and update:
-            warnings.warn("Due to limitations in UNIX systems, update will not check to ensure that you've not" + f"changed files locally. Prune local dir '{datadir}'" + "if you have made changes, or set 'update' to False.", Warning)
+            warnings.warn("Due to limitations in UNIX systems, update will not check to ensure that you've not" +
+                          f"changed files locally. Prune local dir '{datadir}'" + "if you have made changes, or set 'update' to False.", Warning)
 
         # Check if the file exists locally and if update is enabled
         if update and os.path.exists(destination_path):
@@ -379,16 +414,19 @@ def download_dataset_v2(*,
             # Compare the last modified time with the creation time
             if local_last_modified_time > local_creation_time:
                 # Attempt to update the file from S3 if it has been modified locally
-                client.download_file(Bucket=Bucket, Key=file_path, Filename=destination_path)
+                client.download_file(
+                    Bucket=Bucket, Key=file_path, Filename=destination_path)
                 if verbose:
-                    print(f"Local file '{destination_path}' has been modified since last download. Redownloading...")
+                    print(f"Local file '{
+                          destination_path}' has been modified since last download. Redownloading...")
 
             elif s3_last_modified_time > local_creation_time:
                 # Download the file from S3 if it has been updated since download
                 client.download_file(
                     Bucket=Bucket, Key=file_path, Filename=destination_path)
                 if verbose:
-                    print(f"File '{file_path}' has been updated on S3. Redownloading...")
+                    print(
+                        f"File '{file_path}' has been updated on S3. Redownloading...")
             elif verbose:
                 print(f"File '{file_path}' is up to date with S3. Ignoring...")
         else:
@@ -397,7 +435,8 @@ def download_dataset_v2(*,
             if not os.path.exists(directory):
                 os.makedirs(directory)
             # Download the file from S3
-            client.download_file(Bucket=Bucket, Key=file_path, Filename=destination_path)
+            client.download_file(
+                Bucket=Bucket, Key=file_path, Filename=destination_path)
             if verbose:
                 print(f"File '{file_path}' has been downloaded from S3.")
 
@@ -419,10 +458,12 @@ def download_dataset_v2(*,
 
     # If Requested, fetch all relevant documentation
     if fetch_docs:
-        metadata, datadict = fetch_data_documentation(dsid=dsid, default=True, binary=True)
+        metadata, datadict = fetch_data_documentation(
+            dsid=dsid, default=True, binary=True)
 
         if metadata is not None:
-            metadata_file_path = os.path.join(datadir, dsid_name, "metadata.yaml")
+            metadata_file_path = os.path.join(
+                datadir, dsid_name, "metadata.yaml")
 
             # Ensure that the directory exists
             os.makedirs(os.path.dirname(metadata_file_path), exist_ok=True)
@@ -431,7 +472,8 @@ def download_dataset_v2(*,
             with open(metadata_file_path, 'wb') as file:
                 file.write(metadata)
         if datadict is not None:
-            datadict_file_path = os.path.join(datadir, dsid_name, "datadictionary.yaml")
+            datadict_file_path = os.path.join(
+                datadir, dsid_name, "datadictionary.yaml")
 
             # Ensure that the directory exists
             os.makedirs(os.path.dirname(datadict_file_path), exist_ok=True)
@@ -443,14 +485,87 @@ def download_dataset_v2(*,
     return dsid_name
 
 
+def fetch_file_list(*,
+                    dsid: str,
+                    data_state: str,
+                    prefix: str = None) -> Set[str]:
+    """Fetches list of files in DSID, with input prefix 
+
+    Args:
+        dsid (str): DSID
+        data_state (str): whether raw, preprocessed or standardised
+        prefix (str, optional): folder path with or without file path. Defaults to None.
+
+
+    Raises:
+        ValueError: invalid data_state
+        ValueError: DSID not in data_state
+
+    Returns:
+        Set[str]: list of files in DSID without file extension
+    """
+
+    # Open settings file which contains bucket names
+    with open(pkg_resources.resource_filename(__name__, 'settings.yaml'), 'r') as f:
+        settings = yaml.safe_load(f)
+
+    # Validating data state with standard bucket names
+    Bucket = settings["data_state_buckets"].get(data_state)
+    if Bucket is None:
+        raise ValueError(f"{data_state} is not a valid data state. Must be one of {
+                         list(settings['data_state_buckets'].keys())}")
+
+    # Initialize the S3 client
+    client = boto3.client('s3')
+    listobjv2_paginator = client.get_paginator('list_objects_v2')
+
+    # Get the common prefixes (folders) from the bucket
+    dsid_names = {}
+    for result in listobjv2_paginator.paginate(Bucket=Bucket, Delimiter='/'):
+        for pre in result.get('CommonPrefixes', []):
+            folder = pre.get('Prefix')
+            dsid_names[folder.split("-")[0]] = folder
+
+    # Determine the prefix for the specified dsid
+    dsid_name = dsid_names.get(dsid)
+    if dsid_name is None:
+        raise ValueError(f"Dataset {dsid} not found in specified state {
+                         data_state} on Bucket.")
+
+    # Add prefix provided by user
+    if prefix:
+        if prefix.startswith("/"):
+            prefix = prefix[1:]
+        path = dsid_name + prefix
+    else:
+        path = dsid_name
+
+    # List objects in the dsid prefix
+    files_found = []
+    for result in listobjv2_paginator.paginate(Bucket=Bucket, Prefix=path):
+        if 'Contents' in result:
+            files_found += [item['Key']
+                            for item in result['Contents'] if not item['Key'].endswith("/")]
+        else:
+            raise FileNotFoundError("Prefix does not exist.")
+
+    if not files_found:
+        warnings.warn(f"No files found in {dsid} with prefix {prefix}")
+
+    # Removing extensions and extracting file names
+    files_set = {item.split("/")[-1].split(".")[0] for item in files_found}
+
+    return files_set
+
+
 def compare_folders(*,
-                  dsid1: str,
-                  data_state1: str,
-                  prefix1: str = None,
-                  dsid2: str,
-                  data_state2: str,
-                  prefix2: str = None,
-                  superdsid: int = None) -> Tuple[List[str], List[str]]:
+                    dsid1: str,
+                    data_state1: str,
+                    prefix1: str = None,
+                    dsid2: str,
+                    data_state2: str,
+                    prefix2: str = None,
+                    superdsid: int = None) -> Tuple[List[str], List[str]]:
     """Compares file names (without file extension) in two folders, and returns files in dsid1 not in dsid2, and files in dsid2 not in dsid1.
     If superdsid is provided, it returns a list of files in superdsid that are not in the other dsid.  
 
@@ -481,82 +596,15 @@ def compare_folders(*,
     if prefix1 or prefix2:
         if not isinstance(prefix1, str) or not isinstance(prefix2, str):
             raise TypeError("prefix must be a string")
-            
+
     if superdsid:
         if superdsid not in [1, 2]:
             raise ValueError("Superdsid must be int 1 or 2")
 
-    def fetch_file_list(*,
-                        dsid: str,
-                        data_state: str,
-                        prefix: str = None) -> Set[str]:
-        """Fetches list of files in DSID, with input prefix 
-
-        Args:
-            dsid (str): DSID
-            data_state (str): whether raw, preprocessed or standardised
-            prefix (str, optional): folder path with or without file path. Defaults to None.
-
-
-        Raises:
-            ValueError: invalid data_state
-            ValueError: DSID not in data_state
-
-        Returns:
-            Set[str]: list of files in DSID without file extension
-        """
-
-        # Open settings file which contains bucket names
-        with open(pkg_resources.resource_filename(__name__, 'settings.yaml'), 'r') as f:
-            settings = yaml.safe_load(f)
-
-        # Validating data state with standard bucket names
-        Bucket = settings["data_state_buckets"].get(data_state)
-        if Bucket is None:
-            raise ValueError(f"{data_state} is not a valid data state. Must be one of {list(settings['data_state_buckets'].keys())}")
-
-        # Initialize the S3 client
-        client = boto3.client('s3')
-        listobjv2_paginator = client.get_paginator('list_objects_v2')
-
-        # Get the common prefixes (folders) from the bucket
-        dsid_names = {}
-        for result in listobjv2_paginator.paginate(Bucket=Bucket, Delimiter='/'):
-            for pre in result.get('CommonPrefixes', []):
-                folder = pre.get('Prefix')
-                dsid_names[folder.split("-")[0]] = folder
-
-        # Determine the prefix for the specified dsid
-        dsid_name = dsid_names.get(dsid)
-        if dsid_name is None:
-            raise ValueError(f"Dataset {dsid} not found in specified state {data_state} on Bucket.")
-
-        # Add prefix provided by user
-        if prefix:
-            if prefix.startswith("/"):
-                prefix = prefix[1:]
-            path = dsid_name + prefix
-        else:
-            path = dsid_name
-
-        # List objects in the dsid prefix
-        files_found = []
-        for result in listobjv2_paginator.paginate(Bucket=Bucket, Prefix=path):
-            if 'Contents' in result:
-                files_found += [item['Key'] for item in result['Contents'] if not item['Key'].endswith("/")]
-            else:
-                raise FileNotFoundError("Prefix does not exist.")
-
-        if not files_found:
-            warnings.warn(f"No files found in {dsid} with prefix {prefix}")
-
-        # Removing extensions and extracting file names
-        files_set = {item.split("/")[-1].split(".")[0] for item in files_found}
-
-        return files_set
-
-    file_list1 = fetch_file_list(dsid=dsid1, data_state=data_state1, prefix=prefix1)
-    file_list2 = fetch_file_list(dsid=dsid2, data_state=data_state2, prefix=prefix2)
+    file_list1 = fetch_file_list(
+        dsid=dsid1, data_state=data_state1, prefix=prefix1)
+    file_list2 = fetch_file_list(
+        dsid=dsid2, data_state=data_state2, prefix=prefix2)
 
     if superdsid == 1:
         return (file_list1 - file_list2, None)

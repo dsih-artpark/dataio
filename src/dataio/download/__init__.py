@@ -119,8 +119,8 @@ def fetch_data_documentation(*, dsid: str,
         unexpected_keys = set(repo_info.keys(
         )) - {'owner', 'repo', 'branch', 'catalogue_path', 'datadict_fname', 'metadata_fname'}
         if unexpected_keys:
-            warnings.warn(f"Ignoring unexpected keys in repo_info: {
-                          unexpected_keys}", UserWarning)
+            warnings.warn(
+                f"Ignoring unexpected keys in repo_info: {unexpected_keys}", UserWarning)
 
         # Check for missing keys in repo_info
         missing_keys = {'owner', 'repo', 'branch', 'catalogue_path',
@@ -143,8 +143,8 @@ def fetch_data_documentation(*, dsid: str,
         unexpected_keys = set(gh_urls.keys()) - \
             {'api_base_url', 'raw_base_url'}
         if unexpected_keys:
-            warnings.warn(f"Ignoring unexpected keys in gh_urls: {
-                          unexpected_keys}", UserWarning)
+            warnings.warn(
+                f"Ignoring unexpected keys in gh_urls: {unexpected_keys}", UserWarning)
 
         # Check for missing keys in gh_urls
         missing_keys = {'api_base_url', 'raw_base_url'} - set(gh_urls.keys())

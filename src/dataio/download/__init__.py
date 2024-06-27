@@ -126,11 +126,11 @@ def fetch_data_documentation(*, dsid: str,
         missing_keys = {'owner', 'repo', 'branch', 'catalogue_path',
                         'datadict_fname', 'metadata_fname'} - set(repo_info.keys())
         if missing_keys and not default:
-            warnings.warn(f"Missing keys in repo_info, using default values for: {
-                          missing_keys}", UserWarning)
+            warnings.warn(
+                f"Missing keys in repo_info, using default values for: {missing_keys}", UserWarning)
         elif missing_keys and default:
-            warnings.warn(f"Missing keys in repo_info, using default values for: {
-                          missing_keys}", UserWarning, stacklevel=2)
+            warnings.warn(
+                f"Missing keys in repo_info, using default values for: {missing_keys}", UserWarning, stacklevel=2)
 
     # Issue warning if custom values not provided for repo_info and default values are used.
     elif not default:
@@ -149,11 +149,11 @@ def fetch_data_documentation(*, dsid: str,
         # Check for missing keys in gh_urls
         missing_keys = {'api_base_url', 'raw_base_url'} - set(gh_urls.keys())
         if missing_keys and not default:
-            warnings.warn(f"Missing keys in gh_urls, using default values for: {
-                          missing_keys}", UserWarning)
+            warnings.warn(
+                f"Missing keys in gh_urls, using default values for: {missing_keys}", UserWarning)
         elif missing_keys and default:
-            warnings.warn(f"Missing keys in gh_urls, using default values for: {
-                          missing_keys}", UserWarning, stacklevel=2)
+            warnings.warn(
+                f"Missing keys in gh_urls, using default values for: {missing_keys}", UserWarning, stacklevel=2)
 
     # Issue warning if custom values not provided for gh_urls and default values are used.
     elif not default:
@@ -176,8 +176,7 @@ def fetch_data_documentation(*, dsid: str,
     metadata_fname = repo_info.get('metadata_fname', "metadata.yaml")
 
     # Construct URL to fetch the tree of files
-    tree_url = f"{gh_api_base_url}{
-        owner}/{repo}/git/trees/{branch}?recursive = 1"
+    tree_url = f"{gh_api_base_url}{owner}/{repo}/git/trees/{branch}?recursive = 1"
 
     # Make request to GitHub tree API endpoint
     response = requests.get(tree_url)
@@ -210,16 +209,15 @@ def fetch_data_documentation(*, dsid: str,
             f"Data dictionary file not found for dataset ID '{dsid}'.")
 
     # Construct URLs to fetch raw content of metadata file
-    gh_raw_metadata_url = f"{gh_raw_base_url}{
-        owner}/{repo}/{branch}/{gh_metadata_path}"
+    gh_raw_metadata_url = f"{gh_raw_base_url}{owner}/{repo}/{branch}/{gh_metadata_path}"
 
     # Retrieve and parse metadata
     raw_metadata_response = requests.get(gh_raw_metadata_url)
     if raw_metadata_response.status_code == 404:
         raise ValueError(f"Metadata file not found for dataset ID '{dsid}'.")
     elif raw_metadata_response.status_code != 200:
-        raise ValueError(f"Failed to retrieve metadata for dataset ID '{
-                         dsid}'. Request failed.")
+        raise ValueError(
+            f"Failed to retrieve metadata for dataset ID '{dsid}'. Request failed.")
 
     if binary:
         return raw_metadata_response.content

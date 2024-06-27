@@ -276,8 +276,8 @@ def download_dataset_v2(*,
 
     Bucket = settings["data_state_buckets"].get(data_state)
     if Bucket is None:
-        raise ValueError(f"{data_state} is not a valid data state. Must be one of {
-                         str(settings['data_state_buckets'].keys())}")
+        raise ValueError(
+            f"{data_state} is not a valid data state. Must be one of {str(settings['data_state_buckets'].keys())}")
 
     # Initialize the S3 client
     client = boto3.client('s3')
@@ -292,8 +292,8 @@ def download_dataset_v2(*,
     # Determine the prefix for the specified dsid
     dsid_name = dsid_names.get(dsid)
     if dsid_name is None:
-        raise ValueError(f"Dataset {dsid} not found in specified state {
-                         data_state} on Bucket.")
+        raise ValueError(
+            f"Dataset {dsid} not found in specified state {data_state} on Bucket.")
 
     # List objects in the dsid prefix
     listobjv2_files = listobjv2_paginator.paginate(
@@ -415,8 +415,8 @@ def download_dataset_v2(*,
                 client.download_file(
                     Bucket=Bucket, Key=file_path, Filename=destination_path)
                 if verbose:
-                    print(f"Local file '{
-                          destination_path}' has been modified since last download. Redownloading...")
+                    print(
+                        f"Local file '{destination_path}' has been modified since last download. Redownloading...")
 
             elif s3_last_modified_time > local_creation_time:
                 # Download the file from S3 if it has been updated since download
@@ -511,8 +511,8 @@ def fetch_file_list(*,
     # Validating data state with standard bucket names
     Bucket = settings["data_state_buckets"].get(data_state)
     if Bucket is None:
-        raise ValueError(f"{data_state} is not a valid data state. Must be one of {
-                         list(settings['data_state_buckets'].keys())}")
+        raise ValueError(
+            f"{data_state} is not a valid data state. Must be one of {list(settings['data_state_buckets'].keys())}")
 
     # Initialize the S3 client
     client = boto3.client('s3')
@@ -528,8 +528,8 @@ def fetch_file_list(*,
     # Determine the prefix for the specified dsid
     dsid_name = dsid_names.get(dsid)
     if dsid_name is None:
-        raise ValueError(f"Dataset {dsid} not found in specified state {
-                         data_state} on Bucket.")
+        raise ValueError(
+            f"Dataset {dsid} not found in specified state {data_state} on Bucket.")
 
     # Add prefix provided by user
     if prefix:

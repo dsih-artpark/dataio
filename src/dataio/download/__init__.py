@@ -111,7 +111,8 @@ def fetch_data_documentation(*, dsid: str,
         ValueError: If metadata or data dictionary files are not found for the specified dataset ID.
         TypeError: If dsid is not a string.
     """
-    logger.info(f"Fetching data documentation for dataset ID '{dsid}'...")
+    logger.info(
+        f"Fetching metadata and data documentation for dataset ID '{dsid}'...")
 
     # Validate repo_info dictionary
     if repo_info is not None:
@@ -176,7 +177,8 @@ def fetch_data_documentation(*, dsid: str,
     metadata_fname = repo_info.get('metadata_fname', "metadata.yaml")
 
     # Construct URL to fetch the tree of files
-    tree_url = f"{gh_api_base_url}{owner}/{repo}/git/trees/{branch}?recursive = 1"
+    tree_url = f"{gh_api_base_url}{
+        owner}/{repo}/git/trees/{branch}?recursive = 1"
 
     # Make request to GitHub tree API endpoint
     response = requests.get(tree_url)
@@ -196,6 +198,8 @@ def fetch_data_documentation(*, dsid: str,
     # Construct path prefix based on dataset ID
     dsid_path_prefix = f"{catalogue_path}/{dsid[0:2]}/{dsid}-"
 
+    print(dsid_path_prefix)
+
     # Find data dictionary file in the tree
     gh_metadata_path = None
     for file_info in tree:
@@ -206,10 +210,11 @@ def fetch_data_documentation(*, dsid: str,
     # Raise error if data dictionary file not found
     if not gh_metadata_path:
         raise ValueError(
-            f"Data dictionary file not found for dataset ID '{dsid}'.")
+            f"Metadata file (metadata.yaml) file not found for dataset ID '{dsid}'.")
 
     # Construct URLs to fetch raw content of metadata file
-    gh_raw_metadata_url = f"{gh_raw_base_url}{owner}/{repo}/{branch}/{gh_metadata_path}"
+    gh_raw_metadata_url = f"{gh_raw_base_url}{
+        owner}/{repo}/{branch}/{gh_metadata_path}"
 
     # Retrieve and parse metadata
     raw_metadata_response = requests.get(gh_raw_metadata_url)

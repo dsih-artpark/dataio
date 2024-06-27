@@ -443,7 +443,7 @@ def download_dataset_v2(*,
     return dsid_name
 
 
-def compare_files(*,
+def compare_folders(*,
                   dsid1: str,
                   data_state1: str,
                   prefix1: str = None,

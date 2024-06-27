@@ -9,7 +9,7 @@ import pkg_resources
 import platform
 import logging
 
-from helper import extract_url
+from dataio.download.utils import extract_url
 
 # Set up logging
 # Set up logging
@@ -186,33 +186,33 @@ def fetch_data_documentation(*, dsid: str,
 
     # Iterative requests to get first-level nesting
     for nest in nesting:
-        try:
-            response = requests.get(url)
-            if response.status_code == 200:
-                tree = response.json().get('tree', [])
-                url_dict = extract_url(tree)
-                url = url_dict[nest]
-            elif response.status_code == 404:
+        response = requests.get(url)
+        if response.status_code == 200:
+            tree = response.json().get('tree', [])
+            for subtree in tree:
+                if subtree["path"].startswith(nest):
+                    url = subtree["url"]
+                    break
+            if not url:
                 raise ValueError(
-                    "Resource not found. Please check if the repository or branch exists.")
-            elif response.status_code == 422:
-                raise ValueError(
-                    "Validation failed or the endpoint has been spammed.")
-            else:
-                raise ValueError(
-                    "Unknown error occurred while fetching tree data from GitHub.")
-
-        except Exception as e:
-            raise (
-                f"Unknown error occurred while fetching tree data from GitHub {e}")
+                    "Key not found in dictionary. Please check the nesting of folders in the catalogue repository")
+        elif response.status_code == 404:
+            raise ValueError(
+                "Resource not found. Please check if the repository or branch exists.")
+        elif response.status_code == 422:
+            raise ValueError(
+                "Validation failed or the endpoint has been spammed.")
+        else:
+            raise ValueError(
+                f"Error {response.status_code} occurred while fetching tree data from GitHub")
 
     # Retrieve and parse metadata
     raw_metadata_response = requests.get(url)
     if raw_metadata_response.status_code == 404:
         raise ValueError(f"Metadata file not found for dataset ID '{dsid}'.")
     elif raw_metadata_response.status_code != 200:
-        raise ValueError(
-            f"Failed to retrieve metadata for dataset ID '{dsid}'. Request failed.")
+        raise ValueError(f"Failed to retrieve metadata for dataset ID '{
+                         dsid}'. Request failed.")
 
     if binary:
         return raw_metadata_response.content

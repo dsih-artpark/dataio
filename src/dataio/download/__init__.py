@@ -9,8 +9,6 @@ import pkg_resources
 import platform
 import logging
 
-from dataio.download.utils import extract_url
-
 # Set up logging
 # Set up logging
 logger = logging.getLogger("dataio.download")
@@ -211,14 +209,12 @@ def fetch_data_documentation(*, dsid: str,
     if raw_metadata_response.status_code == 404:
         raise ValueError(f"Metadata file not found for dataset ID '{dsid}'.")
     elif raw_metadata_response.status_code != 200:
-        raise ValueError(f"Failed to retrieve metadata for dataset ID '{
-                         dsid}'. Request failed.")
+        raise ValueError(f"Failed to retrieve metadata for dataset ID '{dsid}'. Request failed.")
 
     if binary:
         return raw_metadata_response.content
     else:
-        metadata = yaml.safe_load(
-            raw_metadata_response.content.decode('utf-8'))
+        metadata = yaml.safe_load(raw_metadata_response.content.decode('utf-8'))
         return metadata
 
 

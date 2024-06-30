@@ -176,7 +176,7 @@ def fetch_data_documentation(*, dsid: str,
     metadata_fname = repo_info.get('metadata_fname', "metadata.yaml")
 
     # Construct URL to fetch the tree of files
-    tree_url = f"{gh_api_base_url}{owner}/{repo}/git/trees/{branch}?recursive = 1"
+    tree_url = f"{gh_api_base_url}{owner}/{repo}/git/trees/{branch}?recursive=1"
 
     # Make request to GitHub tree API endpoint
     response = requests.get(tree_url)

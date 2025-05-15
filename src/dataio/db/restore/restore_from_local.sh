@@ -1,5 +1,5 @@
 source .env
-createdb -U postgres -U $DB_USER -h $DB_HOST -p $DB_PORT -T template0 $DB_NAME
+createdb -U $DB_USER -h $DB_HOST -p $DB_PORT -T template0 $DB_NAME
 bash ./src/dataio/db/restore/restore_schema.sh $SCHEMA_FILE_TO_RESTORE
 bash ./src/dataio/db/restore/restore_data.sh $DATA_FILE_TO_RESTORE
 

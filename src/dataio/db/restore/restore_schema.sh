@@ -16,4 +16,4 @@ if [ ! -f "$SCHEMA_PATH" ]; then
 fi
 
 source .env
-psql -U postgres -h $DB_HOST -p $DB_PORT -d $DB_NAME < "$SCHEMA_PATH"
+psql -U $DB_USER -h $DB_HOST -p $DB_PORT -d $DB_NAME < "$SCHEMA_PATH"

@@ -2,8 +2,8 @@
 -- PostgreSQL database dump
 --
 
--- Dumped from database version 17.5 (Homebrew)
--- Dumped by pg_dump version 17.5 (Homebrew)
+-- Dumped from database version 17.5 (Ubuntu 17.5-1.pgdg22.04+1)
+-- Dumped by pg_dump version 17.5 (Ubuntu 17.5-1.pgdg22.04+1)
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -16,20 +16,6 @@ SET check_function_bodies = false;
 SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
-
---
--- Name: public; Type: SCHEMA; Schema: -; Owner: -
---
-
--- *not* creating schema, since initdb creates it
-
-
---
--- Name: SCHEMA public; Type: COMMENT; Schema: -; Owner: -
---
-
-COMMENT ON SCHEMA public IS '';
-
 
 --
 -- Name: access_level; Type: TYPE; Schema: public; Owner: -
@@ -69,18 +55,17 @@ CREATE TYPE public.version_type AS ENUM (
 
 
 --
--- Name: add_dataset(character varying[], character varying, text, text, text, text, text, text[], text, text, text, text, public.access_level, text, text); Type: FUNCTION; Schema: public; Owner: -
+-- Name: add_dataset(character varying[], character varying, text, text, character varying[], text, text, text, text, text, text, public.access_level, text, text); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.add_dataset(p_raw_dataset_ids character varying[], p_ds_id character varying, p_title text, p_collection_name text, p_data_owner_name text, p_concept_name text, p_description text, p_tag_names text[], p_spatial_coverage text, p_spatial_resolution text, p_temporal_coverage text, p_temporal_resolution text, p_public_access_level public.access_level, p_notes text, p_supplementary_documents text) RETURNS void
+CREATE FUNCTION public.add_dataset(p_raw_dataset_ids character varying[], p_ds_id character varying, p_title text, p_collection_name text, p_tags character varying[], p_data_owner_name text, p_description text, p_spatial_coverage text, p_spatial_resolution text, p_temporal_coverage text, p_temporal_resolution text, p_public_access_level public.access_level, p_notes text, p_supplementary_documents text) RETURNS void
     LANGUAGE plpgsql
     AS $$
 DECLARE
     v_raw_dataset_ids INTEGER[];
     v_collection_id INTEGER;
-    v_data_owner_id INTEGER;
-    v_concept_id INTEGER;
     v_tag_ids INTEGER[];
+    v_data_owner_id INTEGER;
     v_dataset_id INTEGER;
 BEGIN
     -- Convert raw_dataset_ids from VARCHAR[] to their corresponding INTEGER[]
@@ -92,6 +77,14 @@ BEGIN
         v_raw_dataset_ids := '{}'::INTEGER[];
     END IF;
 
+    -- Convert tags from VARCHAR[] to their corresponding INTEGER[]
+    IF p_tags IS NOT NULL AND array_length(p_tags, 1) > 0 THEN
+        SELECT array_agg(id) INTO v_tag_ids
+        FROM tags
+        WHERE tag_name = ANY(p_tags);
+    ELSE
+        v_tag_ids := '{}'::INTEGER[];
+    END IF;
     -- Get collection_id
     SELECT id INTO v_collection_id
     FROM collections
@@ -102,29 +95,13 @@ BEGIN
     FROM data_owners
     WHERE name = p_data_owner_name;
 
-    -- Get concept_id
-    SELECT id INTO v_concept_id
-    FROM concepts
-    WHERE concept_name = p_concept_name;
-
-    -- Convert tag_names to actual IDs if not empty
-    IF p_tag_names IS NOT NULL AND array_length(p_tag_names, 1) > 0 THEN
-        SELECT array_agg(id) INTO v_tag_ids
-        FROM tags
-        WHERE tag_name = ANY(p_tag_names);
-    ELSE
-        v_tag_ids := '{}'::INTEGER[];
-    END IF;
-
     -- Insert into datasets
     INSERT INTO datasets (
         ds_id,
         title,
         collection_id,
         data_owner_id,
-        concept_id,
         description,
-        tag_ids,
         spatial_coverage,
         spatial_resolution,
         temporal_coverage,
@@ -137,9 +114,7 @@ BEGIN
         p_title,
         v_collection_id,
         v_data_owner_id,
-        v_concept_id,
         p_description,
-        v_tag_ids,
         p_spatial_coverage,
         p_spatial_resolution,
         p_temporal_coverage,
@@ -154,6 +129,13 @@ BEGIN
         INSERT INTO dataset_raw_datasets (dataset_id, raw_dataset_id)
         SELECT v_dataset_id, unnest(v_raw_dataset_ids);
     END IF;
+
+    -- Create relationships in dataset_tags table
+    IF v_tag_ids IS NOT NULL AND array_length(v_tag_ids, 1) > 0 THEN
+        INSERT INTO dataset_tags (dataset_id, tag_id)
+        SELECT v_dataset_id, unnest(v_tag_ids);
+    END IF;
+    
 END;
 $$;
 
@@ -253,31 +235,6 @@ ALTER TABLE public.collections ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY 
 
 
 --
--- Name: concepts; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.concepts (
-    id integer NOT NULL,
-    concept_name text NOT NULL,
-    concept_codes text[]
-);
-
-
---
--- Name: concepts_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-ALTER TABLE public.concepts ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME public.concepts_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1
-);
-
-
---
 -- Name: data_owners; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -314,6 +271,16 @@ CREATE TABLE public.dataset_raw_datasets (
 
 
 --
+-- Name: dataset_tags; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.dataset_tags (
+    dataset_id integer NOT NULL,
+    tag_id integer NOT NULL
+);
+
+
+--
 -- Name: dataset_versions; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -338,9 +305,7 @@ CREATE TABLE public.datasets (
     title text NOT NULL,
     collection_id integer NOT NULL,
     data_owner_id integer NOT NULL,
-    concept_id integer NOT NULL,
     description text,
-    tag_ids integer[],
     spatial_coverage text,
     spatial_resolution text,
     temporal_coverage text,
@@ -390,8 +355,6 @@ CREATE VIEW public.datasets_full_view AS
     do2.name AS data_owner_name,
     do2.contact_person AS data_owner_contact_person,
     do2.contact_person_email AS data_owner_contact_person_email,
-    c2.concept_name,
-    c2.concept_codes,
     d.description,
     array_agg(t.tag_name) AS tags,
     d.spatial_coverage,
@@ -401,15 +364,14 @@ CREATE VIEW public.datasets_full_view AS
     d.public_access_level,
     d.notes,
     d.supplementary_documents
-   FROM (((((((public.datasets d
+   FROM ((((((public.datasets d
      LEFT JOIN public.collections c ON ((d.collection_id = c.id)))
-     LEFT JOIN public.concepts c2 ON ((d.concept_id = c2.id)))
      LEFT JOIN public.data_owners do2 ON ((d.data_owner_id = do2.id)))
      LEFT JOIN public.dataset_raw_datasets drd ON ((d.id = drd.dataset_id)))
      LEFT JOIN public.raw_datasets rd ON ((rd.id = drd.raw_dataset_id)))
-     LEFT JOIN LATERAL unnest(d.tag_ids) tag(id) ON (true))
-     LEFT JOIN public.tags t ON ((tag.id = t.id)))
-  GROUP BY d.id, d.ds_id, d.title, c.collection_id, c.collection_name, c.category_id, c.category_name, do2.name, do2.contact_person, do2.contact_person_email, c2.concept_name, c2.concept_codes, d.description, d.tag_ids, d.spatial_coverage, d.spatial_resolution, d.temporal_coverage, d.temporal_resolution, d.public_access_level, d.notes, d.supplementary_documents;
+     LEFT JOIN public.dataset_tags dt ON ((dt.dataset_id = d.id)))
+     LEFT JOIN public.tags t ON ((t.id = dt.tag_id)))
+  GROUP BY d.id, d.ds_id, d.title, c.collection_id, c.collection_name, c.category_id, c.category_name, do2.name, do2.contact_person, do2.contact_person_email, d.description, d.spatial_coverage, d.spatial_resolution, d.temporal_coverage, d.temporal_resolution, d.public_access_level, d.notes, d.supplementary_documents;
 
 
 --
@@ -496,22 +458,6 @@ ALTER TABLE ONLY public.collections
 
 
 --
--- Name: concepts concepts_concept_name_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.concepts
-    ADD CONSTRAINT concepts_concept_name_key UNIQUE (concept_name);
-
-
---
--- Name: concepts concepts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.concepts
-    ADD CONSTRAINT concepts_pkey PRIMARY KEY (id);
-
-
---
 -- Name: data_owners data_owners_name_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -536,11 +482,27 @@ ALTER TABLE ONLY public.dataset_raw_datasets
 
 
 --
+-- Name: dataset_tags dataset_tags_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.dataset_tags
+    ADD CONSTRAINT dataset_tags_pkey PRIMARY KEY (dataset_id, tag_id);
+
+
+--
 -- Name: dataset_versions dataset_versions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.dataset_versions
     ADD CONSTRAINT dataset_versions_pkey PRIMARY KEY (version_id);
+
+
+--
+-- Name: datasets datasets_ds_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.datasets
+    ADD CONSTRAINT datasets_ds_id_key UNIQUE (ds_id);
 
 
 --
@@ -623,6 +585,22 @@ ALTER TABLE ONLY public.dataset_raw_datasets
 
 
 --
+-- Name: dataset_tags dataset_tags_dataset_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.dataset_tags
+    ADD CONSTRAINT dataset_tags_dataset_id_fkey FOREIGN KEY (dataset_id) REFERENCES public.datasets(id);
+
+
+--
+-- Name: dataset_tags dataset_tags_tag_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.dataset_tags
+    ADD CONSTRAINT dataset_tags_tag_id_fkey FOREIGN KEY (tag_id) REFERENCES public.tags(id);
+
+
+--
 -- Name: dataset_versions dataset_versions_dataset_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -636,14 +614,6 @@ ALTER TABLE ONLY public.dataset_versions
 
 ALTER TABLE ONLY public.datasets
     ADD CONSTRAINT datasets_collection_id_fkey FOREIGN KEY (collection_id) REFERENCES public.collections(id);
-
-
---
--- Name: datasets datasets_concept_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.datasets
-    ADD CONSTRAINT datasets_concept_id_fkey FOREIGN KEY (concept_id) REFERENCES public.concepts(id);
 
 
 --

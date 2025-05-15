@@ -50,27 +50,18 @@ create table if not exists raw_datasets (
     foreign key (data_owner_id) references data_owners(id)
 );
 
-create table if not exists concepts (
-    id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-    concept_name text not null unique,
-    concept_codes text[]
-);
-
 create table if not exists tags (
     id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     tag_name text not null unique
-    -- TODO: additional columns -- 
 );
 
 CREATE TABLE if not exists datasets (
     id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-    ds_id VARCHAR(50) not null,
+    ds_id VARCHAR(50) not null unique,
     title TEXT not null,
     collection_id integer not null,
     data_owner_id integer not null,
-    concept_id integer not null,
     description TEXT,
-    tag_ids integer[],
     spatial_coverage TEXT,
     spatial_resolution TEXT,
     temporal_coverage TEXT,
@@ -79,8 +70,7 @@ CREATE TABLE if not exists datasets (
     notes TEXT,
     supplementary_documents TEXT,
     foreign key (collection_id) references collections (id),
-    foreign key (data_owner_id) references data_owners (id),
-    foreign key (concept_id) references concepts (id)
+    foreign key (data_owner_id) references data_owners (id)
 );
 
 create table if not exists dataset_raw_datasets (
@@ -89,6 +79,14 @@ create table if not exists dataset_raw_datasets (
     foreign key (dataset_id) references datasets (id),
     foreign key (raw_dataset_id) references raw_datasets (id),
     primary key (dataset_id, raw_dataset_id)
+);
+
+create table if not exists dataset_tags (
+    dataset_id integer not null,
+    tag_id integer not null,
+    foreign key (dataset_id) references datasets (id),
+    foreign key (tag_id) references tags (id),
+    primary key (dataset_id, tag_id)
 );
 
 create table if not exists dataset_versions (
@@ -118,18 +116,19 @@ FOR EACH ROW
 EXECUTE FUNCTION TR_insert_dataset();
 
 create view datasets_full_view as 
-select d.id, array_agg(rd.rds_id ) as rds_ids, d.ds_id, d.title, c.collection_id, c.collection_name, c.category_id, c.category_name, 
+select d.id, array_agg(rd.rds_id) as rds_ids, d.ds_id, d.title, c.collection_id, c.collection_name, c.category_id, c.category_name, 
 do2."name" as data_owner_name, do2.contact_person as data_owner_contact_person, do2.contact_person_email as data_owner_contact_person_email,
-c2.concept_name, c2.concept_codes, d.description, array_agg(t.tag_name) as tags, d.spatial_coverage, d.spatial_resolution, d.temporal_coverage, d.temporal_resolution,
-d.public_access_level, d.notes, d.supplementary_documents from datasets d left join collections c on d.collection_id = c.id left join concepts c2 on d.concept_id = c2.id left join data_owners do2 
+d.description, array_agg(t.tag_name) as tags,
+d.spatial_coverage, d.spatial_resolution, d.temporal_coverage, d.temporal_resolution,
+d.public_access_level, d.notes, d.supplementary_documents from datasets d left join collections c on d.collection_id = c.id left join data_owners do2 
 on d.data_owner_id = do2.id 
 left join dataset_raw_datasets drd on d.id = drd.dataset_id
 left join raw_datasets rd on rd.id = drd.raw_dataset_id
-left join lateral unnest(d.tag_ids) as tag(id) on true 
-left join tags t on tag.id = t.id
+left join dataset_tags dt on dt.dataset_id = d.id
+left join tags t on t.id = dt.tag_id
 group by d.id, d.ds_id, d.title, c.collection_id, c.collection_name, c.category_id, c.category_name, 
 data_owner_name, data_owner_contact_person, data_owner_contact_person_email,
-c2.concept_name, c2.concept_codes, d.description, d.tag_ids, d.spatial_coverage, d.spatial_resolution, d.temporal_coverage, d.temporal_resolution,
+d.description, d.spatial_coverage, d.spatial_resolution, d.temporal_coverage, d.temporal_resolution,
 d.public_access_level, d.notes, d.supplementary_documents;
 
 SELECT add_migration(1, '001_datasets');

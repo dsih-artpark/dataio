@@ -12,6 +12,7 @@ DB_USER = os.getenv('DB_USER')
 DB_PASSWORD = os.getenv('DB_PASSWORD')
 DB_HOST = os.getenv('DB_HOST')
 DB_PORT = os.getenv('DB_PORT')
+REPO_DIR = os.getenv('REPO_DIR')
 
 def connect_to_db():
     """Establish connection to the database."""
@@ -35,18 +36,96 @@ def insert_datasets():
     
     try:
         # Read and process the CSV file
-        with open('data_inserts/ARTPARK Data Catalogue - Catalogue v2_filtered.csv', 'r') as csvfile:
+        with open(f'{REPO_DIR}/db/init/data_inserts/ARTPARK Data Catalogue - Catalogue v2_filtered.csv', 'r') as csvfile:
             reader = csv.DictReader(csvfile)
+
+            # Insert data owners into data_owners table
+            for row in reader:
+                if row['Data Owner'].strip() != '':
+                    data_owner_name = row['Data Owner'].strip()
+                    cur.execute(
+                        """
+                        INSERT INTO data_owners (name, contact_person, contact_person_email)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT DO NOTHING
+                        """,
+                        (data_owner_name, None, None)
+                    )
+                    print(f"Inserted data owner: {data_owner_name}")
+
+        # Insert raw datasets into raw_datasets table
+        with open(f'{REPO_DIR}/db/init/data_inserts/raw_datasets.tsv', 'r') as tsvfile:
+            reader = csv.DictReader(tsvfile, delimiter='\t')
             
             for row in reader:
                 try:
+                    # Call the add_raw_dataset function
+                    cur.execute(
+                        "SELECT add_raw_dataset(%s, %s, %s, %s)",
+                        (
+                            row['rds_id'],
+                            row['title'],
+                            row['source'],
+                            row['data_owner_name']
+                        )
+                    )
+                    print(f"Successfully inserted dataset: {row['rds_id']}")
+                except Exception as e:
+                    print(f"Error inserting dataset {row['rds_id']}: {e}")
+                    continue
+        
+        print("All raw datasets inserted successfully!")
+
+        with open(f'{REPO_DIR}/db/init/data_inserts/ARTPARK Data Catalogue - Catalogue v2_filtered.csv', 'r') as csvfile:
+            reader = csv.DictReader(csvfile)
+            # Insert collections into collections table
+            for row in reader:
+                if row['Collection'].strip() != '':
+                    collection_name = row['Collection'].strip()
+                    category_name = row['Category (auto-populated)'].strip()
+                    collection_id = row['DS ID (Stable)'].strip()[:6]
+                    category_id = row['DS ID (Stable)'].strip()[:2]
+                    cur.execute(
+                        """
+                        INSERT INTO collections (collection_id, collection_name, category_name, category_id)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT DO NOTHING
+                        """,
+                        (collection_id, collection_name, category_name, category_id)
+                    )
+                    print(f"Inserted collection: {collection_name}")
+        
+        with open(f'{REPO_DIR}/db/init/data_inserts/ARTPARK Data Catalogue - Catalogue v2_filtered.csv', 'r') as csvfile:
+            reader = csv.DictReader(csvfile)
+            # Insert tags into tags table
+            for row in reader:
+                if row['Concept Name'].strip() != '':
+                    tag_names = [tag.strip() for tag in row['Concept Name'].split(',')]
+                    for tag_name in tag_names:
+                        cur.execute(
+                            """
+                            INSERT INTO tags (tag_name)
+                            VALUES (%s)
+                            ON CONFLICT DO NOTHING
+                        """,
+                        (tag_name,)
+                    )
+                    print(f"Inserted tag: {tag_name}")
+
+        with open(f'{REPO_DIR}/db/init/data_inserts/ARTPARK Data Catalogue - Catalogue v2_filtered.csv', 'r') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                try:
                     # Get raw dataset IDs
-                    if row['RDS ID (Stable)'] != '':
+                    if row['RDS ID (Stable)'].strip() != '':
                         rds_ids = [rds_id.strip() for rds_id in row['RDS ID (Stable)'].split(',')]
                     else:
                         rds_ids = '{}'
                     # Get tag names if available
-                    tag_names = '{}'
+                    if row['Concept Name'].strip() != '':
+                        tag_names = [tag.strip() for tag in row['Concept Name'].split(',')]
+                    else:
+                        tag_names = '{}'
 
                     if len(row['DS ID (Stable)']) != 12:
                         print(f"Error: DS ID {row['DS ID (Stable)']} is not 12 characters long")
@@ -60,10 +139,9 @@ def insert_datasets():
                             %s, -- ds_id
                             %s, -- title
                             %s, -- collection_name
+                            %s, -- tags
                             %s, -- data_owner_name
-                            %s, -- concept_name
                             %s, -- description
-                            %s, -- tag_names
                             %s, -- spatial_coverage
                             %s, -- spatial_resolution
                             %s, -- temporal_coverage
@@ -78,10 +156,9 @@ def insert_datasets():
                             row['DS ID (Stable)'],
                             row['Dataset Title'],
                             row['Collection'],
-                            row['Data Owner'],
-                            row['Concept Name'],
-                            row['Contents'],
                             tag_names,
+                            row['Data Owner'],
+                            row['Contents'],
                             row['Spatial Coverage'],
                             row['Spatial Resolution'],
                             row['Temporal Coverage'],
@@ -98,7 +175,7 @@ def insert_datasets():
         
         # Commit the transaction
         conn.commit()
-        print("All datasets inserted successfully!")
+        print("Insertions Completed. View above logs for details.")
         
     except Exception as e:
         print(f"Error processing CSV file: {e}")

@@ -5,10 +5,9 @@ CREATE OR REPLACE FUNCTION add_dataset(
     p_ds_id VARCHAR,
     p_title TEXT,
     p_collection_name TEXT,
+    p_tags VARCHAR[],
     p_data_owner_name TEXT,
-    p_concept_name TEXT,
     p_description TEXT,
-    p_tag_names TEXT[],
     p_spatial_coverage TEXT,
     p_spatial_resolution TEXT,
     p_temporal_coverage TEXT,
@@ -20,9 +19,8 @@ CREATE OR REPLACE FUNCTION add_dataset(
 DECLARE
     v_raw_dataset_ids INTEGER[];
     v_collection_id INTEGER;
-    v_data_owner_id INTEGER;
-    v_concept_id INTEGER;
     v_tag_ids INTEGER[];
+    v_data_owner_id INTEGER;
     v_dataset_id INTEGER;
 BEGIN
     -- Convert raw_dataset_ids from VARCHAR[] to their corresponding INTEGER[]
@@ -34,6 +32,14 @@ BEGIN
         v_raw_dataset_ids := '{}'::INTEGER[];
     END IF;
 
+    -- Convert tags from VARCHAR[] to their corresponding INTEGER[]
+    IF p_tags IS NOT NULL AND array_length(p_tags, 1) > 0 THEN
+        SELECT array_agg(id) INTO v_tag_ids
+        FROM tags
+        WHERE tag_name = ANY(p_tags);
+    ELSE
+        v_tag_ids := '{}'::INTEGER[];
+    END IF;
     -- Get collection_id
     SELECT id INTO v_collection_id
     FROM collections
@@ -44,29 +50,13 @@ BEGIN
     FROM data_owners
     WHERE name = p_data_owner_name;
 
-    -- Get concept_id
-    SELECT id INTO v_concept_id
-    FROM concepts
-    WHERE concept_name = p_concept_name;
-
-    -- Convert tag_names to actual IDs if not empty
-    IF p_tag_names IS NOT NULL AND array_length(p_tag_names, 1) > 0 THEN
-        SELECT array_agg(id) INTO v_tag_ids
-        FROM tags
-        WHERE tag_name = ANY(p_tag_names);
-    ELSE
-        v_tag_ids := '{}'::INTEGER[];
-    END IF;
-
     -- Insert into datasets
     INSERT INTO datasets (
         ds_id,
         title,
         collection_id,
         data_owner_id,
-        concept_id,
         description,
-        tag_ids,
         spatial_coverage,
         spatial_resolution,
         temporal_coverage,
@@ -79,9 +69,7 @@ BEGIN
         p_title,
         v_collection_id,
         v_data_owner_id,
-        v_concept_id,
         p_description,
-        v_tag_ids,
         p_spatial_coverage,
         p_spatial_resolution,
         p_temporal_coverage,
@@ -96,6 +84,13 @@ BEGIN
         INSERT INTO dataset_raw_datasets (dataset_id, raw_dataset_id)
         SELECT v_dataset_id, unnest(v_raw_dataset_ids);
     END IF;
+
+    -- Create relationships in dataset_tags table
+    IF v_tag_ids IS NOT NULL AND array_length(v_tag_ids, 1) > 0 THEN
+        INSERT INTO dataset_tags (dataset_id, tag_id)
+        SELECT v_dataset_id, unnest(v_tag_ids);
+    END IF;
+    
 END;
 $$ LANGUAGE plpgsql;
 

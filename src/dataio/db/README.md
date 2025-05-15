@@ -16,7 +16,6 @@ key: schema_v00x
 value: YYYY-MM-DDTHH:MM:SS
 ```
 
-
 ## Recreating the Database
 
 There are two ways to recreate the database.
@@ -26,12 +25,17 @@ There are two ways to recreate the database.
    bash ./src/dataio/db/restore/restore_from_local.sh
    ```
 
-2. Initialise a fresh database by running the following migration command.
+2. Initialise a fresh database by running the following command.
    ```bash
-   source .env
-   createdb -U postgres -U $DB_USER -h $DB_HOST -p $DB_PORT -T template0 $DB_NAME
+   bash ./src/dataio/db/init/recreate.sh
    ```
-   Then run the migrations in order from the migrations directory (```src/dataio/db/migrations```). This should give the same result as the first method.
+   This drops existing db, creates new db, runs migration scripts in order.
+   Use
+   ```bash
+   bash ./src/dataio/db/init/recreate_full.sh
+   ```
+   if you want to do the data inserts as well.
+   keep the data_inserts folder inside ../db/init
 
 
 If you want to restore the database to a specific previous version, checkout the versioned schema from the previous commit, and run the restore script.

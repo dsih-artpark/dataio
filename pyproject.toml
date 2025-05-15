@@ -1,0 +1,7 @@
+[project]
+name = "dataio"
+version = "0.2.0"
+description = "Postgres and FASTAPI based Dataset Management System (DMS)"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []

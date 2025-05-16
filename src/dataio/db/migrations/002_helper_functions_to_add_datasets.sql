@@ -9,12 +9,12 @@ CREATE OR REPLACE FUNCTION add_dataset(
     p_data_owner_name TEXT,
     p_description TEXT,
     p_spatial_coverage TEXT,
-    p_spatial_resolution TEXT,
-    p_temporal_coverage TEXT,
-    p_temporal_resolution TEXT,
+    p_spatial_resolution spatial_resolution,
+    p_temporal_coverage_start_date date,
+    p_temporal_coverage_end_date date,
+    p_temporal_resolution temporal_resolution,
     p_public_access_level access_level,
-    p_notes TEXT,
-    p_supplementary_documents TEXT
+    p_additional_metadata jsonb
 ) RETURNS VOID AS $$
 DECLARE
     v_raw_dataset_ids INTEGER[];
@@ -59,11 +59,11 @@ BEGIN
         description,
         spatial_coverage,
         spatial_resolution,
-        temporal_coverage,
+        temporal_coverage_start_date,
+        temporal_coverage_end_date,
         temporal_resolution,
         public_access_level,
-        notes,
-        supplementary_documents
+        additional_metadata
     ) VALUES (
         p_ds_id,
         p_title,
@@ -72,11 +72,11 @@ BEGIN
         p_description,
         p_spatial_coverage,
         p_spatial_resolution,
-        p_temporal_coverage,
+        p_temporal_coverage_start_date,
+        p_temporal_coverage_end_date,
         p_temporal_resolution,
         p_public_access_level,
-        p_notes,
-        p_supplementary_documents
+        p_additional_metadata
     ) RETURNING id INTO v_dataset_id;
 
     -- Create relationships in datasets_raw_datasets table

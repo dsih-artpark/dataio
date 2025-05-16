@@ -2,6 +2,11 @@ import os
 import csv
 import psycopg2
 from dotenv import load_dotenv
+from psycopg2.extras import Json
+from psycopg2.extensions import register_adapter
+
+register_adapter(dict, Json)
+
 
 # Load environment variables from .env file
 load_dotenv()
@@ -131,6 +136,23 @@ def insert_datasets():
                         print(f"Error: DS ID {row['DS ID (Stable)']} is not 12 characters long")
                         continue
 
+                    # TODO: temporal coverage start date & end_date, spatial resolution, temporal resolution
+                    # Data needs to be cleaned up first
+
+                    temporal_coverage_start_date = None
+                    temporal_coverage_end_date = None
+                    spatial_resolution = None
+                    temporal_resolution = None
+
+                    # Notes and supplementary documents to additional_metadata
+                    additional_metadata = {
+                    }
+
+                    if row['Notes'].strip() != '':
+                        additional_metadata['notes'] = row['Notes'].strip()
+                    if row['Supplementary Documents'].strip() != '':
+                        additional_metadata['supplementary_documents'] = row['Supplementary Documents'].strip()
+
                     # Call the add_dataset function
                     cur.execute(
                         """
@@ -144,11 +166,11 @@ def insert_datasets():
                             %s, -- description
                             %s, -- spatial_coverage
                             %s, -- spatial_resolution
-                            %s, -- temporal_coverage
+                            %s, -- temporal_coverage_start_date
+                            %s, -- temporal_coverage_end_date
                             %s, -- temporal_resolution
                             %s, -- public_access_level
-                            %s, -- notes
-                            %s  -- supplementary_documents
+                            %s  -- additional_metadata
                         )
                         """,
                         (
@@ -160,12 +182,12 @@ def insert_datasets():
                             row['Data Owner'],
                             row['Contents'],
                             row['Spatial Coverage'],
-                            row['Spatial Resolution'],
-                            row['Temporal Coverage'],
-                            row['Temporal Resolution'],
+                            spatial_resolution,
+                            temporal_coverage_start_date,
+                            temporal_coverage_end_date,
+                            temporal_resolution,
                             'VIEW' if row['Access Type'] == 'Public' else 'NONE',
-                            row['Notes'],
-                            row['Supplementary Documents']
+                            additional_metadata
                         )
                     )
                     print(f"Successfully inserted dataset: {row['DS ID (Stable)']}")

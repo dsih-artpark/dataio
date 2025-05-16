@@ -29,6 +29,37 @@ CREATE TYPE public.access_level AS ENUM (
 
 
 --
+-- Name: spatial_resolution; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.spatial_resolution AS ENUM (
+    'COUNTRY',
+    'STATE',
+    'DISTRICT',
+    'SUBDISTRICT',
+    'MUNICIPALITY',
+    'VILLAGE/WARD',
+    'LAT/LONG',
+    'OTHER'
+);
+
+
+--
+-- Name: temporal_resolution; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.temporal_resolution AS ENUM (
+    'YEAR',
+    'MONTH',
+    'WEEK',
+    'DATE',
+    'HOUR',
+    'MINUTE',
+    'SECOND'
+);
+
+
+--
 -- Name: updation_frequency; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -55,10 +86,10 @@ CREATE TYPE public.version_type AS ENUM (
 
 
 --
--- Name: add_dataset(character varying[], character varying, text, text, character varying[], text, text, text, text, text, text, public.access_level, text, text); Type: FUNCTION; Schema: public; Owner: -
+-- Name: add_dataset(character varying[], character varying, text, text, character varying[], text, text, text, public.spatial_resolution, date, date, public.temporal_resolution, public.access_level, jsonb); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.add_dataset(p_raw_dataset_ids character varying[], p_ds_id character varying, p_title text, p_collection_name text, p_tags character varying[], p_data_owner_name text, p_description text, p_spatial_coverage text, p_spatial_resolution text, p_temporal_coverage text, p_temporal_resolution text, p_public_access_level public.access_level, p_notes text, p_supplementary_documents text) RETURNS void
+CREATE FUNCTION public.add_dataset(p_raw_dataset_ids character varying[], p_ds_id character varying, p_title text, p_collection_name text, p_tags character varying[], p_data_owner_name text, p_description text, p_spatial_coverage text, p_spatial_resolution public.spatial_resolution, p_temporal_coverage_start_date date, p_temporal_coverage_end_date date, p_temporal_resolution public.temporal_resolution, p_public_access_level public.access_level, p_additional_metadata jsonb) RETURNS void
     LANGUAGE plpgsql
     AS $$
 DECLARE
@@ -104,11 +135,11 @@ BEGIN
         description,
         spatial_coverage,
         spatial_resolution,
-        temporal_coverage,
+        temporal_coverage_start_date,
+        temporal_coverage_end_date,
         temporal_resolution,
         public_access_level,
-        notes,
-        supplementary_documents
+        additional_metadata
     ) VALUES (
         p_ds_id,
         p_title,
@@ -117,11 +148,11 @@ BEGIN
         p_description,
         p_spatial_coverage,
         p_spatial_resolution,
-        p_temporal_coverage,
+        p_temporal_coverage_start_date,
+        p_temporal_coverage_end_date,
         p_temporal_resolution,
         p_public_access_level,
-        p_notes,
-        p_supplementary_documents
+        p_additional_metadata
     ) RETURNING id INTO v_dataset_id;
 
     -- Create relationships in datasets_raw_datasets table
@@ -307,12 +338,12 @@ CREATE TABLE public.datasets (
     data_owner_id integer NOT NULL,
     description text,
     spatial_coverage text,
-    spatial_resolution text,
-    temporal_coverage text,
-    temporal_resolution text,
+    spatial_resolution public.spatial_resolution,
+    temporal_coverage_start_date date,
+    temporal_coverage_end_date date,
+    temporal_resolution public.temporal_resolution,
     public_access_level public.access_level NOT NULL,
-    notes text,
-    supplementary_documents text
+    additional_metadata jsonb
 );
 
 
@@ -359,11 +390,11 @@ CREATE VIEW public.datasets_full_view AS
     array_agg(t.tag_name) AS tags,
     d.spatial_coverage,
     d.spatial_resolution,
-    d.temporal_coverage,
+    d.temporal_coverage_start_date,
+    d.temporal_coverage_end_date,
     d.temporal_resolution,
     d.public_access_level,
-    d.notes,
-    d.supplementary_documents
+    d.additional_metadata
    FROM ((((((public.datasets d
      LEFT JOIN public.collections c ON ((d.collection_id = c.id)))
      LEFT JOIN public.data_owners do2 ON ((d.data_owner_id = do2.id)))
@@ -371,7 +402,7 @@ CREATE VIEW public.datasets_full_view AS
      LEFT JOIN public.raw_datasets rd ON ((rd.id = drd.raw_dataset_id)))
      LEFT JOIN public.dataset_tags dt ON ((dt.dataset_id = d.id)))
      LEFT JOIN public.tags t ON ((t.id = dt.tag_id)))
-  GROUP BY d.id, d.ds_id, d.title, c.collection_id, c.collection_name, c.category_id, c.category_name, do2.name, do2.contact_person, do2.contact_person_email, d.description, d.spatial_coverage, d.spatial_resolution, d.temporal_coverage, d.temporal_resolution, d.public_access_level, d.notes, d.supplementary_documents;
+  GROUP BY d.id, d.ds_id, d.title, c.collection_id, c.collection_name, c.category_id, c.category_name, do2.name, do2.contact_person, do2.contact_person_email, d.description, d.spatial_coverage, d.spatial_resolution, d.temporal_coverage_start_date, d.temporal_coverage_end_date, d.temporal_resolution, d.public_access_level, d.additional_metadata;
 
 
 --

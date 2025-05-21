@@ -29,16 +29,30 @@ CREATE TYPE public.access_level AS ENUM (
 
 
 --
+-- Name: resource_type; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.resource_type AS ENUM (
+    'dataset',
+    'group'
+);
+
+
+--
 -- Name: spatial_resolution; Type: TYPE; Schema: public; Owner: -
 --
 
 CREATE TYPE public.spatial_resolution AS ENUM (
     'COUNTRY',
     'STATE',
+    'UT',
     'DISTRICT',
     'SUBDISTRICT',
     'MUNICIPALITY',
-    'VILLAGE/WARD',
+    'VILLAGE',
+    'WARD',
+    'PRABHAG',
+    'ULB',
     'LAT/LONG',
     'OTHER'
 );
@@ -89,7 +103,7 @@ CREATE TYPE public.version_type AS ENUM (
 -- Name: add_dataset(character varying[], character varying, text, text, character varying[], text, text, text, public.spatial_resolution, date, date, public.temporal_resolution, public.access_level, jsonb); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.add_dataset(p_raw_dataset_ids character varying[], p_ds_id character varying, p_title text, p_collection_name text, p_tags character varying[], p_data_owner_name text, p_description text, p_spatial_coverage text, p_spatial_resolution public.spatial_resolution, p_temporal_coverage_start_date date, p_temporal_coverage_end_date date, p_temporal_resolution public.temporal_resolution, p_public_access_level public.access_level, p_additional_metadata jsonb) RETURNS void
+CREATE FUNCTION public.add_dataset(p_raw_dataset_ids character varying[], p_ds_id character varying, p_title text, p_collection_name text, p_tags character varying[], p_data_owner_name text, p_description text, p_spatial_coverage_region_id text, p_spatial_resolution public.spatial_resolution, p_temporal_coverage_start_date date, p_temporal_coverage_end_date date, p_temporal_resolution public.temporal_resolution, p_public_access_level public.access_level, p_additional_metadata jsonb) RETURNS void
     LANGUAGE plpgsql
     AS $$
 DECLARE
@@ -133,7 +147,7 @@ BEGIN
         collection_id,
         data_owner_id,
         description,
-        spatial_coverage,
+        spatial_coverage_region_id,
         spatial_resolution,
         temporal_coverage_start_date,
         temporal_coverage_end_date,
@@ -146,7 +160,7 @@ BEGIN
         v_collection_id,
         v_data_owner_id,
         p_description,
-        p_spatial_coverage,
+        p_spatial_coverage_region_id,
         p_spatial_resolution,
         p_temporal_coverage_start_date,
         p_temporal_coverage_end_date,
@@ -219,6 +233,31 @@ $$;
 
 
 --
+-- Name: add_resource_group_member(text, text, public.resource_type, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.add_resource_group_member(resource_group_name text, resource_id text, resource_type public.resource_type, resource_json jsonb) RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+declare
+    v_resource_group_id text;
+begin
+    -- get id from resource_group_name
+    select resource_group_id into v_resource_group_id
+    from resource_groups
+    where group_name = resource_group_name;
+
+    if v_resource_group_id is null then
+        raise exception 'Resource group % not found', resource_group_name;
+    end if;
+
+    insert into resource_group_members (resource_group_id, resource_id, resource_type, resource_json) 
+    values (v_resource_group_id, resource_id, resource_type, resource_json);
+end;
+$$;
+
+
+--
 -- Name: tr_insert_dataset(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -229,6 +268,37 @@ BEGIN
     IF length(NEW.ds_id) != 12 THEN
         RAISE EXCEPTION 'ds_id must be 12 characters long';
     END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: validate_group_membership(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.validate_group_membership() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    -- Check if group_email refers to a group
+    IF NOT EXISTS (
+        SELECT 1 FROM users 
+        WHERE email = NEW.group_email 
+        AND is_group = TRUE
+    ) THEN
+        RAISE EXCEPTION 'group_email must reference a group';
+    END IF;
+
+    -- Check if user_email refers to a non-group user
+    IF NOT EXISTS (
+        SELECT 1 FROM users 
+        WHERE email = NEW.user_email 
+        AND is_group = FALSE
+    ) THEN
+        RAISE EXCEPTION 'user_email must reference a non-group user';
+    END IF;
+
     RETURN NEW;
 END;
 $$;
@@ -337,7 +407,7 @@ CREATE TABLE public.datasets (
     collection_id integer NOT NULL,
     data_owner_id integer NOT NULL,
     description text,
-    spatial_coverage text,
+    spatial_coverage_region_id text,
     spatial_resolution public.spatial_resolution,
     temporal_coverage_start_date date,
     temporal_coverage_end_date date,
@@ -357,6 +427,18 @@ CREATE TABLE public.raw_datasets (
     title text NOT NULL,
     source text NOT NULL,
     data_owner_id integer NOT NULL
+);
+
+
+--
+-- Name: regions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.regions (
+    id integer NOT NULL,
+    region_id text NOT NULL,
+    region_name text NOT NULL,
+    region_type public.spatial_resolution NOT NULL
 );
 
 
@@ -388,21 +470,22 @@ CREATE VIEW public.datasets_full_view AS
     do2.contact_person_email AS data_owner_contact_person_email,
     d.description,
     array_agg(t.tag_name) AS tags,
-    d.spatial_coverage,
+    r.region_name AS spatial_coverage,
     d.spatial_resolution,
     d.temporal_coverage_start_date,
     d.temporal_coverage_end_date,
     d.temporal_resolution,
     d.public_access_level,
     d.additional_metadata
-   FROM ((((((public.datasets d
+   FROM (((((((public.datasets d
      LEFT JOIN public.collections c ON ((d.collection_id = c.id)))
      LEFT JOIN public.data_owners do2 ON ((d.data_owner_id = do2.id)))
      LEFT JOIN public.dataset_raw_datasets drd ON ((d.id = drd.dataset_id)))
      LEFT JOIN public.raw_datasets rd ON ((rd.id = drd.raw_dataset_id)))
      LEFT JOIN public.dataset_tags dt ON ((dt.dataset_id = d.id)))
      LEFT JOIN public.tags t ON ((t.id = dt.tag_id)))
-  GROUP BY d.id, d.ds_id, d.title, c.collection_id, c.collection_name, c.category_id, c.category_name, do2.name, do2.contact_person, do2.contact_person_email, d.description, d.spatial_coverage, d.spatial_resolution, d.temporal_coverage_start_date, d.temporal_coverage_end_date, d.temporal_resolution, d.public_access_level, d.additional_metadata;
+     LEFT JOIN public.regions r ON ((r.region_id = d.spatial_coverage_region_id)))
+  GROUP BY d.id, d.ds_id, d.title, c.collection_id, c.collection_name, c.category_id, c.category_name, do2.name, do2.contact_person, do2.contact_person_email, d.description, r.region_name, d.spatial_resolution, d.temporal_coverage_start_date, d.temporal_coverage_end_date, d.temporal_resolution, d.public_access_level, d.additional_metadata;
 
 
 --
@@ -459,6 +542,63 @@ ALTER TABLE public.raw_datasets ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY
 
 
 --
+-- Name: regions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+ALTER TABLE public.regions ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.regions_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
+-- Name: resource_group_members; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.resource_group_members (
+    resource_group_id text NOT NULL,
+    resource_id text NOT NULL,
+    resource_json jsonb,
+    resource_type public.resource_type NOT NULL
+);
+
+
+--
+-- Name: resource_groups; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.resource_groups (
+    id integer NOT NULL,
+    resource_group_id text NOT NULL,
+    group_name text NOT NULL
+);
+
+
+--
+-- Name: resource_groups_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.resource_groups_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: resource_groups_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.resource_groups_id_seq OWNED BY public.resource_groups.id;
+
+
+--
 -- Name: tags_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
@@ -470,6 +610,47 @@ ALTER TABLE public.tags ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     NO MAXVALUE
     CACHE 1
 );
+
+
+--
+-- Name: user_groups; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.user_groups (
+    group_email text NOT NULL,
+    user_email text NOT NULL
+);
+
+
+--
+-- Name: user_permissions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.user_permissions (
+    user_email text NOT NULL,
+    resource_type public.resource_type NOT NULL,
+    resource_id text NOT NULL,
+    permission public.access_level NOT NULL
+);
+
+
+--
+-- Name: users; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.users (
+    email text NOT NULL,
+    key text,
+    is_group boolean DEFAULT false NOT NULL,
+    CONSTRAINT valid_user_group CHECK ((((is_group = true) AND (key IS NULL)) OR ((is_group = false) AND (key IS NOT NULL))))
+);
+
+
+--
+-- Name: resource_groups id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.resource_groups ALTER COLUMN id SET DEFAULT nextval('public.resource_groups_id_seq'::regclass);
 
 
 --
@@ -577,6 +758,62 @@ ALTER TABLE ONLY public.raw_datasets
 
 
 --
+-- Name: regions regions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.regions
+    ADD CONSTRAINT regions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: regions regions_region_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.regions
+    ADD CONSTRAINT regions_region_id_key UNIQUE (region_id);
+
+
+--
+-- Name: regions regions_region_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.regions
+    ADD CONSTRAINT regions_region_name_key UNIQUE (region_name);
+
+
+--
+-- Name: resource_group_members resource_group_members_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.resource_group_members
+    ADD CONSTRAINT resource_group_members_pkey PRIMARY KEY (resource_group_id, resource_id);
+
+
+--
+-- Name: resource_groups resource_groups_group_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.resource_groups
+    ADD CONSTRAINT resource_groups_group_name_key UNIQUE (group_name);
+
+
+--
+-- Name: resource_groups resource_groups_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.resource_groups
+    ADD CONSTRAINT resource_groups_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: resource_groups resource_groups_resource_group_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.resource_groups
+    ADD CONSTRAINT resource_groups_resource_group_id_key UNIQUE (resource_group_id);
+
+
+--
 -- Name: tags tags_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -593,10 +830,41 @@ ALTER TABLE ONLY public.tags
 
 
 --
+-- Name: user_groups user_groups_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_groups
+    ADD CONSTRAINT user_groups_pkey PRIMARY KEY (group_email, user_email);
+
+
+--
+-- Name: user_permissions user_permissions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_permissions
+    ADD CONSTRAINT user_permissions_pkey PRIMARY KEY (user_email, resource_type, resource_id);
+
+
+--
+-- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_pkey PRIMARY KEY (email);
+
+
+--
 -- Name: datasets insert_dataset; Type: TRIGGER; Schema: public; Owner: -
 --
 
 CREATE TRIGGER insert_dataset BEFORE INSERT OR UPDATE ON public.datasets FOR EACH ROW EXECUTE FUNCTION public.tr_insert_dataset();
+
+
+--
+-- Name: user_groups validate_group_membership_trigger; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER validate_group_membership_trigger BEFORE INSERT OR UPDATE ON public.user_groups FOR EACH ROW EXECUTE FUNCTION public.validate_group_membership();
 
 
 --
@@ -656,11 +924,51 @@ ALTER TABLE ONLY public.datasets
 
 
 --
+-- Name: datasets datasets_spatial_coverage_region_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.datasets
+    ADD CONSTRAINT datasets_spatial_coverage_region_id_fkey FOREIGN KEY (spatial_coverage_region_id) REFERENCES public.regions(region_id);
+
+
+--
 -- Name: raw_datasets raw_datasets_data_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.raw_datasets
     ADD CONSTRAINT raw_datasets_data_owner_id_fkey FOREIGN KEY (data_owner_id) REFERENCES public.data_owners(id);
+
+
+--
+-- Name: resource_group_members resource_group_members_resource_group_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.resource_group_members
+    ADD CONSTRAINT resource_group_members_resource_group_id_fkey FOREIGN KEY (resource_group_id) REFERENCES public.resource_groups(resource_group_id);
+
+
+--
+-- Name: user_groups user_groups_group_email_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_groups
+    ADD CONSTRAINT user_groups_group_email_fkey FOREIGN KEY (group_email) REFERENCES public.users(email);
+
+
+--
+-- Name: user_groups user_groups_user_email_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_groups
+    ADD CONSTRAINT user_groups_user_email_fkey FOREIGN KEY (user_email) REFERENCES public.users(email);
+
+
+--
+-- Name: user_permissions user_permissions_user_email_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_permissions
+    ADD CONSTRAINT user_permissions_user_email_fkey FOREIGN KEY (user_email) REFERENCES public.users(email);
 
 
 --

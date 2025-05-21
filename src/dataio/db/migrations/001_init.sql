@@ -28,7 +28,7 @@ create type access_level as enum('NONE', 'VIEW', 'DOWNLOAD');
 
 create type temporal_resolution as enum('YEAR', 'MONTH', 'WEEK', 'DATE', 'HOUR', 'MINUTE', 'SECOND');
 
-create type spatial_resolution as enum('COUNTRY', 'STATE', 'DISTRICT', 'SUBDISTRICT', 'MUNICIPALITY', 'VILLAGE/WARD', 'LAT/LONG', 'OTHER');
+create type spatial_resolution as enum('COUNTRY', 'STATE', 'UT', 'DISTRICT', 'SUBDISTRICT', 'MUNICIPALITY', 'VILLAGE', 'WARD', 'PRABHAG', 'ULB', 'LAT/LONG', 'OTHER');
 
 create table if not exists collections (
     id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
@@ -61,6 +61,13 @@ create table if not exists tags (
 
 -- TODO: Spatial Coverage linked to RegionIDs
 
+create table if not exists regions (
+    id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    region_id text not null unique,
+    region_name text not null unique,
+    region_type spatial_resolution not null
+);
+
 CREATE TABLE if not exists datasets (
     id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     ds_id VARCHAR(50) not null unique,
@@ -68,7 +75,7 @@ CREATE TABLE if not exists datasets (
     collection_id integer not null,
     data_owner_id integer not null,
     description TEXT,
-    spatial_coverage TEXT,
+    spatial_coverage_region_id text,
     spatial_resolution spatial_resolution,
     temporal_coverage_start_date date,
     temporal_coverage_end_date date,
@@ -76,7 +83,8 @@ CREATE TABLE if not exists datasets (
     public_access_level access_level not null,
     additional_metadata jsonb,
     foreign key (collection_id) references collections (id),
-    foreign key (data_owner_id) references data_owners (id)
+    foreign key (data_owner_id) references data_owners (id),
+    foreign key (spatial_coverage_region_id) references regions (region_id)
 );
 
 create table if not exists dataset_raw_datasets (
@@ -125,16 +133,17 @@ create view datasets_full_view as
 select d.id, array_agg(rd.rds_id) as rds_ids, d.ds_id, d.title, c.collection_id, c.collection_name, c.category_id, c.category_name, 
 do2."name" as data_owner_name, do2.contact_person as data_owner_contact_person, do2.contact_person_email as data_owner_contact_person_email,
 d.description, array_agg(t.tag_name) as tags,
-d.spatial_coverage, d.spatial_resolution, d.temporal_coverage_start_date, d.temporal_coverage_end_date, d.temporal_resolution,
+r.region_name as spatial_coverage, d.spatial_resolution, d.temporal_coverage_start_date, d.temporal_coverage_end_date, d.temporal_resolution,
 d.public_access_level, d.additional_metadata from datasets d left join collections c on d.collection_id = c.id left join data_owners do2 
 on d.data_owner_id = do2.id 
 left join dataset_raw_datasets drd on d.id = drd.dataset_id
 left join raw_datasets rd on rd.id = drd.raw_dataset_id
 left join dataset_tags dt on dt.dataset_id = d.id
 left join tags t on t.id = dt.tag_id
+left join regions r on r.region_id = d.spatial_coverage_region_id
 group by d.id, d.ds_id, d.title, c.collection_id, c.collection_name, c.category_id, c.category_name, 
 data_owner_name, data_owner_contact_person, data_owner_contact_person_email,
-d.description, d.spatial_coverage, d.spatial_resolution, d.temporal_coverage_start_date, d.temporal_coverage_end_date, d.temporal_resolution,
+d.description, spatial_coverage, d.spatial_resolution, d.temporal_coverage_start_date, d.temporal_coverage_end_date, d.temporal_resolution,
 d.public_access_level, d.additional_metadata;
 
 SELECT add_migration(1, '001_datasets');

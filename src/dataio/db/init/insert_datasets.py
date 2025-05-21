@@ -4,9 +4,10 @@ import psycopg2
 from dotenv import load_dotenv
 from psycopg2.extras import Json
 from psycopg2.extensions import register_adapter
+import secrets
+import bcrypt
 
 register_adapter(dict, Json)
-
 
 # Load environment variables from .env file
 load_dotenv()
@@ -117,6 +118,21 @@ def insert_datasets():
                     )
                     print(f"Inserted tag: {tag_name}")
 
+        # insert regionids.csv into regions table
+        with open(f'{REPO_DIR}/db/init/data_inserts/regionids.csv', 'r') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+
+                region_type = row['regionID'].split('_')[0].upper()
+
+                cur.execute(
+                    """INSERT INTO regions (region_id, region_name, region_type)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    (row['regionID'], row['regionName'], region_type)
+                )
+
         with open(f'{REPO_DIR}/db/init/data_inserts/ARTPARK Data Catalogue - Catalogue v2_filtered.csv', 'r') as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
@@ -143,7 +159,7 @@ def insert_datasets():
                     temporal_coverage_end_date = None
                     spatial_resolution = None
                     temporal_resolution = None
-
+                    spatial_coverage_region_id = None
                     # Notes and supplementary documents to additional_metadata
                     additional_metadata = {
                     }
@@ -164,7 +180,7 @@ def insert_datasets():
                             %s, -- tags
                             %s, -- data_owner_name
                             %s, -- description
-                            %s, -- spatial_coverage
+                            %s, -- spatial_coverage_region_id
                             %s, -- spatial_resolution
                             %s, -- temporal_coverage_start_date
                             %s, -- temporal_coverage_end_date
@@ -181,7 +197,7 @@ def insert_datasets():
                             tag_names,
                             row['Data Owner'],
                             row['Contents'],
-                            row['Spatial Coverage'],
+                            spatial_coverage_region_id,
                             spatial_resolution,
                             temporal_coverage_start_date,
                             temporal_coverage_end_date,
@@ -199,12 +215,15 @@ def insert_datasets():
         conn.commit()
         print("Insertions Completed. View above logs for details.")
         
+
     except Exception as e:
         print(f"Error processing CSV file: {e}")
         conn.rollback()
     finally:
         cur.close()
         conn.close()
+
+
 
 if __name__ == "__main__":
     insert_datasets() 

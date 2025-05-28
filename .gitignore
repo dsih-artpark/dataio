@@ -147,3 +147,4 @@ dmypy.json
 !.env.example
 data/*
 **/data_inserts/**
+*.zip

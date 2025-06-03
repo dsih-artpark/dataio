@@ -1,9 +1,10 @@
 from typing import List, Optional
 import logging
 from sqlalchemy.orm import joinedload
+import bcrypt
 
 from .config import Session
-from .models import Dataset, AccessLevel
+from .models import Dataset, AccessLevel, User
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -150,7 +151,13 @@ def create_dataset(
         session.close() 
 
 def check_api_key(api_key: str) -> bool:
-    return False
-
-def get_user_from_api_key(api_key: str) -> dict:
-    return {"email": "test@test.com"}
+    try:
+        users = Session().query(User).all()
+        for user in users:
+            if user.key:    
+                if bcrypt.checkpw(api_key.encode('utf-8'), user.key):
+                    print('user found - key verified')
+                    return user
+        return None
+    except Exception as e:
+        logger.error(f"Error checking API key: {str(e)}")

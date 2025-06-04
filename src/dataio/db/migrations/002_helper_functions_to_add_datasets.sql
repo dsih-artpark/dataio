@@ -13,7 +13,7 @@ CREATE OR REPLACE FUNCTION add_dataset(
     p_temporal_coverage_start_date date,
     p_temporal_coverage_end_date date,
     p_temporal_resolution temporal_resolution,
-    p_public_access_level access_level,
+    p_access_level access_level,
     p_additional_metadata jsonb
 ) RETURNS VOID AS $$
 DECLARE
@@ -62,7 +62,7 @@ BEGIN
         temporal_coverage_start_date,
         temporal_coverage_end_date,
         temporal_resolution,
-        public_access_level,
+        access_level,
         additional_metadata
     ) VALUES (
         p_ds_id,
@@ -75,7 +75,7 @@ BEGIN
         p_temporal_coverage_start_date,
         p_temporal_coverage_end_date,
         p_temporal_resolution,
-        p_public_access_level,
+        p_access_level,
         p_additional_metadata
     ) RETURNING id INTO v_dataset_id;
 

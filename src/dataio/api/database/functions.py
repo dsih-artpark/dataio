@@ -41,10 +41,10 @@ def get_datasets(limit: int = 100, offset: int = 0, user_permissions: List[UserP
 
         for dataset in datasets:
             possible_permissions = [user_permission.permission for user_permission in dataset_user_permissions if user_permission.resource_id == dataset.ds_id]
-            possible_permissions.append(dataset.public_access_level)
-            dataset.public_access_level = determine_highest_permission(possible_permissions)
+            possible_permissions.append(dataset.access_level)
+            dataset.access_level = determine_highest_permission(possible_permissions)
 
-        datasets_filtered = [dataset for dataset in datasets if dataset.public_access_level != AccessLevel.NONE]
+        datasets_filtered = [dataset for dataset in datasets if dataset.access_level != AccessLevel.NONE]
 
         return datasets_filtered
     except Exception as e:

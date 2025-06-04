@@ -103,7 +103,7 @@ CREATE TYPE public.version_type AS ENUM (
 -- Name: add_dataset(character varying[], character varying, text, text, character varying[], text, text, text, public.spatial_resolution, date, date, public.temporal_resolution, public.access_level, jsonb); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.add_dataset(p_raw_dataset_ids character varying[], p_ds_id character varying, p_title text, p_collection_name text, p_tags character varying[], p_data_owner_name text, p_description text, p_spatial_coverage_region_id text, p_spatial_resolution public.spatial_resolution, p_temporal_coverage_start_date date, p_temporal_coverage_end_date date, p_temporal_resolution public.temporal_resolution, p_public_access_level public.access_level, p_additional_metadata jsonb) RETURNS void
+CREATE FUNCTION public.add_dataset(p_raw_dataset_ids character varying[], p_ds_id character varying, p_title text, p_collection_name text, p_tags character varying[], p_data_owner_name text, p_description text, p_spatial_coverage_region_id text, p_spatial_resolution public.spatial_resolution, p_temporal_coverage_start_date date, p_temporal_coverage_end_date date, p_temporal_resolution public.temporal_resolution, p_access_level public.access_level, p_additional_metadata jsonb) RETURNS void
     LANGUAGE plpgsql
     AS $$
 DECLARE
@@ -152,7 +152,7 @@ BEGIN
         temporal_coverage_start_date,
         temporal_coverage_end_date,
         temporal_resolution,
-        public_access_level,
+        access_level,
         additional_metadata
     ) VALUES (
         p_ds_id,
@@ -165,7 +165,7 @@ BEGIN
         p_temporal_coverage_start_date,
         p_temporal_coverage_end_date,
         p_temporal_resolution,
-        p_public_access_level,
+        p_access_level,
         p_additional_metadata
     ) RETURNING id INTO v_dataset_id;
 
@@ -392,7 +392,7 @@ CREATE TABLE public.dataset_versions (
     type public.version_type NOT NULL,
     last_modified_date date NOT NULL,
     updation_frequency public.updation_frequency NOT NULL,
-    public_access_level public.access_level NOT NULL
+    access_level public.access_level NOT NULL
 );
 
 
@@ -412,7 +412,7 @@ CREATE TABLE public.datasets (
     temporal_coverage_start_date date,
     temporal_coverage_end_date date,
     temporal_resolution public.temporal_resolution,
-    public_access_level public.access_level NOT NULL,
+    access_level public.access_level NOT NULL,
     additional_metadata jsonb
 );
 
@@ -475,7 +475,7 @@ CREATE VIEW public.datasets_full_view AS
     d.temporal_coverage_start_date,
     d.temporal_coverage_end_date,
     d.temporal_resolution,
-    d.public_access_level,
+    d.access_level,
     d.additional_metadata
    FROM (((((((public.datasets d
      LEFT JOIN public.collections c ON ((d.collection_id = c.id)))
@@ -485,7 +485,7 @@ CREATE VIEW public.datasets_full_view AS
      LEFT JOIN public.dataset_tags dt ON ((dt.dataset_id = d.id)))
      LEFT JOIN public.tags t ON ((t.id = dt.tag_id)))
      LEFT JOIN public.regions r ON ((r.region_id = d.spatial_coverage_region_id)))
-  GROUP BY d.id, d.ds_id, d.title, c.collection_id, c.collection_name, c.category_id, c.category_name, do2.name, do2.contact_person, do2.contact_person_email, d.description, r.region_name, d.spatial_resolution, d.temporal_coverage_start_date, d.temporal_coverage_end_date, d.temporal_resolution, d.public_access_level, d.additional_metadata;
+  GROUP BY d.id, d.ds_id, d.title, c.collection_id, c.collection_name, c.category_id, c.category_name, do2.name, do2.contact_person, do2.contact_person_email, d.description, r.region_name, d.spatial_resolution, d.temporal_coverage_start_date, d.temporal_coverage_end_date, d.temporal_resolution, d.access_level, d.additional_metadata;
 
 
 --

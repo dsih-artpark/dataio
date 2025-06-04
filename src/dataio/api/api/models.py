@@ -15,7 +15,7 @@ class DatasetCreate(BaseModel):
     spatial_resolution: Optional[str] = Field(None, description="Spatial resolution information")
     temporal_coverage: Optional[str] = Field(None, description="Temporal coverage information")
     temporal_resolution: Optional[str] = Field(None, description="Temporal resolution information")
-    public_access_level: AccessLevel = Field(
+    access_level: AccessLevel = Field(
         default=AccessLevel.NONE,
         description="Public access level for the dataset"
     )

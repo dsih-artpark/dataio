@@ -107,7 +107,7 @@ class Dataset(Base):
     temporal_coverage_start_date = Column(Date)
     temporal_coverage_end_date = Column(Date)
     temporal_resolution = Column(SQLEnum(TemporalResolution), nullable=False)
-    public_access_level = Column(SQLEnum(AccessLevel), nullable=False)
+    access_level = Column(SQLEnum(AccessLevel), nullable=False)
     additional_metadata = Column(JSONB)
 
     # Relationships
@@ -138,7 +138,7 @@ class DatasetVersion(Base):
     type = Column(SQLEnum(VersionType), nullable=False)
     last_modified_date = Column(Date, nullable=False)
     updation_frequency = Column(SQLEnum(UpdationFrequency), nullable=False)
-    public_access_level = Column(SQLEnum(AccessLevel), nullable=False)
+    access_level = Column(SQLEnum(AccessLevel), nullable=False)
 
     dataset = relationship("Dataset")
 

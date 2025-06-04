@@ -185,7 +185,7 @@ def insert_datasets():
                             %s, -- temporal_coverage_start_date
                             %s, -- temporal_coverage_end_date
                             %s, -- temporal_resolution
-                            %s, -- public_access_level
+                            %s, -- access_level
                             %s  -- additional_metadata
                         )
                         """,

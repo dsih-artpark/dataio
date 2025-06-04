@@ -40,6 +40,11 @@ There are two ways to recreate the database.
 
 If you want to restore the database to a specific previous version, checkout the versioned schema from the previous commit, and run the restore script.
 
+## Starting the API
+```
+uv run fastapi dev src/dataio/api/api
+```
+
 ## Development Guidelines
 
 Use transaction blocks (BEGIN; COMMIT;) in the migration scripts - so that it's never applied half way in case of any errors.

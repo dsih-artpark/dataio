@@ -16,7 +16,7 @@ CREATE TABLE user_groups (
     PRIMARY KEY (group_email, user_email)
 );
 
-create type resource_type as enum ('dataset', 'group');
+create type resource_type as enum ('DATASET', 'GROUP');
 
 CREATE TABLE user_permissions (
     user_email TEXT REFERENCES users(email),

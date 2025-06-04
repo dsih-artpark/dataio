@@ -36,8 +36,9 @@ async def get_datasets(
     - List of datasets
     """
     try:
-        print('hi')
-        datasets = database.get_datasets(limit=limit)
+        # print('hi')
+        user_permissions =  database.determine_user_permissions(user)
+        datasets = database.get_datasets(limit=limit, user_permissions=user_permissions)
         if not datasets:
             return []
         return datasets

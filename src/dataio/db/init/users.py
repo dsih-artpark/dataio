@@ -111,22 +111,22 @@ def add_resource_groups():
         "group_name": "Inlead Livestock Modelling Group",
         "resources": [
             {
-                "resource_type": "dataset",
+                "resource_type": "DATASET",
                 "resource_id": "CS0007DS0041",
                 "resource_json": {}
             },
             {
-                "resource_type": "dataset",
+                "resource_type": "DATASET",
                 "resource_id": "EP0006DS0055",
                 "resource_json": {}
             },
             {
-                "resource_type": "dataset",
+                "resource_type": "DATASET",
                 "resource_id": "CS0007DS0083",
                 "resource_json": {}
             },
             {
-                "resource_type": "dataset",
+                "resource_type": "DATASET",
                 "resource_id": "CS0002DS0084",
                 "resource_json": {}
             }
@@ -152,10 +152,10 @@ def add_resource_groups():
 
 def add_user_permissions():
     user_permissions = [
-        {"user_email": "admin@artpark.in", "resource_type": "dataset", "resource_id": "GS0012DS0051", "permission": "DOWNLOAD"},
-        {"user_email": "analyst@artpark.in", "resource_type": "group", "resource_id": "livestock_group", "permission": "DOWNLOAD"},
-        {"user_email": "external_collaborator@psu.edu", "resource_type": "group", "resource_id": "livestock_group", "permission": "DOWNLOAD"},
-        {"user_email": "public_user@artpark.in", "resource_type": "group", "resource_id": "livestock_group", "permission": "VIEW"},
+        {"user_email": "admin@artpark.in", "resource_type": "DATASET", "resource_id": "GS0012DS0051", "permission": "DOWNLOAD"},
+        {"user_email": "analyst@artpark.in", "resource_type": "GROUP", "resource_id": "livestock_group", "permission": "DOWNLOAD"},
+        {"user_email": "external_collaborator@psu.edu", "resource_type": "GROUP", "resource_id": "livestock_group", "permission": "DOWNLOAD"},
+        {"user_email": "public_user@artpark.in", "resource_type": "GROUP", "resource_id": "livestock_group", "permission": "VIEW"},
     ]
 
     conn = connect_to_db()

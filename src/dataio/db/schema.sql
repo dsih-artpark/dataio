@@ -2,8 +2,8 @@
 -- PostgreSQL database dump
 --
 
--- Dumped from database version 17.5 (Ubuntu 17.5-1.pgdg22.04+1)
--- Dumped by pg_dump version 17.5 (Ubuntu 17.5-1.pgdg22.04+1)
+-- Dumped from database version 17.5 (Homebrew)
+-- Dumped by pg_dump version 17.5 (Homebrew)
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -33,8 +33,8 @@ CREATE TYPE public.access_level AS ENUM (
 --
 
 CREATE TYPE public.resource_type AS ENUM (
-    'dataset',
-    'group'
+    'DATASET',
+    'GROUP'
 );
 
 

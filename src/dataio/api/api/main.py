@@ -1,15 +1,20 @@
 from typing import List, Optional
-from fastapi import FastAPI, HTTPException, Query, Depends
+from fastapi import FastAPI, HTTPException, Query, Depends, UploadFile
 from pydantic import BaseModel, Field
+import logging
 from dataio.api import database
 from dataio.api.database.models import AccessLevel
-from dataio.api.api.models import DatasetCreate, User
-import logging
+from dataio.api.api.models import DatasetCreate, User, DatasetVersionCreate
 from dataio.api.routers import secure
 from dataio.api.api.auth import get_user
 
+
+from dataio.api.api.filestore import DatasetVersionS3
+
+
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+logging.basicConfig(level=logging.INFO, format=log_format, filename="api.log", filemode="a")
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Dataset Management System API")
@@ -20,6 +25,10 @@ app.include_router(secure.router, prefix="/api/v1",
 @app.get("/")
 async def root():
     return {"message": "Welcome to Dataset Management System API"}
+
+##
+## DATASETS TABLE ENDPOINTS
+##
 
 @app.get("/api/v1/datasets")
 async def get_datasets(
@@ -36,7 +45,6 @@ async def get_datasets(
     - List of datasets
     """
     try:
-        # print('hi')
         user_permissions =  database.determine_user_permissions(user)
         datasets = database.get_datasets(limit=limit, user_permissions=user_permissions)
         if not datasets:
@@ -44,68 +52,72 @@ async def get_datasets(
         return datasets
     except Exception as e:
         logger.error(f"Error retrieving datasets: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to retrieve datasets. Contact support.")
+    
+@app.post("/api/v1/datasets")
+async def create_dataset(dataset: DatasetCreate, user: User = Depends(get_user)):
+    """
+    Create a new dataset.
+    """
+    if not database.check_if_admin(user):
+        raise HTTPException(status_code=403, detail="You are not authorized to create a dataset")
+    try:
+        created_dataset = database.create_dataset(dataset)
+        return created_dataset
+    except Exception as e:
+        logger.error(f"Error creating dataset: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create dataset. Contact support.")
+    
+@app.post("/api/v1/dataset_versions")
+async def create_dataset_version(version: DatasetVersionCreate, user: User = Depends(get_user)):
+    """
+    Create a new dataset version.
+    """
+    if not database.check_if_admin(user):
+        raise HTTPException(status_code=403, detail="You are not authorized to create a dataset version")
+        
+    try:
+        created_version = database.create_dataset_version(version)
+        return created_version
+    except Exception as e:
+        logger.error(f"Error creating dataset version: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create dataset version. Contact support.")
+    
+##
+## FILESTORE MODIFICATION ENDPOINTS
+##
+    
+@app.post("/api/v1/datasets/{dataset_id}/versions/{version_id}/files")
+async def create_dataset_version_file(dataset_id: str, version_id: str, file: UploadFile, user: User = Depends(get_user)):
+    if not database.check_if_admin(user):
+            raise HTTPException(status_code=403, detail="You are not authorized to create a dataset version file")
+    try:
+        dataset_version_s3 = DatasetVersionS3(dataset_id, version_id)
+        dataset_version_s3.upload_file(file)
+        return {"message": "File uploaded successfully"}
+    except Exception as e:
+        logger.error(f"Failed to upload file: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload file. Contact support.")
+    
+@app.get("/api/v1/datasets/{dataset_id}/versions/{version_id}/files")
+async def get_dataset_version_files(dataset_id: str, version_id: str, user: User = Depends(get_user)):
+    if not database.check_if_admin(user):
+        raise HTTPException(status_code=403, detail="You are not authorized to get a dataset version files")
+    try:
+        dataset_version_s3 = DatasetVersionS3(dataset_id, version_id)
+        return dataset_version_s3.list_files_in_s3()
+    except Exception as e:
+        logger.error(f"Failed to get dataset version files: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get dataset version files. Contact support.")
 
-# @app.get("/datasets/{dataset_id}")
-# async def get_dataset(dataset_id: int):
-#     """
-#     Retrieve a specific dataset by its ID.
-    
-#     Parameters:
-#     - dataset_id: The unique identifier of the dataset
-    
-#     Returns:
-#     - Dataset details
-    
-#     Raises:
-#     - HTTPException: If dataset is not found
-#     """
-#     try:
-#         dataset = database.get_dataset_by_id(dataset_id)
-#         if dataset is None:
-#             raise HTTPException(status_code=404, detail="Dataset not found")
-#         return dataset
-#     except Exception as e:
-#         logger.error(f"Error retrieving dataset {dataset_id}: {str(e)}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.post("/datasets/", status_code=201)
-# async def create_dataset(dataset: DatasetCreate):
-#     """
-#     Create a new dataset.
-    
-#     Parameters:
-#     - dataset: Dataset creation data.
-#       public_access_level: possible enum values are:
-#         - NONE
-#         - VIEW
-#         - DOWNLOAD
-    
-#     Returns:
-#     - Created dataset details
-    
-#     Raises:
-#     - HTTPException: If dataset creation fails
-#     """
-#     try:
-#         created_dataset = database.create_dataset(
-#             raw_dataset_ids=dataset.raw_dataset_ids,
-#             ds_id=dataset.ds_id,
-#             title=dataset.title,
-#             collection_id=dataset.collection_id,
-#             data_owner_id=dataset.data_owner_id,
-#             concept_id=dataset.concept_id,
-#             description=dataset.description,
-#             tag_ids=dataset.tag_ids,
-#             spatial_coverage=dataset.spatial_coverage,
-#             spatial_resolution=dataset.spatial_resolution,
-#             temporal_coverage=dataset.temporal_coverage,
-#             temporal_resolution=dataset.temporal_resolution,
-#             public_access_level=dataset.public_access_level,
-#             notes=dataset.notes,
-#             supplementary_documents=dataset.supplementary_documents
-#         )
-#         return created_dataset
-#     except Exception as e:
-#         logger.error(f"Error creating dataset: {str(e)}")
-#         raise HTTPException(status_code=500, detail=str(e))
+@app.delete("/api/v1/datasets/{dataset_id}/versions/{version_id}/files/{file_name}")
+async def delete_dataset_version_file(dataset_id: str, version_id: str, file_name: str, user: User = Depends(get_user)):
+    if not database.check_if_admin(user):
+        raise HTTPException(status_code=403, detail="You are not authorized to delete a dataset version file")
+    try:
+        dataset_version_s3 = DatasetVersionS3(dataset_id, version_id)
+        dataset_version_s3.delete_file(file_name)
+        return {"message": "File deleted successfully"}
+    except Exception as e:
+        logger.error(f"Failed to delete dataset version file: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete dataset version file. Contact support.")

@@ -1,6 +1,6 @@
-from .models import Base, Dataset, Collection, DataOwner, RawDataset, Tag, AccessLevel
-from .config import engine, Session
-from .functions import get_datasets, determine_user_permissions
+from dataio.api.database.models import Base, Dataset, Collection, DataOwner, RawDataset, Tag, AccessLevel
+from dataio.api.database.config import engine, Session
+from dataio.api.database.functions import get_datasets, determine_user_permissions, check_if_admin, create_dataset, create_dataset_version, check_api_key
 
 __all__ = [
     'Base',
@@ -13,5 +13,9 @@ __all__ = [
     'engine',
     'Session',
     'get_datasets',
-    'determine_user_permissions'
+    'determine_user_permissions',
+    'check_if_admin',
+    'create_dataset',
+    'create_dataset_version',
+    'check_api_key'
 ] 

@@ -1,0 +1,15 @@
+{
+  "ds_id": "TS0001DS9999",
+  "title": "Test dataset for testing",
+  "collection_id": 1,
+  "data_owner_id": 2,
+  "description": "Test dataset is for testing purpose",
+  "spatial_coverage_region_id": "state_01",
+  "spatial_resolution": "DISTRICT",
+  "temporal_coverage_start_date": "22-01-2021",
+  "temporal_coverage_end_date": "24-05-2025",
+  "temporal_resolution": "YEAR",
+  "access_level": "NONE",
+  "additional_metadata": {
+  }
+}

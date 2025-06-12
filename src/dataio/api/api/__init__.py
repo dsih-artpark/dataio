@@ -1,5 +1,5 @@
-from .main import app
-from .models import DatasetCreate
+from dataio.api.api.main import app
+from dataio.api.api.models import DatasetCreate
 
 __all__ = [
     'app',

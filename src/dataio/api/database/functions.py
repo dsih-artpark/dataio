@@ -3,8 +3,9 @@ import logging
 from sqlalchemy.orm import joinedload
 import bcrypt
 
-from .config import Session
-from .models import Dataset, AccessLevel, User, UserGroup, UserPermission, ResourceGroup, ResourceGroupMember
+from dataio.api.database.config import Session
+from dataio.api.database.models import Dataset, AccessLevel, User, UserGroup, UserPermission, ResourceGroup, ResourceGroupMember, DatasetVersion
+from dataio.api.api.models import DatasetCreate, DatasetVersionCreate
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +22,8 @@ def get_datasets(limit: int = 100, offset: int = 0, user_permissions: List[UserP
     Returns:
         List[Dataset]: List of Dataset objects with their related data
     """
+    if user_permissions is None:
+        raise ValueError("User permissions are required")
     session = Session()
     try:
         datasets = (
@@ -52,6 +55,52 @@ def get_datasets(limit: int = 100, offset: int = 0, user_permissions: List[UserP
         raise
     finally:
         session.close()
+
+def create_dataset(dataset: DatasetCreate):
+    session = Session()
+    try:
+        dataset = Dataset(**dataset.model_dump())
+        session.add(dataset)
+        session.commit()
+        return dataset
+    except Exception as e:
+        logger.error(f"Error creating dataset: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+def create_dataset_version(dataset_version_create: DatasetVersionCreate):
+
+    session = Session()
+    try:
+        # replace ds_id with id
+        dataset = session.query(Dataset).filter(Dataset.ds_id == dataset_version_create.ds_id).first()
+        if not dataset:
+            raise ValueError(f"Dataset with ID {dataset_version_create.ds_id} not found")
+        
+        dataset_version = DatasetVersion(
+            dataset_id=dataset.id,
+            version_id=dataset_version_create.version_id,
+            version_title=dataset_version_create.version_title,
+            type=dataset_version_create.type,
+            last_modified_date=dataset_version_create.last_modified_date,
+            updation_frequency=dataset_version_create.updation_frequency,
+            access_level=dataset_version_create.access_level,
+        )
+        
+        session.add(dataset_version)
+        session.commit()
+        return dataset_version
+    except Exception as e:
+        logger.error(f"Error creating dataset version: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+def check_if_admin(user: User):
+    if user.is_group:
+        raise ValueError("User is a group")
+    return user.email == "admin@artpark.in"
 
 def determine_highest_permission(permissions: List[AccessLevel]):
     if AccessLevel.DOWNLOAD in permissions:
@@ -139,84 +188,6 @@ def get_resource_group_members(resource_group_id: str):
 #         raise
 #     finally:
 #         session.close()
-
-# def create_dataset(
-#     raw_dataset_ids: List[int],
-#     ds_id: str,
-#     title: str,
-#     collection_id: int,
-#     data_owner_id: int,
-#     concept_id: int,
-#     description: Optional[str] = None,
-#     tag_ids: Optional[List[int]] = None,
-#     spatial_coverage: Optional[str] = None,
-#     spatial_resolution: Optional[str] = None,
-#     temporal_coverage: Optional[str] = None,
-#     temporal_resolution: Optional[str] = None,
-#     public_access_level: AccessLevel = AccessLevel.NONE,
-#     notes: Optional[str] = None,
-#     supplementary_documents: Optional[str] = None
-# ) -> Dataset:
-#     """
-#     Create a new dataset in the database.
-    
-#     Args:
-#         raw_dataset_ids (List[int]): List of raw dataset IDs
-#         ds_id (str): Dataset identifier
-#         title (str): Dataset title
-#         collection_id (int): ID of the collection this dataset belongs to
-#         data_owner_id (int): ID of the data owner
-#         concept_id (int): ID of the concept this dataset represents
-#         description (Optional[str]): Dataset description
-#         tag_ids (Optional[List[int]]): List of tag IDs
-#         spatial_coverage (Optional[str]): Spatial coverage information
-#         spatial_resolution (Optional[str]): Spatial resolution information
-#         temporal_coverage (Optional[str]): Temporal coverage information
-#         temporal_resolution (Optional[str]): Temporal resolution information
-#         public_access_level (AccessLevel): Public access level for the dataset
-        
-#     Returns:
-#         Dataset: The created dataset object
-        
-#     Raises:
-#         ValueError: If required fields are missing or invalid
-#         Exception: For database errors
-#     """
-#     session = Session()
-#     try:
-#         # Create new dataset
-#         dataset = Dataset(
-#             raw_dataset_ids=raw_dataset_ids,
-#             ds_id=ds_id,
-#             title=title,
-#             collection_id=collection_id,
-#             data_owner_id=data_owner_id,
-#             concept_id=concept_id,
-#             description=description,
-#             tag_ids=tag_ids or [],
-#             spatial_coverage=spatial_coverage,
-#             spatial_resolution=spatial_resolution,
-#             temporal_coverage=temporal_coverage,
-#             temporal_resolution=temporal_resolution,
-#             public_access_level=public_access_level,
-#             notes=notes,
-#             supplementary_documents=supplementary_documents
-#         )
-        
-#         # Add to session and commit
-#         session.add(dataset)
-#         session.commit()
-        
-#         # Refresh to get the created ID and relationships
-#         session.refresh(dataset)
-        
-#         return dataset
-#     except Exception as e:
-#         session.rollback()
-#         logger.error(f"Error creating dataset: {str(e)}")
-#         raise
-#     finally:
-#         session.close() 
 
 def check_api_key(api_key: str) -> bool:
     try:

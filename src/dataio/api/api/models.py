@@ -19,8 +19,20 @@ class DatasetCreate(BaseModel):
     )
     additional_metadata: Optional[dict] = Field(None, description="Additional metadata")
 
+class DatasetUpdate(BaseModel):
+    title: Optional[str] = Field(None, description="Dataset title")
+    description: Optional[str] = Field(None, description="Dataset description")
+    collection_id: Optional[int] = Field(None, description="Collection ID")
+    data_owner_id: Optional[int] = Field(None, description="Data owner ID")
+    spatial_coverage_region_id: Optional[str] = Field(None, description="Spatial coverage region ID")
+    spatial_resolution: Optional[str] = Field(None, description="Spatial resolution information")
+    temporal_coverage_start_date: Optional[str] = Field(None, description="Temporal coverage start date")
+    temporal_coverage_end_date: Optional[str] = Field(None, description="Temporal coverage end date")
+    temporal_resolution: Optional[str] = Field(None, description="Temporal resolution information")
+    access_level: Optional[AccessLevel] = Field(None, description="Access level")
+    additional_metadata: Optional[dict] = Field(None, description="Additional metadata")
+
 class DatasetVersionCreate(BaseModel):
-    ds_id: str = Field(..., description="12 digit DS_ID", min_length=12, max_length=12)
     version_id: str = Field(..., description="Version identifier", min_length=1, max_length=20)
     version_title: str = Field(..., description="Version title", min_length=1)
     type: VersionType = Field(..., description="Version type")
@@ -31,3 +43,13 @@ class DatasetVersionCreate(BaseModel):
 class User(BaseModel):
     email: str
     is_group: bool
+
+class UserCreate(BaseModel):
+    email: str
+    is_group: bool
+
+class UserReturn(BaseModel):
+    email: str
+    is_group: bool
+    key: Optional[str] = None
+    message: Optional[str] = None

@@ -17,15 +17,20 @@ class DatasetVersionS3:
 
         self.bucket = self.s3.Bucket(os.getenv('AWS_BUCKET_NAME'))
 
+        self.prefix = self._get_prefix_for_dataset(self.dataset_id, self.version_id)
+
     def _get_prefix_for_dataset(self, dataset_id: str, version_id: str):
         return f"filestore/{dataset_id}/{version_id}"
 
     def upload_file(self, file: UploadFile):
-        prefix = self._get_prefix_for_dataset(self.dataset_id, self.version_id)
-        remote_filepath = f"{prefix}/{os.path.basename(file.filename)}"
+        remote_filepath = f"{self.prefix}/{os.path.basename(file.filename)}"
         self.bucket.upload_fileobj(file.file, remote_filepath)
     
     def list_files_in_s3(self):
-        prefix = self._get_prefix_for_dataset(self.dataset_id, self.version_id)
-        files_list = [obj.key.split('/')[-1] for obj in self.bucket.objects.filter(Prefix=prefix)]
+        files_list = [obj.key.split('/')[-1] for obj in self.bucket.objects.filter(Prefix=self.prefix)]
         return files_list
+    
+    def delete_file(self, file_name: str):
+        self.bucket.delete_objects(Delete={
+            'Objects': [{'Key': f"{self.prefix}/{file_name}"}]
+        })

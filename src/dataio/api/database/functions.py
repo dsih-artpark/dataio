@@ -2,10 +2,13 @@ from typing import List, Optional
 import logging
 from sqlalchemy.orm import joinedload
 import bcrypt
+import secrets
+import psycopg2.errors
 
 from dataio.api.database.config import Session
 from dataio.api.database.models import Dataset, AccessLevel, User, UserGroup, UserPermission, ResourceGroup, ResourceGroupMember, DatasetVersion
-from dataio.api.api.models import DatasetCreate, DatasetVersionCreate
+from dataio.api.api.models import DatasetCreate, DatasetVersionCreate, UserCreate, UserReturn, DatasetUpdate
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -40,6 +43,8 @@ def get_datasets(limit: int = 100, offset: int = 0, user_permissions: List[UserP
             .all()
         )
 
+        print(datasets)
+
         dataset_user_permissions = [user_permission for user_permission in user_permissions if user_permission.resource_type == 'DATASET']
 
         for dataset in datasets:
@@ -48,7 +53,7 @@ def get_datasets(limit: int = 100, offset: int = 0, user_permissions: List[UserP
             dataset.access_level = determine_highest_permission(possible_permissions)
 
         datasets_filtered = [dataset for dataset in datasets if dataset.access_level != AccessLevel.NONE]
-
+        print(datasets_filtered)
         return datasets_filtered
     except Exception as e:
         logger.error(f"Error fetching datasets: {str(e)}")
@@ -62,6 +67,7 @@ def create_dataset(dataset: DatasetCreate):
         dataset = Dataset(**dataset.model_dump())
         session.add(dataset)
         session.commit()
+        session.refresh(dataset)
         return dataset
     except Exception as e:
         logger.error(f"Error creating dataset: {str(e)}")
@@ -69,14 +75,30 @@ def create_dataset(dataset: DatasetCreate):
     finally:
         session.close()
 
-def create_dataset_version(dataset_version_create: DatasetVersionCreate):
+def update_dataset(dataset_id: str, dataset_update: DatasetUpdate):
+    session = Session()
+    try:
+        dataset = session.query(Dataset).filter(Dataset.ds_id == dataset_id).first()
+        if not dataset:
+            raise ValueError(f"Dataset with ID {dataset_id} not found")
+        for key, value in dataset_update.model_dump().items():
+            if value is not None:
+                setattr(dataset, key, value)
+        session.commit()
+        session.refresh(dataset)
+        return dataset
+    except Exception as e:
+        logger.error(f"Error updating dataset: {str(e)}")
+        raise
+
+def create_dataset_version(dataset_id: str, dataset_version_create: DatasetVersionCreate):
 
     session = Session()
     try:
         # replace ds_id with id
-        dataset = session.query(Dataset).filter(Dataset.ds_id == dataset_version_create.ds_id).first()
+        dataset = session.query(Dataset).filter(Dataset.ds_id == dataset_id).first()
         if not dataset:
-            raise ValueError(f"Dataset with ID {dataset_version_create.ds_id} not found")
+            raise ValueError(f"Dataset with ID {dataset_id} not found")
         
         dataset_version = DatasetVersion(
             dataset_id=dataset.id,
@@ -90,6 +112,7 @@ def create_dataset_version(dataset_version_create: DatasetVersionCreate):
         
         session.add(dataset_version)
         session.commit()
+        session.refresh(dataset_version)
         return dataset_version
     except Exception as e:
         logger.error(f"Error creating dataset version: {str(e)}")
@@ -200,3 +223,30 @@ def check_api_key(api_key: str) -> bool:
         return None
     except Exception as e:
         logger.error(f"Error checking API key: {str(e)}")
+
+def create_user(user_create: UserCreate):
+    try:
+        if user_create.is_group:
+            # dont generate key for group
+            user = User(email=user_create.email, is_group=user_create.is_group)
+            user_return = UserReturn(email=user.email, is_group=user.is_group, key=None)
+            session = Session()
+            session.add(user)
+            session.commit()
+            return user_return
+        else:
+            key = secrets.token_urlsafe()
+            bytes = key.encode('utf-8')
+            salt = bcrypt.gensalt()
+            hash = bcrypt.hashpw(bytes, salt)
+            user = User(email=user_create.email, is_group=user_create.is_group, key=hash)
+            user_return = UserReturn(email=user.email, is_group=user.is_group, key=key, message="Please note down the key. It cannot be seen or retrieved again. You will have to regenerate a new key if you forget it.")
+            session = Session()
+            session.add(user)
+            session.commit()
+            return user_return
+    except Exception as e:
+        logger.error(f"Error creating user: {str(e)}")
+        raise
+    finally:
+        session.close()

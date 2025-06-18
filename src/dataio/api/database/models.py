@@ -5,6 +5,8 @@ from dataio.api.database.enums import AccessLevel, SpatialResolution, TemporalRe
 
 Base = declarative_base()
 
+
+
 class Collection(Base):
     __tablename__ = 'collections'
 

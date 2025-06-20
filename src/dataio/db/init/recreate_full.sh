@@ -13,3 +13,4 @@ for migration in $(ls -v "$MIGRATIONS_DIR"/*.sql); do
 done
 
 python src/dataio/db/init/insert_datasets.py
+python src/dataio/db/init/users.py -ugra

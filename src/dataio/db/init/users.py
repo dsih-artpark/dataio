@@ -84,6 +84,7 @@ def add_test_users():
     conn.commit()
     print("All test users inserted successfully!")
     # put the test_users into a csv file
+    os.makedirs(f'{REPO_DIR}/db/init/data_inserts', exist_ok=True)
     with open(f'{REPO_DIR}/db/init/data_inserts/test_users.csv', 'w') as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=['email', 'key', 'is_group', 'unhashed_key'])
         writer.writeheader()

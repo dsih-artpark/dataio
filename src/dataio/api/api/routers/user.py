@@ -58,7 +58,7 @@ async def get_dataset_table_list(dataset_id: str, bucket_type: VersionType, user
             raise HTTPException(status_code=403, detail="You are not authorized to get preprocessed files")
         
         if not user_has_dataset_download_access(user_permissions, dataset_id):
-            raise HTTPException(status_code=403, detail="You are not authorized to get a dataset files")
+            raise HTTPException(status_code=403, detail="You are not authorized to get the dataset files")
         
         dataset_s3 = DatasetS3(dataset_id, bucket_type)
         files_list =  dataset_s3.list_files_in_s3()

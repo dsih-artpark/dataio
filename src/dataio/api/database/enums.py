@@ -45,3 +45,4 @@ class UpdationFrequency(str, enum.Enum):
 class ResourceType(str, enum.Enum):
     DATASET = "DATASET"
     GROUP = "GROUP"
+    BUCKET = "BUCKET"

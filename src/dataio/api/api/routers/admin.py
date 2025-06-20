@@ -35,7 +35,7 @@ async def create_user(user_to_be_created: UserCreate, logged_in_user: User = Dep
         raise HTTPException(status_code=500, detail=f"Failed to create user. Contact support.")
 
 
-@admin_router.post("/")
+@admin_router.post("/datasets")
 async def create_dataset(dataset: DatasetCreate, user: User = Depends(get_user)):
     """
     Create a new dataset.

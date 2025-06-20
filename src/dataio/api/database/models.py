@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Enum as SQLEnum, ForeignKey, Text, Date, Boolean
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, declarative_base
-from dataio.api.database.enums import AccessLevel, SpatialResolution, TemporalResolution, VersionType, UpdationFrequency, ResourceType
+from dataio.api.database.enums import AccessLevel, SpatialResolution, TemporalResolution, ResourceType
 
 Base = declarative_base()
 
@@ -84,19 +84,6 @@ class DatasetTag(Base):
     
     dataset_id = Column(Integer, ForeignKey('datasets.id'), primary_key=True)
     tag_id = Column(Integer, ForeignKey('tags.id'), primary_key=True)
-
-class DatasetVersion(Base):
-    __tablename__ = 'dataset_versions'
-
-    dataset_id = Column(Integer, ForeignKey('datasets.id'), primary_key=True)
-    version_id = Column(Text, primary_key=True)
-    version_title = Column(Text, nullable=False)
-    type = Column(SQLEnum(VersionType), nullable=False)
-    last_modified_date = Column(Date, nullable=False)
-    updation_frequency = Column(SQLEnum(UpdationFrequency), nullable=False)
-    access_level = Column(SQLEnum(AccessLevel), nullable=False)
-
-    dataset = relationship("Dataset")
 
 class User(Base):
     __tablename__ = 'users'

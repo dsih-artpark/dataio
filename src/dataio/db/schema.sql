@@ -34,7 +34,8 @@ CREATE TYPE public.access_level AS ENUM (
 
 CREATE TYPE public.resource_type AS ENUM (
     'DATASET',
-    'GROUP'
+    'GROUP',
+    'BUCKET'
 );
 
 
@@ -382,21 +383,6 @@ CREATE TABLE public.dataset_tags (
 
 
 --
--- Name: dataset_versions; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.dataset_versions (
-    dataset_id integer NOT NULL,
-    version_id text NOT NULL,
-    version_title text NOT NULL,
-    type public.version_type NOT NULL,
-    last_modified_date date NOT NULL,
-    updation_frequency public.updation_frequency NOT NULL,
-    access_level public.access_level NOT NULL
-);
-
-
---
 -- Name: datasets; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -702,14 +688,6 @@ ALTER TABLE ONLY public.dataset_tags
 
 
 --
--- Name: dataset_versions dataset_versions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.dataset_versions
-    ADD CONSTRAINT dataset_versions_pkey PRIMARY KEY (version_id);
-
-
---
 -- Name: datasets datasets_ds_id_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -897,14 +875,6 @@ ALTER TABLE ONLY public.dataset_tags
 
 ALTER TABLE ONLY public.dataset_tags
     ADD CONSTRAINT dataset_tags_tag_id_fkey FOREIGN KEY (tag_id) REFERENCES public.tags(id);
-
-
---
--- Name: dataset_versions dataset_versions_dataset_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.dataset_versions
-    ADD CONSTRAINT dataset_versions_dataset_id_fkey FOREIGN KEY (dataset_id) REFERENCES public.datasets(id);
 
 
 --

@@ -103,17 +103,6 @@ create table if not exists dataset_tags (
     primary key (dataset_id, tag_id)
 );
 
-create table if not exists dataset_versions (
-    dataset_id integer not null,
-    version_id text primary key,
-    version_title text not null,
-    type version_type not null,
-    last_modified_date date not null,
-    updation_frequency updation_frequency not null,
-    access_level access_level not null,
-    foreign key (dataset_id) references datasets (id)
-);
-
 CREATE OR REPLACE FUNCTION TR_insert_dataset()
 RETURNS TRIGGER AS $$
 BEGIN

@@ -32,14 +32,6 @@ class DatasetUpdate(BaseModel):
     access_level: Optional[AccessLevel] = Field(None, description="Access level")
     additional_metadata: Optional[dict] = Field(None, description="Additional metadata")
 
-class DatasetVersionCreate(BaseModel):
-    version_id: str = Field(..., description="Version identifier", min_length=1, max_length=20)
-    version_title: str = Field(..., description="Version title", min_length=1)
-    type: VersionType = Field(..., description="Version type")
-    last_modified_date: str = Field(..., description="Last modified date")
-    updation_frequency: UpdationFrequency = Field(..., description="Updation frequency")
-    access_level: AccessLevel = Field(..., description="Access level")
-
 class User(BaseModel):
     email: str
     is_group: bool

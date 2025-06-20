@@ -223,7 +223,5 @@ def insert_datasets():
         cur.close()
         conn.close()
 
-
-
 if __name__ == "__main__":
     insert_datasets() 

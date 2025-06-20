@@ -6,9 +6,8 @@ import secrets
 import psycopg2.errors
 
 from dataio.api.database.config import Session
-from dataio.api.database.models import Dataset, AccessLevel, User, UserGroup, UserPermission, ResourceGroup, ResourceGroupMember, DatasetVersion
-from dataio.api.api.models import DatasetCreate, DatasetVersionCreate, UserCreate, UserReturn, DatasetUpdate
-
+from dataio.api.database.models import Dataset, AccessLevel, User, UserGroup, UserPermission, ResourceGroup, ResourceGroupMember
+from dataio.api.api.models import DatasetCreate, UserCreate, UserReturn, DatasetUpdate
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -90,35 +89,6 @@ def update_dataset(dataset_id: str, dataset_update: DatasetUpdate):
     except Exception as e:
         logger.error(f"Error updating dataset: {str(e)}")
         raise
-
-def create_dataset_version(dataset_id: str, dataset_version_create: DatasetVersionCreate):
-
-    session = Session()
-    try:
-        # replace ds_id with id
-        dataset = session.query(Dataset).filter(Dataset.ds_id == dataset_id).first()
-        if not dataset:
-            raise ValueError(f"Dataset with ID {dataset_id} not found")
-        
-        dataset_version = DatasetVersion(
-            dataset_id=dataset.id,
-            version_id=dataset_version_create.version_id,
-            version_title=dataset_version_create.version_title,
-            type=dataset_version_create.type,
-            last_modified_date=dataset_version_create.last_modified_date,
-            updation_frequency=dataset_version_create.updation_frequency,
-            access_level=dataset_version_create.access_level,
-        )
-        
-        session.add(dataset_version)
-        session.commit()
-        session.refresh(dataset_version)
-        return dataset_version
-    except Exception as e:
-        logger.error(f"Error creating dataset version: {str(e)}")
-        raise
-    finally:
-        session.close()
 
 def check_if_admin(user: User):
     if user.is_group:

@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 import logging
-from dataio.api.api.routers.datasets import dataset_router
-from dataio.api.api.routers.users import user_router
+from dataio.api.api.routers.user import user_router
+from dataio.api.api.routers.admin import admin_router
 
 # Set up logging
 log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Dataset Management System API")
 
-app.include_router(dataset_router)
 app.include_router(user_router)
+app.include_router(admin_router)
 
 @app.get("/")
 async def root():

@@ -1,9 +1,11 @@
 import enum
 
+
 class AccessLevel(str, enum.Enum):
     NONE = "NONE"
     VIEW = "VIEW"
     DOWNLOAD = "DOWNLOAD"
+
 
 class SpatialResolution(str, enum.Enum):
     COUNTRY = "COUNTRY"
@@ -19,6 +21,7 @@ class SpatialResolution(str, enum.Enum):
     LAT_LONG = "LAT/LONG"
     OTHER = "OTHER"
 
+
 class TemporalResolution(str, enum.Enum):
     YEAR = "YEAR"
     MONTH = "MONTH"
@@ -27,10 +30,13 @@ class TemporalResolution(str, enum.Enum):
     HOUR = "HOUR"
     MINUTE = "MINUTE"
     SECOND = "SECOND"
+    NONE = "NONE"
+
 
 class VersionType(str, enum.Enum):
     PREPROCESSED = "PREPROCESSED"
     STANDARDISED = "STANDARDISED"
+
 
 class UpdationFrequency(str, enum.Enum):
     ONE_TIME = "ONE_TIME"
@@ -41,6 +47,7 @@ class UpdationFrequency(str, enum.Enum):
     HOURLY = "HOURLY"
     REAL_TIME = "REAL_TIME"
     ADHOC = "ADHOC"
+
 
 class ResourceType(str, enum.Enum):
     DATASET = "DATASET"

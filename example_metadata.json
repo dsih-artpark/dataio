@@ -1,0 +1,102 @@
+{
+    "table_name": "mh-district-livestock-poultry-pop-2019", 
+    "description": "20th Maharashra livestock census",
+    "source": "Pune Knowledge Cluster (PKC)",
+    "data_dictionary": {
+        "metadata.recordID": {
+          "description": "UUID generated using UUID4 from python3",
+          "comments": null,
+          "access": true
+        },
+        "country.ID": {
+          "description": "Country ID constructed using ISO 3166 alpha-2 code. e.g. country_IN for India",
+          "comments": null,
+          "access": true
+        },
+        "country.name": {
+          "description": "Country Name from ISO 3166",
+          "comments": null,
+          "access": true
+        },
+        "location.admin.hierarchy": {
+          "description": "Whether Revenue or ULB admin hierarchy",
+          "comments": "admin_0 if unknown",
+          "access": true
+        },
+        "state.ID": {
+          "description": "State ID or Union Territory ID constructed from Local Government Directory in India. Unique across the country.",
+          "comments": null,
+          "access": true
+        },
+        "state.name": {
+          "description": "State or Union Territory Name, as per Local Government Directory in India",
+          "comments": null,
+          "access": true
+        },
+        "district.ID": {
+          "description": "District ID constructed from Local Government Directory in India. Unique across the country.",
+          "comments": "If a district has LGD code 525, the ID is district_525. admin_0 if unknown.",
+          "access": true
+        },
+        "district.name": {
+          "description": "District Name, as per Local Government Directory",
+          "comments": "If corresponding ID is admin_0 (unknown), the name provided in the raw dataset is retained.",
+          "access": true
+        },
+        "metadata.category": {
+          "description": "Whether Commercial or Backyard",
+          "comments": null,
+          "access": true
+        },
+        "metadata.type": {
+          "description": "Whether Indigenous, Improved or Other",
+          "comments": null,
+          "access": true
+        },
+        "population.cocks": {
+          "description": "Cocks population",
+          "comments": null,
+          "access": true
+        },
+        "population.hens": {
+          "description": "Hens population",
+          "comments": null,
+          "access": true
+        },
+        "population.chickens": {
+          "description": "Chickens population",
+          "comments": null,
+          "access": true
+        },
+        "population.drakes": {
+          "description": "Drakes population",
+          "comments": null,
+          "access": true
+        },
+        "population.ducks": {
+          "description": "Ducks population",
+          "comments": null,
+          "access": true
+        },
+        "population.ducklings": {
+          "description": "Ducklings population",
+          "comments": null,
+          "access": true
+        },
+        "population.turkey": {
+          "description": "Turkey population",
+          "comments": null,
+          "access": true
+        },
+        "population.quails": {
+          "description": "Quails population",
+          "comments": null,
+          "access": true
+        },
+        "population.poultyBirds": {
+          "description": "Poultry birds (Gini Fowl, Ostrich, Emu,Geese) population",
+          "comments": null,
+          "access": true
+        }
+      }
+    }

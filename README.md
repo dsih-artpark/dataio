@@ -37,7 +37,7 @@ Starting the API Server
 uv run fastapi dev src/dataio/api/api
 ```
 
-To start with logging enabled
+To start with logging & autoreload enabled
 ```
 uvicorn src.dataio.api.api.main:app --log-config log_config.yml --reload
 ```

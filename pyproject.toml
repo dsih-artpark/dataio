@@ -13,5 +13,7 @@ dependencies = [
     "psycopg2>=2.9.10",
     "py-bcrypt>=0.4",
     "pyopenssl>=25.0.0",
+    "python-multipart>=0.0.20",
+    "requests>=2.32.4",
     "sqlalchemy>=2.0.41",
 ]

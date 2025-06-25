@@ -26,7 +26,7 @@ create type version_type as enum('PREPROCESSED', 'STANDARDISED');
 
 create type access_level as enum('NONE', 'VIEW', 'DOWNLOAD');
 
-create type temporal_resolution as enum('YEAR', 'MONTH', 'WEEK', 'DATE', 'HOUR', 'MINUTE', 'SECOND');
+create type temporal_resolution as enum('NONE', 'YEAR', 'MONTH', 'WEEK', 'DATE', 'HOUR', 'MINUTE', 'SECOND');
 
 create type spatial_resolution as enum('COUNTRY', 'STATE', 'UT', 'DISTRICT', 'SUBDISTRICT', 'MUNICIPALITY', 'VILLAGE', 'WARD', 'PRABHAG', 'ULB', 'LAT/LONG', 'OTHER');
 
@@ -49,9 +49,7 @@ create table if not exists raw_datasets (
     id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     rds_id VARCHAR(50) not null unique,
     title text not null,
-    source text not null,
-    data_owner_id integer not null,
-    foreign key (data_owner_id) references data_owners(id)
+    source text not null
 );
 
 create table if not exists tags (
@@ -64,8 +62,8 @@ create table if not exists tags (
 create table if not exists regions (
     id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     region_id text not null unique,
-    region_name text not null unique,
-    region_type spatial_resolution not null
+    region_name text not null,
+    parent_region_id text
 );
 
 CREATE TABLE if not exists datasets (

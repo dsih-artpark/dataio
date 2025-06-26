@@ -17,3 +17,22 @@ dependencies = [
     "requests>=2.32.4",
     "sqlalchemy>=2.0.41",
 ]
+
+[dependency-groups]
+docs = [
+    "furo>=2024.8.6",
+    "linkify-it-py>=2.0.3",
+    "myst-parser>=4.0.1",
+    "sphinx>=8.2.3",
+    "sphinx-autodoc2>=0.5.0",
+    "sphinx-copybutton>=0.5.2",
+    "sphinx-design>=0.6.1",
+    "sphinx-togglebutton>=0.3.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+default-groups = ["docs"]

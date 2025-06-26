@@ -37,6 +37,7 @@ extensions = [
     # Add other extensions as needed
 ]
 
+html_logo = "_static/logo.png"
 # autodoc2_packages = ["../../src/dataio"]
 
 # autodoc2_output_dir = "api"  # Where API docs will be stored
@@ -69,7 +70,7 @@ myst_enable_extensions = [
 
 html_theme = "furo"
 html_static_path = ["_static"]
-html_title = "dataio"
+html_title = "ARTPARK DataIO"
 html_theme_options: Dict[str, Any] = {
     "footer_icons": [
         {

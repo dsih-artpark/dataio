@@ -109,6 +109,7 @@ class User(Base):
     email = Column(Text, primary_key=True)
     key = Column(Text, nullable=True)
     is_group = Column(Boolean, nullable=False, default=False)
+    is_admin = Column(Boolean, nullable=False, default=False)
 
 
 class UserGroup(Base):

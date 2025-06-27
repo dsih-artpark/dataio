@@ -215,6 +215,17 @@ def determine_user_permissions(user: User):
 
     session = Session()
     try:
+        user_permissions = []
+        if user.is_admin is True:
+            user_permissions.append(
+                UserPermission(
+                    user_email=user.email,
+                    resource_type="*",
+                    resource_id="*",
+                    permission="DOWNLOAD",
+                )
+            )
+
         user_groups = (
             session.query(UserGroup).filter(UserGroup.user_email == user.email).all()
         )
@@ -222,7 +233,7 @@ def determine_user_permissions(user: User):
         for user_group in user_groups:
             group_permissions = determine_user_group_permissions(user_group.group_email)
 
-        user_permissions = (
+        user_permissions.extend(
             session.query(UserPermission)
             .filter(UserPermission.user_email == user.email)
             .all()

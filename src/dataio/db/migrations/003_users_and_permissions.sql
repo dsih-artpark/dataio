@@ -7,7 +7,8 @@ CREATE TABLE users (
     CONSTRAINT valid_user_group CHECK (
         (is_group = TRUE AND key IS NULL) OR
         (is_group = FALSE AND key is not null)
-    )
+    ),
+    is_admin BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE TABLE user_groups (

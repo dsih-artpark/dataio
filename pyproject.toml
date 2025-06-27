@@ -19,6 +19,9 @@ dependencies = [
 ]
 
 [dependency-groups]
+dev = [
+    "ipython>=9.3.0",
+]
 docs = [
     "furo>=2024.8.6",
     "linkify-it-py>=2.0.3",

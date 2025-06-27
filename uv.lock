@@ -275,6 +275,9 @@ dependencies = [
 ]
 
 [package.dev-dependencies]
+dev = [
+    { name = "ipython" },
+]
 docs = [
     { name = "furo" },
     { name = "linkify-it-py" },
@@ -302,6 +305,7 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
+dev = [{ name = "ipython", specifier = ">=9.3.0" }]
 docs = [
     { name = "furo", specifier = ">=2024.8.6" },
     { name = "linkify-it-py", specifier = ">=2.0.3" },

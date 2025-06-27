@@ -64,6 +64,7 @@ CREATE TYPE public.spatial_resolution AS ENUM (
 --
 
 CREATE TYPE public.temporal_resolution AS ENUM (
+    'NONE',
     'YEAR',
     'MONTH',
     'WEEK',
@@ -411,8 +412,7 @@ CREATE TABLE public.raw_datasets (
     id integer NOT NULL,
     rds_id character varying(50) NOT NULL,
     title text NOT NULL,
-    source text NOT NULL,
-    data_owner_id integer NOT NULL
+    source text NOT NULL
 );
 
 
@@ -424,7 +424,7 @@ CREATE TABLE public.regions (
     id integer NOT NULL,
     region_id text NOT NULL,
     region_name text NOT NULL,
-    region_type public.spatial_resolution NOT NULL
+    parent_region_id text
 );
 
 
@@ -628,6 +628,7 @@ CREATE TABLE public.users (
     email text NOT NULL,
     key text,
     is_group boolean DEFAULT false NOT NULL,
+    is_admin boolean DEFAULT false NOT NULL,
     CONSTRAINT valid_user_group CHECK ((((is_group = true) AND (key IS NULL)) OR ((is_group = false) AND (key IS NOT NULL))))
 );
 
@@ -749,14 +750,6 @@ ALTER TABLE ONLY public.regions
 
 ALTER TABLE ONLY public.regions
     ADD CONSTRAINT regions_region_id_key UNIQUE (region_id);
-
-
---
--- Name: regions regions_region_name_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.regions
-    ADD CONSTRAINT regions_region_name_key UNIQUE (region_name);
 
 
 --
@@ -899,14 +892,6 @@ ALTER TABLE ONLY public.datasets
 
 ALTER TABLE ONLY public.datasets
     ADD CONSTRAINT datasets_spatial_coverage_region_id_fkey FOREIGN KEY (spatial_coverage_region_id) REFERENCES public.regions(region_id);
-
-
---
--- Name: raw_datasets raw_datasets_data_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.raw_datasets
-    ADD CONSTRAINT raw_datasets_data_owner_id_fkey FOREIGN KEY (data_owner_id) REFERENCES public.data_owners(id);
 
 
 --

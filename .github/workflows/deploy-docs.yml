@@ -27,7 +27,7 @@ jobs:
         uses: peaceiris/actions-gh-pages@v4
         with:
           personal_token: ${{ secrets.DOCS_DEPLOY_TOKEN }}
-          publish_dir: ./docs/build/html
+          publish_dir: ./docs/build
           external_repository: dsih-artpark/dataio-docs
           publish_branch: ${{ github.ref_name }}
           user_name: github-actions[bot]

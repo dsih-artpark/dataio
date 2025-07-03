@@ -26,7 +26,7 @@ jobs:
       - name: Deploy to dataio-docs (staging branch)
         uses: peaceiris/actions-gh-pages@v4
         with:
-          github_token: ${{ secrets.DOCS_DEPLOY_TOKEN }}
+          personal_token: ${{ secrets.DOCS_DEPLOY_TOKEN }}
           publish_dir: ./docs/build/html
           external_repository: dsih-artpark/dataio-docs
           publish_branch: ${{ github.ref_name }}

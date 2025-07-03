@@ -148,3 +148,4 @@ dmypy.json
 data/*
 **/data_inserts/**
 *.zip
+.data/

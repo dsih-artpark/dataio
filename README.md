@@ -1,5 +1,6 @@
 # README - Dataio
 
+[![Netlify Status](https://api.netlify.com/api/v1/badges/83e85c01-20b5-40fb-a972-65f95b1646d4/deploy-status)](https://app.netlify.com/projects/dataio/deploys)
 Dataio is a Postgres and FASTAPI based Dataset Management System (DMS).
 
 ## Installation

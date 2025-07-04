@@ -91,10 +91,6 @@ When you list the datasets, you will get a list of dictionaries, each containing
 
 Downloading a complete dataset will download all the tables in the dataset to the specified directory. You can do this by passing the dataset's unique identifier to the `download_dataset` method. The client will download the dataset to the default directory `.data` within the current working directory.
 
-:::{warning}
-The download link is a signed link that will expire in 1 hour.
-:::
-
 ```python
 download_dir = client.download_dataset("TS0001DS9999") # Downloads the dataset to the default directory `.data` within the current working directory
 ```
@@ -141,3 +137,7 @@ client.list_dataset_tables("TS0001DS9999")
 ```
 
 When you list the tables in a dataset, you will get a list of dictionaries, each containing the metadata of a table. This will include the table's name, which is the `table_name` field in the table metadata, and will also include the table's download link, which is the `download_link` field in the table metadata. The download link is a signed link that will expire in 1 hour.
+
+:::{warning}
+The download link is a signed link that will expire in 1 hour.
+:::

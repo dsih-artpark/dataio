@@ -19,7 +19,7 @@ ARTPARK Data Management System (DMS) is a platform for managing and sharing data
 Using uv:
 
 ```bash
-uv install git+https://github.com/dsih-artpark/dataio.git
+uv add git+https://github.com/dsih-artpark/dataio.git
 ```
 
 or using pip:

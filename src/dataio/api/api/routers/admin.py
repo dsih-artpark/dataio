@@ -17,6 +17,10 @@ from dataio.api.api.models import (
     CollectionUpdate,
     RawDatasetCreate,
     TableMetadata,
+    UserGroupCreate,
+    ResourceGroupCreate,
+    ResourceGroupMemberCreate,
+    UserPermissionCreate,
 )
 from fastapi import HTTPException, Depends, UploadFile, APIRouter, Form
 from dataio.api.api.filestore import DatasetS3, ValidationError
@@ -49,6 +53,98 @@ async def create_user(
         logger.error(f"Failed to create user: {str(e)}")
         raise HTTPException(
             status_code=500, detail=f"Failed to create user. Contact support."
+        )
+
+
+@admin_router.get("/users", tags=["admin/users"])
+async def get_users(user: User = Depends(get_user)):
+    try:
+        if not database.check_if_admin(user):
+            raise HTTPException(
+                status_code=403, detail="You are not authorized to get users"
+            )
+        return database.get_users()
+    except Exception as e:
+        logger.error(f"Failed to get users: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get users. Contact support."
+        )
+
+
+@admin_router.post("/user-groups", tags=["admin/user-groups"])
+async def create_user_group(
+    user_group: UserGroupCreate, user: User = Depends(get_user)
+):
+    if not database.check_if_admin(user):
+        raise HTTPException(
+            status_code=403, detail="You are not authorized to create a user group"
+        )
+    try:
+        created_user_group = database.create_user_group(user_group)
+        return created_user_group
+    except Exception as e:
+        logger.error(f"Failed to create user group: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to create user group. Contact support."
+        )
+
+
+@admin_router.post("/resource-groups", tags=["admin/resource-groups"])
+async def create_resource_group(
+    resource_group: ResourceGroupCreate, user: User = Depends(get_user)
+):
+    if not database.check_if_admin(user):
+        raise HTTPException(
+            status_code=403, detail="You are not authorized to create a resource group"
+        )
+    try:
+        created_resource_group = database.create_resource_group(resource_group)
+        return created_resource_group
+    except Exception as e:
+        logger.error(f"Failed to create resource group: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to create resource group. Contact support."
+        )
+
+
+@admin_router.post("/resource-group-members", tags=["admin/resource-group-members"])
+async def create_resource_group_member(
+    resource_group_member: ResourceGroupMemberCreate, user: User = Depends(get_user)
+):
+    if not database.check_if_admin(user):
+        raise HTTPException(
+            status_code=403,
+            detail="You are not authorized to create a resource group member",
+        )
+    try:
+        created_resource_group_member = database.create_resource_group_member(
+            resource_group_member
+        )
+        return created_resource_group_member
+    except Exception as e:
+        logger.error(f"Failed to create resource group member: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create resource group member. Contact support.",
+        )
+
+
+@admin_router.post("/user-permissions", tags=["admin/user-permissions"])
+async def create_user_permission(
+    user_permission: UserPermissionCreate, user: User = Depends(get_user)
+):
+    if not database.check_if_admin(user):
+        raise HTTPException(
+            status_code=403, detail="You are not authorized to create a user permission"
+        )
+    try:
+        created_user_permission = database.create_user_permission(user_permission)
+        return created_user_permission
+    except Exception as e:
+        logger.error(f"Failed to create user permission: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create user permission. Contact support.",
         )
 
 

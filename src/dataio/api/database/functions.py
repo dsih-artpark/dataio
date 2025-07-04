@@ -4,8 +4,11 @@ from sqlalchemy.orm import joinedload
 import bcrypt
 import secrets
 import dateutil
+from sqlalchemy import select
 
 from dataio.api.database.config import Session
+from dataio.api.database.enums import ResourceType
+
 from dataio.api.database.models import (
     Dataset,
     AccessLevel,
@@ -30,6 +33,10 @@ from dataio.api.api.models import (
     DataOwnerUpdate,
     CollectionUpdate,
     RawDatasetCreate,
+    UserGroupCreate,
+    ResourceGroupCreate,
+    UserPermissionCreate,
+    ResourceGroupMemberCreate,
 )
 
 # Set up logging
@@ -230,8 +237,11 @@ def determine_user_permissions(user: User):
             session.query(UserGroup).filter(UserGroup.user_email == user.email).all()
         )
 
+        group_permissions = []
         for user_group in user_groups:
-            group_permissions = determine_user_group_permissions(user_group.group_email)
+            group_permissions.extend(
+                determine_user_group_permissions(user_group.group_email)
+            )
 
         user_permissions.extend(
             session.query(UserPermission)
@@ -239,12 +249,15 @@ def determine_user_permissions(user: User):
             .all()
         )
         user_permissions.extend(group_permissions)
-
+        # print(len(user_permissions))
+        resource_group_replacements = {}
         for user_permission in user_permissions:
-            if user_permission.resource_type == "GROUP":
+            if user_permission.resource_type == ResourceType.GROUP:
                 group_members = get_resource_group_members(user_permission.resource_id)
+                resource_group_replacements[user_permission] = []
+                # print(group_members)
                 for group_member in group_members:
-                    user_permissions.append(
+                    resource_group_replacements[user_permission].append(
                         UserPermission(
                             user_email=user_permission.user_email,
                             resource_type=group_member.resource_type,
@@ -252,7 +265,12 @@ def determine_user_permissions(user: User):
                             permission=user_permission.permission,
                         )
                     )
-                user_permissions.remove(user_permission)
+                # user_permissions.remove(user_permission)
+
+        for item in resource_group_replacements:
+            user_permissions.remove(item)
+            user_permissions.extend(resource_group_replacements[item])
+
         return user_permissions
     except Exception as e:
         logger.error(f"Error determining user permissions: {str(e)}")
@@ -341,6 +359,64 @@ def create_user(user_create: UserCreate):
         session.close()
 
 
+def create_user_group(user_group: UserGroupCreate):
+    session = Session()
+    try:
+        user_group = UserGroup(**user_group.model_dump())
+        session.add(user_group)
+        session.commit()
+        session.refresh(user_group)
+    except Exception as e:
+        logger.error(f"Error creating user group: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def create_resource_group(resource_group: ResourceGroupCreate):
+    session = Session()
+    try:
+        resource_group = ResourceGroup(**resource_group.model_dump())
+        session.add(resource_group)
+        session.commit()
+        session.refresh(resource_group)
+    except Exception as e:
+        logger.error(f"Error creating resource group: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def create_resource_group_member(resource_group_member: ResourceGroupMemberCreate):
+    session = Session()
+    try:
+        resource_group_member = ResourceGroupMember(
+            **resource_group_member.model_dump()
+        )
+        session.add(resource_group_member)
+        session.commit()
+        session.refresh(resource_group_member)
+    except Exception as e:
+        logger.error(f"Error creating resource group member: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def create_user_permission(user_permission: UserPermissionCreate):
+    session = Session()
+    try:
+        user_permission = UserPermission(**user_permission.model_dump())
+        session.add(user_permission)
+        session.commit()
+        session.refresh(user_permission)
+    except Exception as e:
+        logger.error(f"Error creating user permission: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
 def create_data_owner(data_owner: DataOwnerCreate):
     session = Session()
     try:
@@ -381,6 +457,24 @@ def get_data_owners():
         raise
     finally:
         session.close()
+
+
+def get_users():
+    session = Session()
+    try:
+        results = session.execute(select(User.email, User.is_group, User.is_admin))
+        users = []
+        for result in results:
+            users.append(
+                {
+                    "email": result.email,
+                    "is_group": result.is_group,
+                    "is_admin": result.is_admin,
+                }
+            )
+        return users
+    except Exception as e:
+        logger.error(f"Error getting users: {str(e)}")
 
 
 def get_collections():

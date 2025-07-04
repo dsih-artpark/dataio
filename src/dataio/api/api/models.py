@@ -1,6 +1,11 @@
 from typing import List, Optional, Dict
 from pydantic import BaseModel, Field
-from dataio.api.database.enums import AccessLevel, VersionType, UpdationFrequency
+from dataio.api.database.enums import (
+    AccessLevel,
+    VersionType,
+    UpdationFrequency,
+    ResourceType,
+)
 
 
 class RawDatasetCreate(BaseModel):
@@ -51,6 +56,30 @@ class User(BaseModel):
 class UserCreate(BaseModel):
     email: str
     is_group: bool
+
+
+class UserGroupCreate(BaseModel):
+    group_email: str
+    user_email: str
+
+
+class ResourceGroupCreate(BaseModel):
+    resource_group_id: str
+    group_name: str
+
+
+class UserPermissionCreate(BaseModel):
+    user_email: str
+    resource_type: ResourceType
+    resource_id: str
+    permission: AccessLevel
+
+
+class ResourceGroupMemberCreate(BaseModel):
+    resource_group_id: str
+    resource_id: str
+    resource_type: ResourceType
+    resource_json: Optional[dict] = None
 
 
 class UserReturn(BaseModel):

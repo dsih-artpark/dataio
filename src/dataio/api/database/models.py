@@ -144,4 +144,4 @@ class ResourceGroupMember(Base):
     )
     resource_id = Column(Text, nullable=False, primary_key=True)
     resource_type = Column(SQLEnum(ResourceType), nullable=False)
-    resource_json = Column(JSONB, nullable=False)
+    resource_json = Column(JSONB, nullable=True)

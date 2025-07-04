@@ -85,14 +85,7 @@ def generate_group(email):
 def add_test_users():
     conn = connect_to_db()
     cur = conn.cursor()
-    test_users = [
-        generate_user("admin@artpark.in", True),
-        generate_group("data_group@artpark.in"),
-        generate_user("analyst@artpark.in", False),
-        generate_group("livestock_group@artpark.in"),
-        generate_user("external_collaborator@psu.edu", False),
-        generate_user("public_user@artpark.in", False),
-    ]
+    test_users = [generate_user("admin@artpark.in", True)]
 
     print(test_users)
 
@@ -117,13 +110,7 @@ def add_test_users():
 def add_groups():
     conn = connect_to_db()
     cur = conn.cursor()
-    group_mapping = {
-        "data_group@artpark.in": ["admin@artpark.in", "analyst@artpark.in"],
-        "livestock_group@artpark.in": [
-            "analyst@artpark.in",
-            "external_collaborator@psu.edu",
-        ],
-    }
+    group_mapping = {}
     for group, users in group_mapping.items():
         for user in users:
             cur.execute(
@@ -187,30 +174,30 @@ def add_resource_groups():
 
 def add_user_permissions():
     user_permissions = [
-        {
-            "user_email": "admin@artpark.in",
-            "resource_type": "DATASET",
-            "resource_id": "GS0012DS0051",
-            "permission": "DOWNLOAD",
-        },
-        {
-            "user_email": "analyst@artpark.in",
-            "resource_type": "GROUP",
-            "resource_id": "livestock_group",
-            "permission": "DOWNLOAD",
-        },
-        {
-            "user_email": "external_collaborator@psu.edu",
-            "resource_type": "GROUP",
-            "resource_id": "livestock_group",
-            "permission": "DOWNLOAD",
-        },
-        {
-            "user_email": "public_user@artpark.in",
-            "resource_type": "GROUP",
-            "resource_id": "livestock_group",
-            "permission": "VIEW",
-        },
+        # {
+        #     "user_email": "admin@artpark.in",
+        #     "resource_type": "DATASET",
+        #     "resource_id": "GS0012DS0051",
+        #     "permission": "DOWNLOAD",
+        # },
+        # {
+        #     "user_email": "analyst@artpark.in",
+        #     "resource_type": "GROUP",
+        #     "resource_id": "livestock_group",
+        #     "permission": "DOWNLOAD",
+        # },
+        # {
+        #     "user_email": "external_collaborator@psu.edu",
+        #     "resource_type": "GROUP",
+        #     "resource_id": "livestock_group",
+        #     "permission": "DOWNLOAD",
+        # },
+        # {
+        #     "user_email": "public_user@artpark.in",
+        #     "resource_type": "GROUP",
+        #     "resource_id": "livestock_group",
+        #     "permission": "VIEW",
+        # },
     ]
 
     conn = connect_to_db()

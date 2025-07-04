@@ -59,7 +59,8 @@ async def get_dataset_table_list(
 
     try:
         user_permissions = database.determine_user_permissions(user)
-
+        # for permission in user_permissions:
+        #     print(permission.__dict__)
         if bucket_type == VersionType.PREPROCESSED and not user_has_preprocessed_access(
             user_permissions
         ):

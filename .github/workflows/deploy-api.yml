@@ -27,6 +27,7 @@ jobs:
         username: ${{ secrets.LIGHTSAIL_USER }}
         key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
         script: |
+          export PATH="/home/ubuntu/.local/bin:$PATH"
           cd /home/ubuntu/staging/dataio
           uv sync
           sudo supervisorctl restart dataio-app

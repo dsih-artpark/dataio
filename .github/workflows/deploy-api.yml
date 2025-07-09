@@ -23,9 +23,9 @@ jobs:
     - name: UV Sync & supervisorctl restart
       uses: appleboy/ssh-action@master
       with:
-        host: ${{ secrets.REMOTE_HOST }}
-        username: ${{ secrets.REMOTE_USER }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        host: ${{ secrets.LIGHTSAIL_IP }}
+        username: ${{ secrets.LIGHTSAIL_USER }}
+        key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
         script: |
           cd /home/ubuntu/staging/dataio
           uv sync

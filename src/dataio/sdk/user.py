@@ -1,4 +1,5 @@
 import os
+from typing import Union
 
 import dotenv
 import requests
@@ -16,7 +17,9 @@ class DataIOAPI:
 
     """
 
-    def __init__(self, base_url: str = None, api_key: str = None):
+    def __init__(
+        self, base_url: Union[str, None] = None, api_key: Union[str, None] = None
+    ):
         dotenv.load_dotenv()
         if base_url is None:
             base_url = os.getenv("DATAIO_API_BASE_URL", None)

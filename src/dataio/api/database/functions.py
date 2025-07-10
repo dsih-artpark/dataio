@@ -127,6 +127,20 @@ def create_dataset(dataset_create: DatasetCreate):
                 f"Data owner with name {dataset_create.data_owner_name} not found"
             )
 
+        if dataset_create.temporal_coverage_start_date is None:
+            tc_start_date = None
+        else:
+            tc_start_date = dateutil.parser.parse(
+                dataset_create.temporal_coverage_start_date
+            )
+
+        if dataset_create.temporal_coverage_end_date is None:
+            tc_end_date = None
+        else:
+            tc_end_date = dateutil.parser.parse(
+                dataset_create.temporal_coverage_end_date
+            )
+
         dataset = Dataset(
             ds_id=dataset_create.ds_id,
             title=dataset_create.title,
@@ -135,12 +149,8 @@ def create_dataset(dataset_create: DatasetCreate):
             description=dataset_create.description,
             spatial_coverage_region_id=dataset_create.spatial_coverage_region_id,
             spatial_resolution=dataset_create.spatial_resolution,
-            temporal_coverage_start_date=dateutil.parser.parse(
-                dataset_create.temporal_coverage_start_date
-            ),
-            temporal_coverage_end_date=dateutil.parser.parse(
-                dataset_create.temporal_coverage_end_date
-            ),
+            temporal_coverage_start_date=tc_start_date,
+            temporal_coverage_end_date=tc_end_date,
             temporal_resolution=dataset_create.temporal_resolution,
             access_level=dataset_create.access_level,
             additional_metadata=dataset_create.additional_metadata,
@@ -150,16 +160,17 @@ def create_dataset(dataset_create: DatasetCreate):
         session.commit()
         session.refresh(dataset)
 
-        for tag in dataset_create.tags:
-            # check if tag exists
-            existing_tag = session.query(Tag).filter(Tag.tag_name == tag).first()
-            if not existing_tag:
-                existing_tag = Tag(tag_name=tag)
-                session.add(existing_tag)
-                session.commit()
-                session.refresh(existing_tag)
-            dataset_tag = DatasetTag(dataset_id=dataset.id, tag_id=existing_tag.id)
-            session.add(dataset_tag)
+        if dataset_create.tags:
+            for tag in dataset_create.tags:
+                # check if tag exists
+                existing_tag = session.query(Tag).filter(Tag.tag_name == tag).first()
+                if not existing_tag:
+                    existing_tag = Tag(tag_name=tag)
+                    session.add(existing_tag)
+                    session.commit()
+                    session.refresh(existing_tag)
+                dataset_tag = DatasetTag(dataset_id=dataset.id, tag_id=existing_tag.id)
+                session.add(dataset_tag)
 
         for raw_dataset_id in dataset_create.raw_dataset_ids:
             raw_dataset = (

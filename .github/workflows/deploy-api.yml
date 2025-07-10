@@ -2,7 +2,7 @@ name: dataio API CI/CD to lightsail
 
 on:
   push:
-    branches: [release/staging]
+    branches: [staging]
 
 jobs:
   deploy:

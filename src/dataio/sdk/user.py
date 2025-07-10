@@ -1,4 +1,6 @@
 import os
+import re
+from typing import Optional
 
 import dotenv
 import requests
@@ -16,7 +18,7 @@ class DataIOAPI:
 
     """
 
-    def __init__(self, base_url: str = None, api_key: str = None):
+    def __init__(self, base_url: Optional[str] = None, api_key: Optional[str] = None):
         dotenv.load_dotenv()
         if base_url is None:
             base_url = os.getenv("DATAIO_API_BASE_URL", None)
@@ -140,7 +142,8 @@ class DataIOAPI:
             each_ds["title"] for each_ds in ds_details if each_ds["ds_id"] == dataset_id
         ][0]
 
-        ds_dir = f"{data_dir}/{dataset_id}-{ds_title.replace(' ', '_')}"
+        ds_title = re.sub(r"[^a-zA-Z0-9]", "_", ds_title)
+        ds_dir = f"{data_dir}/{dataset_id}-{ds_title}"
         if not os.path.exists(ds_dir):
             os.makedirs(ds_dir)
 

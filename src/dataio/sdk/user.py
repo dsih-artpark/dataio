@@ -87,99 +87,138 @@ class DataIOAPI:
         response.raise_for_status()
         return response.content
 
-    def _get_download_links(
-        self, dataset_id, bucket_type="STANDARDISED", get_metadata=True
-    ):
+    def get_dataset_details(self, dataset_id):
+        """Get the details of a dataset - this is the dataset level metadata.
+
+        :param dataset_id: The ID of the dataset to get details for. This is the ``ds_id`` field in the dataset metadata.
+        :type dataset_id: str
+        :returns: The dataset details.
+        """
+        dataset_list = self.list_datasets()
+        dataset_details = [
+            each_ds for each_ds in dataset_list if each_ds["ds_id"] == dataset_id
+        ]
+        if len(dataset_details) == 0:
+            raise ValueError(f"Dataset with ID {dataset_id} not found")
+        dataset_details = dataset_details[0]
+        return dataset_details
+
+    def _get_download_links(self, dataset_id, bucket_type="STANDARDISED"):
         """Get download links for a dataset.
 
         :param dataset_id: The ID of the dataset to get download links for. This is the ``ds_id`` field in the dataset metadata.
         :type dataset_id: str
         :param bucket_type: The type of bucket to get download links for. Defaults to "STANDARDISED". Other option is "PREPROCESSED".
         :type bucket_type: str
-        :param get_metadata: Whether to return metadata for each table as a separate dictionary. Defaults to True.
-        :type get_metadata: bool
         :returns: A dictionary of download links.
         :rtype: dict
         """
         bucket_type = bucket_type.upper()
         table_list = self.list_dataset_tables(dataset_id, bucket_type)
         table_links = {}
-        table_metadata = {}
 
         for each_table in table_list:
             table_links[each_table["table_name"]] = each_table["download_link"]
-            if get_metadata:
-                table_metadata[each_table["table_name"]] = each_table["metadata"]
 
-        if get_metadata:
-            return table_links, table_metadata
-        else:
-            return table_links
+        return table_links
+
+    def construct_dataset_metadata(
+        self,
+        dataset_details: Optional[dict] = None,
+        bucket_type="STANDARDISED",
+    ):
+        """Get the metadata for a dataset. This combines dataset level metadata with table level metadata.
+
+        :param dataset_details: The dataset details. This will be validated for the presence of the following fields: title, description, collection, category_name, collection_name.
+        :type dataset_details: dict
+        :param bucket_type: The type of bucket to get the table metadata for. Defaults to "STANDARDISED". Other option is "PREPROCESSED".
+        :type bucket_type: str
+        :returns: The dataset metadata. This includes the dataset title, description, category, collection, and tables with their table-level metadata.
+        :rtype: dict
+        """
+        bucket_type = bucket_type.upper()
+        assert dataset_details is not None, "dataset_details must be provided"
+        assert isinstance(dataset_details, dict), "dataset_details must be a dictionary"
+        assert "title" in dataset_details, "dataset_details must contain a title"
+        assert "description" in dataset_details, (
+            "dataset_details must contain a description"
+        )
+        assert "collection" in dataset_details, (
+            "dataset_details must contain a collection"
+        )
+        assert "category_name" in dataset_details["collection"], (
+            "dataset_details must contain a category_name"
+        )
+        assert "collection_name" in dataset_details["collection"], (
+            "dataset_details must contain a collection_name"
+        )
+
+        table_list = self.list_dataset_tables(dataset_details["ds_id"], bucket_type)
+        table_metadata = {
+            each_table["table_name"]: each_table["metadata"]
+            for each_table in table_list
+        }
+
+        metadata = {}
+        metadata["dataset_title"] = dataset_details["title"]
+        metadata["dataset_description"] = dataset_details["description"]
+        metadata["category"] = dataset_details["collection"]["category_name"]
+        metadata["collection"] = dataset_details["collection"]["collection_name"]
+        metadata["dataset_tables"] = table_metadata
+
+        return metadata
 
     def download_dataset(
         self,
         dataset_id,
         bucket_type="STANDARDISED",
-        data_dir=".data",
+        root_dir=".data",
         get_metadata=True,
-        metadata_as_yaml=True,
+        metadata_format="yaml",
     ):
-        """Download a dataset.
+        """Download a dataset, along with its metadata.
 
         :param dataset_id: The unique identifier of the dataset to download. This is the ``ds_id`` field in the dataset metadata.
         :type dataset_id: str
         :param bucket_type: The type of bucket to download. Defaults to "STANDARDISED". Other option is "PREPROCESSED".
-        :type bucket_type: str
-        :param data_dir: The directory to download the dataset to. Defaults to ".data".
-        :type data_dir: str
+        :type bucket_type: str (default: "STANDARDISED")
+        :param root_dir: The directory to download the dataset to. Defaults to ".data".
+        :type root_dir: str (default: ".data")
         :param get_metadata: Whether to include metadata in the download links. Defaults to True.
-        :type get_metadata: bool
-        :param metadata_as_yaml: Whether to download the metadata as a YAML file. Defaults to True.
-        :type metadata_as_yaml: bool
+        :type get_metadata: bool (default: True)
+        :param metadata_format: The format to download the metadata in. Defaults to "yaml". Other option is "json".
+        :type metadata_format: str (default: "yaml")
         :returns: The directory the dataset was downloaded to.
         :rtype: str
         """
+        # Set up the dataset directory
         bucket_type = bucket_type.upper()
-        download_links, table_metadata = self._get_download_links(
-            dataset_id, bucket_type, get_metadata=get_metadata
+        dataset_details = self.get_dataset_details(dataset_id)
+        dataset_title = re.sub(
+            r"_+", "_", re.sub(r"[^a-zA-Z0-9]", "_", dataset_details["title"])
         )
-        if not os.path.exists(data_dir):
-            os.makedirs(data_dir)
+        dataset_dir = f"{root_dir}/{dataset_id}-{dataset_title}"
+        os.makedirs(dataset_dir, exist_ok=True)
 
-        ds_details = self.list_datasets()
-        ds_details = [
-            each_ds for each_ds in ds_details if each_ds["ds_id"] == dataset_id
-        ][0]
-
-        ds_title = re.sub(r"_+", "_", re.sub(r"[^a-zA-Z0-9]", "_", ds_details["title"]))
-        ds_dir = f"{data_dir}/{dataset_id}-{ds_title}"
-        if not os.path.exists(ds_dir):
-            os.makedirs(ds_dir)
+        # Get the download links for the dataset
+        download_links = self._get_download_links(dataset_id, bucket_type)
 
         for table_name, table_link in download_links.items():
             file_content = self._get_file(table_link)
-            with open(f"{ds_dir}/{table_name.replace('-', '_')}.csv", "wb") as f:
+            with open(f"{dataset_dir}/{table_name.replace('-', '_')}.csv", "wb") as f:
                 f.write(file_content)
 
-        metadata = {}  # TODO: Use OrderedDict and dump in correct order
         if get_metadata:
-            metadata["dataset_title"] = ds_title
-            metadata["dataset_description"] = ds_details["description"]
-            metadata["category"] = ds_details["collection"]["category_name"]
-            metadata["collection"] = ds_details["collection"]["collection_name"]
-            metadata["dataset_tables"] = table_metadata
+            metadata = self.construct_dataset_metadata(dataset_details, bucket_type)
+            if metadata_format.lower() == "yaml":
+                with open(f"{dataset_dir}/metadata.yaml", "w") as f:
+                    yaml.dump(metadata, f, indent=4)
+            elif metadata_format.lower() == "json":
+                with open(f"{dataset_dir}/metadata.json", "w") as f:
+                    json.dump(metadata, f, indent=4)
+            else:
+                raise ValueError(
+                    f"Invalid metadata format: {metadata_format.lower()}. Valid options are 'yaml' and 'json'."
+                )
 
-        if get_metadata and metadata_as_yaml:
-            with open(f"{ds_dir}/metadata.yaml", "w") as f:
-                yaml.dump(metadata, f, indent=4)
-            if os.path.exists(f"{ds_dir}/metadata.json"):
-                os.remove(f"{ds_dir}/metadata.json")
-        elif get_metadata and not metadata_as_yaml:
-            with open(f"{ds_dir}/metadata.json", "w") as f:
-                json.dump(metadata, f, indent=4)
-            if os.path.exists(f"{ds_dir}/metadata.yaml"):
-                os.remove(f"{ds_dir}/metadata.yaml")
-        elif not get_metadata:
-            pass
-
-        return ds_dir
+        return dataset_dir

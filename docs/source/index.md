@@ -89,7 +89,7 @@ When you list the datasets, you will get a list of dictionaries, each containing
 
 ### Downloading a Complete Dataset
 
-Downloading a complete dataset will download all the tables in the dataset to the specified directory. You can do this by passing the dataset's unique identifier to the `download_dataset` method. The client will download the dataset to the default directory `.data` within the current working directory. By default, the metadata will be downloaded to the root of the dataset directory as a YAML file. This can be controlled by passing the `get_metadata` and `metadata_as_yaml` arguments to the `download_dataset` method.
+Downloading a complete dataset will download all the tables in the dataset to the specified directory. You can do this by passing the dataset's unique identifier to the `download_dataset` method. The client will download the dataset to the default directory `.data` within the current working directory. By default, the metadata will be downloaded to the root of the dataset directory as a YAML file. This can be controlled by passing the `get_metadata` and `metadata_format` arguments to the `download_dataset` method.
 
 In a future release, the README file of the dataset will be added to the dataset directory.
 

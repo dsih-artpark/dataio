@@ -272,6 +272,7 @@ dependencies = [
     { name = "pyopenssl" },
     { name = "python-dotenv" },
     { name = "python-multipart" },
+    { name = "pyyaml" },
     { name = "requests" },
     { name = "sqlalchemy" },
 ]
@@ -305,6 +306,7 @@ requires-dist = [
     { name = "pyopenssl", specifier = ">=25.0.0" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
     { name = "python-multipart", specifier = ">=0.0.20" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "requests", specifier = ">=2.32.4" },
     { name = "sqlalchemy", specifier = ">=2.0.41" },
 ]

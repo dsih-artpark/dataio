@@ -81,13 +81,15 @@ def get_datasets(
             user_permission
             for user_permission in user_permissions
             if user_permission.resource_type == "DATASET"
+            or user_permission.resource_type == "*"
         ]
 
         for dataset in datasets:
             possible_permissions = [
                 user_permission.permission
                 for user_permission in dataset_user_permissions
-                if user_permission.resource_id == dataset.ds_id
+                if (user_permission.resource_id == dataset.ds_id)
+                or (user_permission.resource_id == "*")
             ]
             possible_permissions.append(dataset.access_level)
             dataset.access_level = determine_highest_permission(possible_permissions)

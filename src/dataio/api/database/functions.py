@@ -157,8 +157,6 @@ def create_dataset(dataset_create: DatasetCreate):
         )
 
         session.add(dataset)
-        session.commit()
-        session.refresh(dataset)
 
         if dataset_create.tags:
             for tag in dataset_create.tags:
@@ -167,8 +165,6 @@ def create_dataset(dataset_create: DatasetCreate):
                 if not existing_tag:
                     existing_tag = Tag(tag_name=tag)
                     session.add(existing_tag)
-                    session.commit()
-                    session.refresh(existing_tag)
                 dataset_tag = DatasetTag(dataset_id=dataset.id, tag_id=existing_tag.id)
                 session.add(dataset_tag)
 

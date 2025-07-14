@@ -13,8 +13,6 @@ TEST_EXT_COLLABORATOR_KEY = os.getenv("TEST_EXT_COLLABORATOR_KEY")
 
 client = TestClient(app)
 
-admin_headers = {"X-API-Key": TEST_ADMIN_KEY}
-
 
 def test_read_main():
     response = client.get("/")
@@ -23,7 +21,7 @@ def test_read_main():
 
 
 def test_get_datasets_for_admin():
-    response = client.get("/api/v1/datasets", headers=admin_headers)
+    response = client.get("/api/v1/datasets", headers={"X-API-Key": TEST_ADMIN_KEY})
     assert response.status_code == 200
     assert isinstance(response.json(), list)
     pytest.admin_datasets_object = response.json()

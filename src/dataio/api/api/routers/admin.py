@@ -228,6 +228,11 @@ async def create_dataset_table(
             status_code=403, detail="You are not authorized to create a dataset file"
         )
     try:
+        # Check if dataset exists
+
+        if not database.check_if_dataset_exists(dataset_id):
+            raise ValidationError("Dataset does not exist")
+
         table_metadata = TableMetadata.model_validate_json(
             table_metadata_file.file.read()
         )

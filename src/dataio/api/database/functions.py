@@ -44,6 +44,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def check_if_dataset_exists(dataset_id: str):
+    session = Session()
+    try:
+        dataset = session.query(Dataset).filter(Dataset.ds_id == dataset_id).first()
+        return dataset is not None
+    except Exception as e:
+        logger.error(f"Error checking if dataset exists: {str(e)}")
+        raise
+
+
 def get_datasets(
     limit: int = 100, offset: int = 0, user_permissions: List[UserPermission] = None
 ) -> List[Dataset]:

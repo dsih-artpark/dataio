@@ -1,3 +1,7 @@
+from dataio.api.database.functions import get_dataset
+from dataio.api.database.models import AccessLevel
+
+
 def user_has_preprocessed_access(user_permissions):
     for user_permission in user_permissions:
         if (
@@ -9,8 +13,13 @@ def user_has_preprocessed_access(user_permissions):
 
 
 def user_has_dataset_download_access(user_permissions, dataset_id):
+    # check if dataset is public download
+    dataset = get_dataset(dataset_id)
+    if dataset.access_level == AccessLevel.DOWNLOAD:
+        return True
+
     for user_permission in user_permissions:
-        print(user_permission)
+        print(user_permission.__dict__)
         if (
             user_permission.resource_type == "DATASET"
             and user_permission.resource_id == dataset_id

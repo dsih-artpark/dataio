@@ -24,6 +24,7 @@ from dataio.api.database.models import (
     RawDataset,
     DatasetRawDataset,
 )
+from dataio.api.auth.permissions import determine_highest_permission
 from dataio.api.api.models import (
     DatasetCreate,
     UserCreate,
@@ -52,6 +53,18 @@ def check_if_dataset_exists(dataset_id: str):
     except Exception as e:
         logger.error(f"Error checking if dataset exists: {str(e)}")
         raise
+
+
+def get_dataset(dataset_id: str):
+    session = Session()
+    try:
+        dataset = session.query(Dataset).filter(Dataset.ds_id == dataset_id).first()
+        return dataset
+    except Exception as e:
+        logger.error(f"Error getting dataset: {str(e)}")
+        raise
+    finally:
+        session.close()
 
 
 def get_datasets(
@@ -220,100 +233,6 @@ def create_dataset(dataset_create: DatasetCreate):
 #         raise
 
 
-def check_if_admin(user: User):
-    if user.is_group:
-        raise ValueError("User is a group")
-    return user.email == "admin@artpark.in"
-
-
-def determine_highest_permission(permissions: List[AccessLevel]):
-    if AccessLevel.DOWNLOAD in permissions:
-        return AccessLevel.DOWNLOAD
-    elif AccessLevel.VIEW in permissions:
-        return AccessLevel.VIEW
-    else:
-        return AccessLevel.NONE
-
-
-def determine_user_permissions(user: User):
-    if user.is_group:
-        raise ValueError("User is a group")
-
-    session = Session()
-    try:
-        user_permissions = []
-        if user.is_admin is True:
-            user_permissions.append(
-                UserPermission(
-                    user_email=user.email,
-                    resource_type="*",
-                    resource_id="*",
-                    permission="DOWNLOAD",
-                )
-            )
-
-        user_groups = (
-            session.query(UserGroup).filter(UserGroup.user_email == user.email).all()
-        )
-
-        group_permissions = []
-        for user_group in user_groups:
-            group_permissions.extend(
-                determine_user_group_permissions(user_group.group_email)
-            )
-
-        user_permissions.extend(
-            session.query(UserPermission)
-            .filter(UserPermission.user_email == user.email)
-            .all()
-        )
-        user_permissions.extend(group_permissions)
-        # print(len(user_permissions))
-        resource_group_replacements = {}
-        for user_permission in user_permissions:
-            if user_permission.resource_type == ResourceType.GROUP:
-                group_members = get_resource_group_members(user_permission.resource_id)
-                resource_group_replacements[user_permission] = []
-                # print(group_members)
-                for group_member in group_members:
-                    resource_group_replacements[user_permission].append(
-                        UserPermission(
-                            user_email=user_permission.user_email,
-                            resource_type=group_member.resource_type,
-                            resource_id=group_member.resource_id,
-                            permission=user_permission.permission,
-                        )
-                    )
-                # user_permissions.remove(user_permission)
-
-        for item in resource_group_replacements:
-            user_permissions.remove(item)
-            user_permissions.extend(resource_group_replacements[item])
-
-        return user_permissions
-    except Exception as e:
-        logger.error(f"Error determining user permissions: {str(e)}")
-        raise
-    finally:
-        session.close()
-
-
-def determine_user_group_permissions(group_email: str):
-    session = Session()
-    try:
-        user_permissions = (
-            session.query(UserPermission)
-            .filter(UserPermission.user_email == group_email)
-            .all()
-        )
-        return user_permissions
-    except Exception as e:
-        logger.error(f"Error determining user group permissions: {str(e)}")
-        raise
-    finally:
-        session.close()
-
-
 def get_resource_group_members(resource_group_id: str):
     session = Session()
     try:
@@ -328,19 +247,6 @@ def get_resource_group_members(resource_group_id: str):
         raise
     finally:
         session.close()
-
-
-def check_api_key(api_key: str) -> bool:
-    try:
-        users = Session().query(User).all()
-        for user in users:
-            if user.key:
-                if bcrypt.checkpw(api_key.encode("utf-8"), user.key):
-                    print("user found - key verified")
-                    return user
-        return None
-    except Exception as e:
-        logger.error(f"Error checking API key: {str(e)}")
 
 
 def create_user(user_create: UserCreate):

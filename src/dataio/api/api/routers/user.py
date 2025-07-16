@@ -2,7 +2,7 @@ from fastapi import HTTPException, Query, Depends, APIRouter
 import logging
 from dataio.api.database import functions as database
 from dataio.api.api.models import User, VersionType
-from dataio.api.api.auth import get_user
+from dataio.api.auth import get_user, determine_user_permissions
 from dataio.api.api.filestore import DatasetS3
 from dataio.api.api.utils import (
     user_has_preprocessed_access,
@@ -33,7 +33,7 @@ async def get_datasets(
     - List of datasets
     """
     try:
-        user_permissions = database.determine_user_permissions(user)
+        user_permissions = determine_user_permissions(user)
         datasets = database.get_datasets(limit=limit, user_permissions=user_permissions)
         if not datasets:
             return []
@@ -58,7 +58,7 @@ async def get_dataset_table_list(
     # TODO: Response should have table metadata as well.
 
     try:
-        user_permissions = database.determine_user_permissions(user)
+        user_permissions = determine_user_permissions(user)
         # for permission in user_permissions:
         #     print(permission.__dict__)
         if bucket_type == VersionType.PREPROCESSED and not user_has_preprocessed_access(

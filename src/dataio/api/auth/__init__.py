@@ -1,0 +1,47 @@
+"""
+Authentication and authorization module for dataio API.
+
+This module provides:
+- API key authentication
+- Permission checking and validation
+- Decorators for route protection
+- Custom exceptions for auth errors
+"""
+
+from .providers import get_user, get_current_user, api_key_header
+from .permissions import (
+    is_admin,
+    determine_highest_permission,
+    determine_user_permissions,
+    has_permission,
+    require_admin,
+    require_permission,
+)
+from .decorators import (
+    admin_required,
+)
+from .exceptions import (
+    AuthError,
+    AuthenticationError,
+    AuthorizationError,
+)
+
+__all__ = [
+    # Providers
+    "get_user",
+    "get_current_user",
+    "api_key_header",
+    # Permissions
+    "is_admin",
+    "determine_highest_permission",
+    "determine_user_permissions",
+    "has_permission",
+    "require_admin",
+    "require_permission",
+    # Decorators
+    "admin_required",
+    # Exceptions
+    "AuthError",
+    "AuthenticationError",
+    "AuthorizationError",
+]

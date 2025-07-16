@@ -1,6 +1,6 @@
 from fastapi import HTTPException, Depends, APIRouter
 import logging
-from dataio.api.api.auth import get_user
+from dataio.api.auth import get_user, admin_required
 import sqlalchemy.exc
 
 from typing import Annotated
@@ -35,13 +35,10 @@ admin_router = APIRouter(prefix="/api/v1/admin", tags=[])
 
 
 @admin_router.post("/users", tags=["admin/users"])
+@admin_required
 async def create_user(
     user_to_be_created: UserCreate, logged_in_user: User = Depends(get_user)
 ):
-    if not database.check_if_admin(logged_in_user):
-        raise HTTPException(
-            status_code=403, detail="You are not authorized to create a user"
-        )
     try:
         created_user = database.create_user(user_to_be_created)
         return created_user
@@ -57,12 +54,9 @@ async def create_user(
 
 
 @admin_router.get("/users", tags=["admin/users"])
+@admin_required
 async def get_users(user: User = Depends(get_user)):
     try:
-        if not database.check_if_admin(user):
-            raise HTTPException(
-                status_code=403, detail="You are not authorized to get users"
-            )
         return database.get_users()
     except Exception as e:
         logger.error(f"Failed to get users: {str(e)}")
@@ -72,13 +66,10 @@ async def get_users(user: User = Depends(get_user)):
 
 
 @admin_router.post("/user-groups", tags=["admin/user-groups"])
+@admin_required
 async def create_user_group(
     user_group: UserGroupCreate, user: User = Depends(get_user)
 ):
-    if not database.check_if_admin(user):
-        raise HTTPException(
-            status_code=403, detail="You are not authorized to create a user group"
-        )
     try:
         created_user_group = database.create_user_group(user_group)
         return created_user_group
@@ -90,13 +81,10 @@ async def create_user_group(
 
 
 @admin_router.post("/resource-groups", tags=["admin/resource-groups"])
+@admin_required
 async def create_resource_group(
     resource_group: ResourceGroupCreate, user: User = Depends(get_user)
 ):
-    if not database.check_if_admin(user):
-        raise HTTPException(
-            status_code=403, detail="You are not authorized to create a resource group"
-        )
     try:
         created_resource_group = database.create_resource_group(resource_group)
         return created_resource_group
@@ -108,14 +96,10 @@ async def create_resource_group(
 
 
 @admin_router.post("/resource-group-members", tags=["admin/resource-group-members"])
+@admin_required
 async def create_resource_group_member(
     resource_group_member: ResourceGroupMemberCreate, user: User = Depends(get_user)
 ):
-    if not database.check_if_admin(user):
-        raise HTTPException(
-            status_code=403,
-            detail="You are not authorized to create a resource group member",
-        )
     try:
         created_resource_group_member = database.create_resource_group_member(
             resource_group_member
@@ -130,13 +114,10 @@ async def create_resource_group_member(
 
 
 @admin_router.post("/user-permissions", tags=["admin/user-permissions"])
+@admin_required
 async def create_user_permission(
     user_permission: UserPermissionCreate, user: User = Depends(get_user)
 ):
-    if not database.check_if_admin(user):
-        raise HTTPException(
-            status_code=403, detail="You are not authorized to create a user permission"
-        )
     try:
         created_user_permission = database.create_user_permission(user_permission)
         return created_user_permission
@@ -154,13 +135,10 @@ async def create_user_permission(
 
 
 @admin_router.post("/raw-datasets", tags=["admin/raw-datasets"])
+@admin_required
 async def create_raw_dataset(
     raw_dataset: RawDatasetCreate, user: User = Depends(get_user)
 ):
-    if not database.check_if_admin(user):
-        raise HTTPException(
-            status_code=403, detail="You are not authorized to create a raw dataset"
-        )
     try:
         created_raw_dataset = database.create_raw_dataset(raw_dataset)
         return created_raw_dataset
@@ -172,14 +150,11 @@ async def create_raw_dataset(
 
 
 @admin_router.post("/datasets", tags=["admin/datasets"])
+@admin_required
 async def create_dataset(dataset: DatasetCreate, user: User = Depends(get_user)):
     """
     Create a new dataset.
     """
-    if not database.check_if_admin(user):
-        raise HTTPException(
-            status_code=403, detail="You are not authorized to create a dataset"
-        )
     try:
         created_dataset = database.create_dataset(dataset)
         return created_dataset
@@ -214,6 +189,7 @@ async def create_dataset(dataset: DatasetCreate, user: User = Depends(get_user))
 @admin_router.post(
     "/datasets/{dataset_id}/{bucket_type}/tables", tags=["admin/datasets"]
 )
+@admin_required
 async def create_dataset_table(
     dataset_id: str,
     bucket_type: VersionType,
@@ -222,11 +198,6 @@ async def create_dataset_table(
     user: User = Depends(get_user),
 ):
     # Table metadata should also be provided
-
-    if not database.check_if_admin(user):
-        raise HTTPException(
-            status_code=403, detail="You are not authorized to create a dataset file"
-        )
     try:
         # Check if dataset exists
 
@@ -252,16 +223,13 @@ async def create_dataset_table(
 @admin_router.delete(
     "/datasets/{dataset_id}/{bucket_type}/tables/{table_name}", tags=["admin/datasets"]
 )
+@admin_required
 async def delete_dataset_table(
     dataset_id: str,
     bucket_type: VersionType,
     table_name: str,
     user: User = Depends(get_user),
 ):
-    if not database.check_if_admin(user):
-        raise HTTPException(
-            status_code=403, detail="You are not authorized to delete a dataset file"
-        )
     try:
         dataset_s3 = DatasetS3(dataset_id, bucket_type)
         dataset_s3.delete_file(table_name)
@@ -280,13 +248,10 @@ async def delete_dataset_table(
 
 
 @admin_router.post("/data-owners", tags=["admin/data-owners"])
+@admin_required
 async def create_data_owner(
     data_owner: DataOwnerCreate, user: User = Depends(get_user)
 ):
-    if not database.check_if_admin(user):
-        raise HTTPException(
-            status_code=403, detail="You are not authorized to create a data owner"
-        )
     try:
         created_data_owner = database.create_data_owner(data_owner)
         return created_data_owner
@@ -298,11 +263,8 @@ async def create_data_owner(
 
 
 @admin_router.get("/data-owners", tags=["admin/data-owners"])
+@admin_required
 async def get_data_owners(user: User = Depends(get_user)):
-    if not database.check_if_admin(user):
-        raise HTTPException(
-            status_code=403, detail="You are not authorized to get data owners"
-        )
     try:
         data_owners = database.get_data_owners()
         return data_owners
@@ -314,13 +276,10 @@ async def get_data_owners(user: User = Depends(get_user)):
 
 
 @admin_router.post("/collections", tags=["admin/collections"])
+@admin_required
 async def create_collection(
     collection: CollectionCreate, user: User = Depends(get_user)
 ):
-    if not database.check_if_admin(user):
-        raise HTTPException(
-            status_code=403, detail="You are not authorized to create a collection"
-        )
     try:
         created_collection = database.create_collection(collection)
         return created_collection
@@ -332,11 +291,8 @@ async def create_collection(
 
 
 @admin_router.get("/collections", tags=["admin/collections"])
+@admin_required
 async def get_collections(user: User = Depends(get_user)):
-    if not database.check_if_admin(user):
-        raise HTTPException(
-            status_code=403, detail="You are not authorized to get collections"
-        )
     try:
         collections = database.get_collections()
         return collections

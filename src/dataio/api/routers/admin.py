@@ -2,8 +2,7 @@ from fastapi import HTTPException, Depends, APIRouter
 import logging
 from dataio.api.auth import get_user, admin_required
 
-from dataio.api.database import functions as database
-from dataio.api.services import DatasetService, UserService
+from dataio.api.services import AdminUserManagementService, AdminDatasetService
 from dataio.api.models import (
     DatasetCreate,
     User,
@@ -17,7 +16,7 @@ from dataio.api.models import (
     ResourceGroupMemberCreate,
     UserPermissionCreate,
 )
-from fastapi import HTTPException, Depends, UploadFile, APIRouter
+from fastapi import Depends, UploadFile, APIRouter
 
 logger = logging.getLogger(__name__)
 
@@ -33,18 +32,22 @@ admin_router = APIRouter(prefix="/api/v1/admin", tags=[])
 async def create_user(
     user_to_be_created: UserCreate,
     logged_in_user: User = Depends(get_user),
-    user_service: UserService = Depends(UserService),
+    admin_user_service: AdminUserManagementService = Depends(
+        AdminUserManagementService
+    ),
 ):
-    return user_service.create_user(user_to_be_created)
+    return admin_user_service.create_user(user_to_be_created)
 
 
 @admin_router.get("/users", tags=["admin/users"])
 @admin_required
 async def get_users(
     user: User = Depends(get_user),
-    user_service: UserService = Depends(UserService),
+    admin_user_service: AdminUserManagementService = Depends(
+        AdminUserManagementService
+    ),
 ):
-    return user_service.get_users()
+    return admin_user_service.get_users()
 
 
 @admin_router.post("/user-groups", tags=["admin/user-groups"])
@@ -52,9 +55,11 @@ async def get_users(
 async def create_user_group(
     user_group: UserGroupCreate,
     user: User = Depends(get_user),
-    user_service: UserService = Depends(UserService),
+    admin_user_service: AdminUserManagementService = Depends(
+        AdminUserManagementService
+    ),
 ):
-    return user_service.create_user_group(user_group)
+    return admin_user_service.create_user_group(user_group)
 
 
 @admin_router.post("/resource-groups", tags=["admin/resource-groups"])
@@ -62,9 +67,11 @@ async def create_user_group(
 async def create_resource_group(
     resource_group: ResourceGroupCreate,
     user: User = Depends(get_user),
-    user_service: UserService = Depends(UserService),
+    admin_user_service: AdminUserManagementService = Depends(
+        AdminUserManagementService
+    ),
 ):
-    return user_service.create_resource_group(resource_group)
+    return admin_user_service.create_resource_group(resource_group)
 
 
 @admin_router.post("/resource-group-members", tags=["admin/resource-group-members"])
@@ -72,9 +79,11 @@ async def create_resource_group(
 async def create_resource_group_member(
     resource_group_member: ResourceGroupMemberCreate,
     user: User = Depends(get_user),
-    user_service: UserService = Depends(UserService),
+    admin_user_service: AdminUserManagementService = Depends(
+        AdminUserManagementService
+    ),
 ):
-    return user_service.create_resource_group_member(resource_group_member)
+    return admin_user_service.create_resource_group_member(resource_group_member)
 
 
 @admin_router.post("/user-permissions", tags=["admin/user-permissions"])
@@ -82,9 +91,11 @@ async def create_resource_group_member(
 async def create_user_permission(
     user_permission: UserPermissionCreate,
     user: User = Depends(get_user),
-    user_service: UserService = Depends(UserService),
+    admin_user_service: AdminUserManagementService = Depends(
+        AdminUserManagementService
+    ),
 ):
-    return user_service.create_user_permission(user_permission)
+    return admin_user_service.create_user_permission(user_permission)
 
 
 ###
@@ -95,16 +106,11 @@ async def create_user_permission(
 @admin_router.post("/raw-datasets", tags=["admin/raw-datasets"])
 @admin_required
 async def create_raw_dataset(
-    raw_dataset: RawDatasetCreate, user: User = Depends(get_user)
+    raw_dataset: RawDatasetCreate,
+    user: User = Depends(get_user),
+    admin_dataset_service: AdminDatasetService = Depends(AdminDatasetService),
 ):
-    try:
-        created_raw_dataset = database.create_raw_dataset(raw_dataset)
-        return created_raw_dataset
-    except Exception as e:
-        logger.error(f"Failed to create raw dataset: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to create raw dataset. Contact support."
-        )
+    return admin_dataset_service.create_raw_dataset(raw_dataset)
 
 
 @admin_router.post("/datasets", tags=["admin/datasets"])
@@ -112,12 +118,12 @@ async def create_raw_dataset(
 async def create_dataset(
     dataset: DatasetCreate,
     user: User = Depends(get_user),
-    dataset_service: DatasetService = Depends(DatasetService),
+    admin_dataset_service: AdminDatasetService = Depends(AdminDatasetService),
 ):
     """
     Create a new dataset.
     """
-    return dataset_service.create_dataset(dataset)
+    return admin_dataset_service.create_dataset(dataset)
 
 
 # @admin_router.put("/datasets/{dataset_id}", tags=["admin/datasets"])
@@ -151,9 +157,9 @@ async def create_dataset_table(
     file: UploadFile,
     table_metadata_file: UploadFile,
     user: User = Depends(get_user),
-    dataset_service: DatasetService = Depends(DatasetService),
+    admin_dataset_service: AdminDatasetService = Depends(AdminDatasetService),
 ):
-    return dataset_service.create_dataset_table(
+    return admin_dataset_service.create_dataset_table(
         dataset_id, bucket_type, file, table_metadata_file
     )
 
@@ -167,9 +173,11 @@ async def delete_dataset_table(
     bucket_type: VersionType,
     table_name: str,
     user: User = Depends(get_user),
-    dataset_service: DatasetService = Depends(DatasetService),
+    admin_dataset_service: AdminDatasetService = Depends(AdminDatasetService),
 ):
-    return dataset_service.delete_dataset_table(dataset_id, bucket_type, table_name)
+    return admin_dataset_service.delete_dataset_table(
+        dataset_id, bucket_type, table_name
+    )
 
 
 ####
@@ -180,57 +188,39 @@ async def delete_dataset_table(
 @admin_router.post("/data-owners", tags=["admin/data-owners"])
 @admin_required
 async def create_data_owner(
-    data_owner: DataOwnerCreate, user: User = Depends(get_user)
+    data_owner: DataOwnerCreate,
+    user: User = Depends(get_user),
+    admin_dataset_service: AdminDatasetService = Depends(AdminDatasetService),
 ):
-    try:
-        created_data_owner = database.create_data_owner(data_owner)
-        return created_data_owner
-    except Exception as e:
-        logger.error(f"Failed to create data owner: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to create data owner. Contact support."
-        )
+    return admin_dataset_service.create_data_owner(data_owner)
 
 
 @admin_router.get("/data-owners", tags=["admin/data-owners"])
 @admin_required
-async def get_data_owners(user: User = Depends(get_user)):
-    try:
-        data_owners = database.get_data_owners()
-        return data_owners
-    except Exception as e:
-        logger.error(f"Failed to get data owners: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to get data owners. Contact support."
-        )
+async def get_data_owners(
+    user: User = Depends(get_user),
+    admin_dataset_service: AdminDatasetService = Depends(AdminDatasetService),
+):
+    return admin_dataset_service.get_data_owners()
 
 
 @admin_router.post("/collections", tags=["admin/collections"])
 @admin_required
 async def create_collection(
-    collection: CollectionCreate, user: User = Depends(get_user)
+    collection: CollectionCreate,
+    user: User = Depends(get_user),
+    admin_dataset_service: AdminDatasetService = Depends(AdminDatasetService),
 ):
-    try:
-        created_collection = database.create_collection(collection)
-        return created_collection
-    except Exception as e:
-        logger.error(f"Failed to create collection: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to create collection. Contact support."
-        )
+    return admin_dataset_service.create_collection(collection)
 
 
 @admin_router.get("/collections", tags=["admin/collections"])
 @admin_required
-async def get_collections(user: User = Depends(get_user)):
-    try:
-        collections = database.get_collections()
-        return collections
-    except Exception as e:
-        logger.error(f"Failed to get collections: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to get collections. Contact support."
-        )
+async def get_collections(
+    user: User = Depends(get_user),
+    admin_dataset_service: AdminDatasetService = Depends(AdminDatasetService),
+):
+    return admin_dataset_service.get_collections()
 
 
 # @admin_router.put("/data-owners/{data_owner_id}", tags=["admin/data-owners"])

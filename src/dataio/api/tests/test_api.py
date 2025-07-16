@@ -184,3 +184,132 @@ def test_ts0001ds0005_not_returned_for_all_users_except_admin():
             if dataset["ds_id"] == "TS0001DS0005"
         ]
     )
+
+
+# Admin access tests
+def test_admin_can_get_collections():
+    """Test that admin can get collections and receives non-empty list"""
+    response = client.get(
+        "/api/v1/admin/collections", headers={"X-API-Key": TEST_ADMIN_KEY}
+    )
+    assert response.status_code == 200
+    collections = response.json()
+    assert isinstance(collections, list)
+    assert len(collections) > 0, "Admin should get non-empty collections list"
+
+
+def test_admin_can_get_users():
+    """Test that admin can get users and receives non-empty list"""
+    response = client.get("/api/v1/admin/users", headers={"X-API-Key": TEST_ADMIN_KEY})
+    assert response.status_code == 200
+    users = response.json()
+    assert isinstance(users, list)
+    assert len(users) > 0, "Admin should get non-empty users list"
+
+
+def test_admin_can_get_data_owners():
+    """Test that admin can get data owners and receives non-empty list"""
+    response = client.get(
+        "/api/v1/admin/data-owners", headers={"X-API-Key": TEST_ADMIN_KEY}
+    )
+    assert response.status_code == 200
+    data_owners = response.json()
+    assert isinstance(data_owners, list)
+    assert len(data_owners) > 0, "Admin should get non-empty data owners list"
+
+
+# User dataset table access tests
+def test_public_user_can_get_dataset_table_with_download_permission():
+    """Test that public user can get dataset table for dataset they have DOWNLOAD access to"""
+    # Public user has DOWNLOAD access to TS0001DS0001
+    response = client.get(
+        "/api/v1/datasets/TS0001DS0001/STANDARDISED/tables",
+        headers={"X-API-Key": TEST_PUBLIC_KEY},
+    )
+    assert response.status_code == 200, (
+        "Public user should be able to access dataset table with DOWNLOAD permission"
+    )
+
+
+def test_public_user_cannot_get_dataset_table_with_view_permission():
+    """Test that public user cannot get dataset table for dataset they have VIEW access to"""
+    # Public user has VIEW access to TS0001DS0002
+    response = client.get(
+        "/api/v1/datasets/TS0001DS0002/STANDARDISED/tables",
+        headers={"X-API-Key": TEST_PUBLIC_KEY},
+    )
+    assert response.status_code == 403, (
+        "Public user should not be able to access dataset table with VIEW permission"
+    )
+
+
+def test_public_user_cannot_get_dataset_table_with_none_permission():
+    """Test that public user cannot get dataset table for dataset they have NONE access to"""
+    # Public user has NONE access to TS0001DS0004
+    response = client.get(
+        "/api/v1/datasets/TS0001DS0004/STANDARDISED/tables",
+        headers={"X-API-Key": TEST_PUBLIC_KEY},
+    )
+    assert response.status_code == 403, (
+        "Public user should not be able to access dataset table with NONE permission"
+    )
+
+
+def test_analyst_user_can_get_dataset_table_with_download_permission():
+    """Test that analyst user can get dataset table for dataset they have DOWNLOAD access to"""
+    # Analyst user has DOWNLOAD access to TS0001DS0001
+    response = client.get(
+        "/api/v1/datasets/TS0001DS0001/STANDARDISED/tables",
+        headers={"X-API-Key": TEST_ANALYST_KEY},
+    )
+    assert response.status_code == 200, (
+        "Analyst user should be able to access dataset table with DOWNLOAD permission"
+    )
+
+
+def test_analyst_user_cannot_get_dataset_table_with_none_permission():
+    """Test that analyst user cannot get dataset table for dataset they have NONE access to"""
+    # Analyst user has NONE access to TS0001DS0005
+    response = client.get(
+        "/api/v1/datasets/TS0001DS0005/STANDARDISED/tables",
+        headers={"X-API-Key": TEST_ANALYST_KEY},
+    )
+    assert response.status_code == 403, (
+        "Analyst user should not be able to access dataset table with NONE permission"
+    )
+
+
+def test_ext_collaborator_can_get_dataset_table_with_download_permission():
+    """Test that ext collaborator can get dataset table for dataset they have DOWNLOAD access to"""
+    # Ext collaborator has DOWNLOAD access to TS0001DS0001
+    response = client.get(
+        "/api/v1/datasets/TS0001DS0001/STANDARDISED/tables",
+        headers={"X-API-Key": TEST_EXT_COLLABORATOR_KEY},
+    )
+    assert response.status_code == 200, (
+        "Ext collaborator should be able to access dataset table with DOWNLOAD permission"
+    )
+
+
+def test_ext_collaborator_cannot_get_dataset_table_with_view_permission():
+    """Test that ext collaborator cannot get dataset table for dataset they have VIEW access to"""
+    # Ext collaborator has VIEW access to TS0001DS0002
+    response = client.get(
+        "/api/v1/datasets/TS0001DS0002/STANDARDISED/tables",
+        headers={"X-API-Key": TEST_EXT_COLLABORATOR_KEY},
+    )
+    assert response.status_code == 403, (
+        "Ext collaborator should not be able to access dataset table with VIEW permission"
+    )
+
+
+def test_ext_collaborator_cannot_get_dataset_table_with_none_permission():
+    """Test that ext collaborator cannot get dataset table for dataset they have NONE access to"""
+    # Ext collaborator has NONE access to TS0001DS0005
+    response = client.get(
+        "/api/v1/datasets/TS0001DS0005/STANDARDISED/tables",
+        headers={"X-API-Key": TEST_EXT_COLLABORATOR_KEY},
+    )
+    assert response.status_code == 403, (
+        "Ext collaborator should not be able to access dataset table with NONE permission"
+    )

@@ -3,7 +3,7 @@ from botocore.client import Config
 import dotenv
 import os
 from fastapi import UploadFile
-from dataio.api.api.models import VersionType, TableMetadata
+from dataio.api.models import VersionType, TableMetadata
 import json
 import logging
 from pathlib import Path

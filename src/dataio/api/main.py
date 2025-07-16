@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 import logging
-from dataio.api.api.routers.user import user_router
-from dataio.api.api.routers.admin import admin_router
+from dataio.api.routers.user import user_router
+from dataio.api.routers.admin import admin_router
 
 # Set up logging
 log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

@@ -16,6 +16,9 @@ from .permissions import (
     has_permission,
     require_admin,
     require_permission,
+    check_for_global_permission,
+    user_has_preprocessed_access,
+    user_has_dataset_download_access,
 )
 from .decorators import (
     admin_required,
@@ -38,6 +41,9 @@ __all__ = [
     "has_permission",
     "require_admin",
     "require_permission",
+    "check_for_global_permission",
+    "user_has_preprocessed_access",
+    "user_has_dataset_download_access",
     # Decorators
     "admin_required",
     # Exceptions

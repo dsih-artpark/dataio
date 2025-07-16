@@ -25,7 +25,7 @@ from dataio.api.database.models import (
     DatasetRawDataset,
 )
 from dataio.api.auth.permissions import determine_highest_permission
-from dataio.api.api.models import (
+from dataio.api.models import (
     DatasetCreate,
     UserCreate,
     UserReturn,

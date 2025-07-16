@@ -2,7 +2,7 @@ import dotenv
 import os
 import pytest
 
-from dataio.api.api import app
+from dataio.api import app
 from fastapi.testclient import TestClient
 
 dotenv.load_dotenv()

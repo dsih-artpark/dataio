@@ -1,29 +1,23 @@
 from fastapi import HTTPException, Depends, APIRouter
 import logging
 from dataio.api.auth import get_user, admin_required
-import sqlalchemy.exc
-
-from typing import Annotated
 
 from dataio.api.database import functions as database
-from dataio.api.api.models import (
+from dataio.api.services import DatasetService, UserService
+from dataio.api.models import (
     DatasetCreate,
     User,
     UserCreate,
     VersionType,
     DataOwnerCreate,
     CollectionCreate,
-    DataOwnerUpdate,
-    CollectionUpdate,
     RawDatasetCreate,
-    TableMetadata,
     UserGroupCreate,
     ResourceGroupCreate,
     ResourceGroupMemberCreate,
     UserPermissionCreate,
 )
-from fastapi import HTTPException, Depends, UploadFile, APIRouter, Form
-from dataio.api.api.filestore import DatasetS3, ValidationError
+from fastapi import HTTPException, Depends, UploadFile, APIRouter
 
 logger = logging.getLogger(__name__)
 
@@ -37,96 +31,60 @@ admin_router = APIRouter(prefix="/api/v1/admin", tags=[])
 @admin_router.post("/users", tags=["admin/users"])
 @admin_required
 async def create_user(
-    user_to_be_created: UserCreate, logged_in_user: User = Depends(get_user)
+    user_to_be_created: UserCreate,
+    logged_in_user: User = Depends(get_user),
+    user_service: UserService = Depends(UserService),
 ):
-    try:
-        created_user = database.create_user(user_to_be_created)
-        return created_user
-    except sqlalchemy.exc.IntegrityError:
-        raise HTTPException(
-            status_code=400, detail="Error creating user. User already exists"
-        )
-    except Exception as e:
-        logger.error(f"Failed to create user: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to create user. Contact support."
-        )
+    return user_service.create_user(user_to_be_created)
 
 
 @admin_router.get("/users", tags=["admin/users"])
 @admin_required
-async def get_users(user: User = Depends(get_user)):
-    try:
-        return database.get_users()
-    except Exception as e:
-        logger.error(f"Failed to get users: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to get users. Contact support."
-        )
+async def get_users(
+    user: User = Depends(get_user),
+    user_service: UserService = Depends(UserService),
+):
+    return user_service.get_users()
 
 
 @admin_router.post("/user-groups", tags=["admin/user-groups"])
 @admin_required
 async def create_user_group(
-    user_group: UserGroupCreate, user: User = Depends(get_user)
+    user_group: UserGroupCreate,
+    user: User = Depends(get_user),
+    user_service: UserService = Depends(UserService),
 ):
-    try:
-        created_user_group = database.create_user_group(user_group)
-        return created_user_group
-    except Exception as e:
-        logger.error(f"Failed to create user group: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to create user group. Contact support."
-        )
+    return user_service.create_user_group(user_group)
 
 
 @admin_router.post("/resource-groups", tags=["admin/resource-groups"])
 @admin_required
 async def create_resource_group(
-    resource_group: ResourceGroupCreate, user: User = Depends(get_user)
+    resource_group: ResourceGroupCreate,
+    user: User = Depends(get_user),
+    user_service: UserService = Depends(UserService),
 ):
-    try:
-        created_resource_group = database.create_resource_group(resource_group)
-        return created_resource_group
-    except Exception as e:
-        logger.error(f"Failed to create resource group: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to create resource group. Contact support."
-        )
+    return user_service.create_resource_group(resource_group)
 
 
 @admin_router.post("/resource-group-members", tags=["admin/resource-group-members"])
 @admin_required
 async def create_resource_group_member(
-    resource_group_member: ResourceGroupMemberCreate, user: User = Depends(get_user)
+    resource_group_member: ResourceGroupMemberCreate,
+    user: User = Depends(get_user),
+    user_service: UserService = Depends(UserService),
 ):
-    try:
-        created_resource_group_member = database.create_resource_group_member(
-            resource_group_member
-        )
-        return created_resource_group_member
-    except Exception as e:
-        logger.error(f"Failed to create resource group member: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to create resource group member. Contact support.",
-        )
+    return user_service.create_resource_group_member(resource_group_member)
 
 
 @admin_router.post("/user-permissions", tags=["admin/user-permissions"])
 @admin_required
 async def create_user_permission(
-    user_permission: UserPermissionCreate, user: User = Depends(get_user)
+    user_permission: UserPermissionCreate,
+    user: User = Depends(get_user),
+    user_service: UserService = Depends(UserService),
 ):
-    try:
-        created_user_permission = database.create_user_permission(user_permission)
-        return created_user_permission
-    except Exception as e:
-        logger.error(f"Failed to create user permission: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to create user permission. Contact support.",
-        )
+    return user_service.create_user_permission(user_permission)
 
 
 ###
@@ -151,18 +109,15 @@ async def create_raw_dataset(
 
 @admin_router.post("/datasets", tags=["admin/datasets"])
 @admin_required
-async def create_dataset(dataset: DatasetCreate, user: User = Depends(get_user)):
+async def create_dataset(
+    dataset: DatasetCreate,
+    user: User = Depends(get_user),
+    dataset_service: DatasetService = Depends(DatasetService),
+):
     """
     Create a new dataset.
     """
-    try:
-        created_dataset = database.create_dataset(dataset)
-        return created_dataset
-    except Exception as e:
-        logger.error(f"Error creating dataset: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Failed to create dataset. Contact support."
-        )
+    return dataset_service.create_dataset(dataset)
 
 
 # @admin_router.put("/datasets/{dataset_id}", tags=["admin/datasets"])
@@ -196,28 +151,11 @@ async def create_dataset_table(
     file: UploadFile,
     table_metadata_file: UploadFile,
     user: User = Depends(get_user),
+    dataset_service: DatasetService = Depends(DatasetService),
 ):
-    # Table metadata should also be provided
-    try:
-        # Check if dataset exists
-
-        if not database.check_if_dataset_exists(dataset_id):
-            raise ValidationError("Dataset does not exist")
-
-        table_metadata = TableMetadata.model_validate_json(
-            table_metadata_file.file.read()
-        )
-        dataset_s3 = DatasetS3(dataset_id, bucket_type)
-        dataset_s3.upload_file(file, table_metadata)
-        return {"message": "File uploaded successfully"}
-    except ValidationError as e:
-        logger.error(f"Failed to upload file: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Validation error raised: {e}")
-    except Exception as e:
-        logger.error(f"Failed to upload file: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail="Failed to upload file. Contact support."
-        )
+    return dataset_service.create_dataset_table(
+        dataset_id, bucket_type, file, table_metadata_file
+    )
 
 
 @admin_router.delete(
@@ -229,17 +167,9 @@ async def delete_dataset_table(
     bucket_type: VersionType,
     table_name: str,
     user: User = Depends(get_user),
+    dataset_service: DatasetService = Depends(DatasetService),
 ):
-    try:
-        dataset_s3 = DatasetS3(dataset_id, bucket_type)
-        dataset_s3.delete_file(table_name)
-        return {"message": "File deleted successfully"}
-    except Exception as e:
-        logger.error(f"Failed to delete dataset version file: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to delete dataset version file. Contact support.",
-        )
+    return dataset_service.delete_dataset_table(dataset_id, bucket_type, table_name)
 
 
 ####

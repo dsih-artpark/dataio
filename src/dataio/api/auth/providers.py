@@ -1,6 +1,6 @@
 from fastapi import Security, HTTPException, status
 from fastapi.security import APIKeyHeader, OAuth2PasswordBearer
-from dataio.api.api.models import User
+from dataio.api.models import User
 from dataio.api.database.models import User as DBUser
 from dataio.api.database.config import Session
 from .exceptions import AuthenticationError

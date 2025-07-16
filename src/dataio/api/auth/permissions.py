@@ -1,6 +1,6 @@
 from typing import List
-from dataio.api.api.models import User
-from dataio.api.database.models import UserPermission, AccessLevel, UserGroup
+from dataio.api.models import User
+from dataio.api.database.models import UserPermission, AccessLevel, UserGroup, Dataset
 from dataio.api.database.config import Session
 from .exceptions import AuthorizationError
 
@@ -179,3 +179,55 @@ def require_permission(
         raise AuthorizationError(
             f"Insufficient permissions for {resource_type}:{resource_id}"
         )
+
+
+def check_for_global_permission(user_permission: UserPermission) -> bool:
+    """
+    Check if user permission is a global admin permission.
+
+    EXACT BUSINESS LOGIC from utils.py:32-39
+    """
+    if (
+        user_permission.resource_type == "*"
+        and user_permission.resource_id == "*"
+        and user_permission.permission == "DOWNLOAD"
+    ):
+        return True
+    return False
+
+
+def user_has_preprocessed_access(user_permissions: List[UserPermission]) -> bool:
+    """
+    Check if user has access to preprocessed bucket.
+
+    EXACT BUSINESS LOGIC from utils.py:5-12
+    """
+    for user_permission in user_permissions:
+        if (
+            user_permission.resource_type == "BUCKET"
+            and user_permission.resource_id == "PREPROCESSED"
+        ) or check_for_global_permission(user_permission):
+            return True
+    return False
+
+
+def user_has_dataset_download_access(
+    user_permissions: List[UserPermission], dataset: Dataset
+) -> bool:
+    """
+    Check if user has download access to specific dataset.
+
+    EXACT BUSINESS LOGIC from utils.py:15-29
+    """
+    if dataset.access_level == AccessLevel.DOWNLOAD:
+        return True
+
+    for user_permission in user_permissions:
+        print(user_permission.__dict__)
+        if (
+            user_permission.resource_type == "DATASET"
+            and user_permission.resource_id == dataset.ds_id
+            and user_permission.permission == "DOWNLOAD"
+        ) or check_for_global_permission(user_permission):
+            return True
+    return False

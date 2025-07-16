@@ -101,8 +101,18 @@ class AdminDatasetService(BaseService):
         EXACT BUSINESS LOGIC from admin.py:158-165
         """
         try:
+            if not dataset.ds_id[:6] == dataset.collection_id:
+                raise ValidationError("Dataset ID must start with collection ID")
+            if not len(dataset.ds_id) == 12:
+                raise ValidationError("Dataset ID must be 12 characters long")
             created_dataset = database.create_dataset(dataset)
             return created_dataset
+        except ValidationError as e:
+            self.logger.error(f"Failed to create dataset: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"Validation error raised: {e}")
+        except ValueError as e:
+            self.logger.error(f"Failed to create dataset: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"Value error raised: {e}")
         except Exception as e:
             self.logger.error(f"Error creating dataset: {str(e)}")
             raise HTTPException(

@@ -129,6 +129,15 @@ def get_datasets(
         session.close()
 
 
+def parse_date(date_string: str):
+    if date_string is None:
+        return None
+    if len(date_string) == 4 and date_string.isdigit():
+        return dateutil.parser.parse(f"{date_string}-01-01")
+    else:
+        return dateutil.parser.parse(date_string)
+
+
 def create_dataset(dataset_create: DatasetCreate):
     session = Session()
     try:
@@ -152,19 +161,8 @@ def create_dataset(dataset_create: DatasetCreate):
                 f"Data owner with name {dataset_create.data_owner_name} not found"
             )
 
-        if dataset_create.temporal_coverage_start_date is None:
-            tc_start_date = None
-        else:
-            tc_start_date = dateutil.parser.parse(
-                dataset_create.temporal_coverage_start_date
-            )
-
-        if dataset_create.temporal_coverage_end_date is None:
-            tc_end_date = None
-        else:
-            tc_end_date = dateutil.parser.parse(
-                dataset_create.temporal_coverage_end_date
-            )
+        tc_start_date = parse_date(dataset_create.temporal_coverage_start_date)
+        tc_end_date = parse_date(dataset_create.temporal_coverage_end_date)
 
         dataset = Dataset(
             ds_id=dataset_create.ds_id,

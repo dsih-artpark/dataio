@@ -8,15 +8,12 @@ This module provides:
 - Custom exceptions for auth errors
 """
 
-from .providers import get_user, get_current_user, api_key_header
+from .providers import get_user
 from .permissions import (
     is_admin,
     determine_highest_permission,
     determine_user_permissions,
-    has_permission,
     require_admin,
-    require_permission,
-    check_for_global_permission,
     user_has_preprocessed_access,
     user_has_dataset_download_access,
 )
@@ -24,7 +21,6 @@ from .decorators import (
     admin_required,
 )
 from .exceptions import (
-    AuthError,
     AuthenticationError,
     AuthorizationError,
 )
@@ -32,22 +28,16 @@ from .exceptions import (
 __all__ = [
     # Providers
     "get_user",
-    "get_current_user",
-    "api_key_header",
     # Permissions
     "is_admin",
     "determine_highest_permission",
     "determine_user_permissions",
-    "has_permission",
     "require_admin",
-    "require_permission",
-    "check_for_global_permission",
     "user_has_preprocessed_access",
     "user_has_dataset_download_access",
     # Decorators
     "admin_required",
     # Exceptions
-    "AuthError",
     "AuthenticationError",
     "AuthorizationError",
 ]

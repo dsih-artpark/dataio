@@ -1,7 +1,6 @@
-from fastapi import HTTPException, Depends, APIRouter
+from fastapi import HTTPException, Depends, APIRouter, UploadFile
 import logging
 from dataio.api.auth import get_user, admin_required
-
 from dataio.api.services import AdminUserManagementService, AdminDatasetService
 from dataio.api.models import (
     DatasetCreate,
@@ -16,7 +15,6 @@ from dataio.api.models import (
     ResourceGroupMemberCreate,
     UserPermissionCreate,
 )
-from fastapi import Depends, UploadFile, APIRouter
 
 logger = logging.getLogger(__name__)
 
@@ -126,25 +124,6 @@ async def create_dataset(
     return admin_dataset_service.create_dataset(dataset)
 
 
-# @admin_router.put("/datasets/{dataset_id}", tags=["admin/datasets"])
-# async def update_dataset(
-#     dataset_id: str, dataset: DatasetCreate, user: User = Depends(get_user)
-# ):
-#     """
-#     Update a dataset.
-#     """
-#     if not database.check_if_admin(user):
-#         raise HTTPException(
-#             status_code=403, detail="You are not authorized to update a dataset"
-#         )
-#     try:
-#         updated_dataset = database.update_dataset(dataset_id, dataset)
-#         return updated_dataset
-#     except Exception as e:
-#         logger.error(f"Error updating dataset: {str(e)}")
-#         raise HTTPException(
-#             status_code=500, detail="Failed to update dataset. Contact support."
-#         )
 
 
 @admin_router.post(
@@ -223,37 +202,3 @@ async def get_collections(
     return admin_dataset_service.get_collections()
 
 
-# @admin_router.put("/data-owners/{data_owner_id}", tags=["admin/data-owners"])
-# async def update_data_owner(
-#     data_owner_id: int, data_owner: DataOwnerUpdate, user: User = Depends(get_user)
-# ):
-#     if not database.check_if_admin(user):
-#         raise HTTPException(
-#             status_code=403, detail="You are not authorized to update a data owner"
-#         )
-#     try:
-#         updated_data_owner = database.update_data_owner(data_owner_id, data_owner)
-#         return updated_data_owner
-#     except Exception as e:
-#         logger.error(f"Failed to update data owner: {str(e)}")
-#         raise HTTPException(
-#             status_code=500, detail=f"Failed to update data owner. Contact support."
-#         )
-
-
-# @admin_router.put("/collections/{collection_id}", tags=["admin/collections"])
-# async def update_collection(
-#     collection_id: int, collection: CollectionUpdate, user: User = Depends(get_user)
-# ):
-#     if not database.check_if_admin(user):
-#         raise HTTPException(
-#             status_code=403, detail="You are not authorized to update a collection"
-#         )
-#     try:
-#         updated_collection = database.update_collection(collection_id, collection)
-#         return updated_collection
-#     except Exception as e:
-#         logger.error(f"Failed to update collection: {str(e)}")
-#         raise HTTPException(
-#             status_code=500, detail=f"Failed to update collection. Contact support."
-#         )

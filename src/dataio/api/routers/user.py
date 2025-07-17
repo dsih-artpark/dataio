@@ -3,6 +3,7 @@ import logging
 from dataio.api.models import User, VersionType
 from dataio.api.auth import get_user
 from dataio.api.services import UserService
+from dataio.api.auth.exceptions import AuthenticationError
 
 logger = logging.getLogger(__name__)
 

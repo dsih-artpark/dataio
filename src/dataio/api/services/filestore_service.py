@@ -6,7 +6,7 @@ from fastapi import UploadFile
 from dataio.api.models import VersionType, TableMetadata
 import json
 from pathlib import Path
-from .base_service import BaseService
+from dataio.api.services.base_service import BaseService
 
 dotenv.load_dotenv()
 
@@ -105,7 +105,6 @@ class FilestoreService(BaseService):
                 return_json["download_link"] = download_link
                 return_json["metadata"] = table_metadata
                 return_json_list.append(return_json)
-            print(return_json_list)
             return return_json_list
         except Exception as e:
             self.logger.error(f"Failed to list files: {str(e)}")

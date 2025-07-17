@@ -8,7 +8,7 @@ from dataio.api.models import (
     UserPermissionCreate,
 )
 from dataio.api.database import functions as database
-from .base_service import BaseService
+from dataio.api.services.base_service import BaseService
 
 
 class AdminUserManagementService(BaseService):

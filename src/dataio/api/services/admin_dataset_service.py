@@ -8,8 +8,8 @@ from dataio.api.models import (
     TableMetadata,
 )
 from dataio.api.database import functions as database
-from .filestore_service import FilestoreService, ValidationError
-from .base_service import BaseService
+from dataio.api.services.filestore_service import FilestoreService, ValidationError
+from dataio.api.services.base_service import BaseService
 
 
 class AdminDatasetService(BaseService):

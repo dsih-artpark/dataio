@@ -6,8 +6,8 @@ from dataio.api.auth import (
     user_has_preprocessed_access,
     user_has_dataset_download_access,
 )
-from .filestore_service import FilestoreService
-from .base_service import BaseService
+from dataio.api.services.filestore_service import FilestoreService
+from dataio.api.services.base_service import BaseService
 
 
 class UserService(BaseService):
@@ -28,7 +28,6 @@ class UserService(BaseService):
             )
             if not datasets:
                 return []
-            print(datasets)
             return datasets
         except Exception as e:
             self.logger.error(f"Error retrieving datasets: {str(e)}")
@@ -47,8 +46,6 @@ class UserService(BaseService):
         try:
             user_permissions = determine_user_permissions(user)
             dataset = database.get_dataset(dataset_id)
-            # for permission in user_permissions:
-            #     print(permission.__dict__)
             if (
                 bucket_type == VersionType.PREPROCESSED
                 and not user_has_preprocessed_access(user_permissions)

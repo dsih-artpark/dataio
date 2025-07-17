@@ -1,14 +1,13 @@
-from fastapi import Security, HTTPException, status
-from fastapi.security import APIKeyHeader, OAuth2PasswordBearer
+from fastapi import Security
+from fastapi.security import APIKeyHeader
 from dataio.api.models import User
 from dataio.api.database.models import User as DBUser
 from dataio.api.database.config import Session
-from .exceptions import AuthenticationError
+from dataio.api.auth.exceptions import AuthenticationError
 import bcrypt
 import logging
 
-api_key_header = APIKeyHeader(name="X-API-Key")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 logger = logging.getLogger(__name__)
 
@@ -16,10 +15,10 @@ logger = logging.getLogger(__name__)
 def check_api_key(api_key: str) -> User:
     """
     Validate API key against database.
-    
+
     Args:
         api_key: API key to validate
-        
+
     Returns:
         User: Authenticated user object if valid, None otherwise
     """
@@ -49,16 +48,11 @@ def get_user(api_key_header: str = Security(api_key_header)) -> User:
     Raises:
         AuthenticationError: If API key is invalid or missing
     """
+    if not api_key_header:
+        raise AuthenticationError("Missing API key")
     user = check_api_key(api_key_header)
-    print(user.email)
     if user:
         return user
-    raise AuthenticationError("Missing or invalid API key")
+    raise AuthenticationError("Invalid API key")
 
 
-def get_current_user(api_key: str = Security(api_key_header)) -> User:
-    """
-    Alternative method name for getting current authenticated user.
-    Alias for get_user() for better readability in some contexts.
-    """
-    return get_user(api_key)

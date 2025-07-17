@@ -1,8 +1,14 @@
 from typing import List
 from dataio.api.models import User
-from dataio.api.database.models import UserPermission, AccessLevel, UserGroup, Dataset
+from dataio.api.database.models import (
+    UserPermission,
+    AccessLevel,
+    UserGroup,
+    Dataset,
+    ResourceGroupMember,
+)
 from dataio.api.database.config import Session
-from .exceptions import AuthorizationError
+from dataio.api.auth.exceptions import AuthorizationError
 
 
 def is_admin(user: User) -> bool:
@@ -94,56 +100,32 @@ def determine_user_permissions(user: User) -> List[UserPermission]:
             )
             user_permissions.extend(group_permissions)
 
+        # expand resource group permissions
+        for user_permission in user_permissions:
+            if user_permission.resource_type == "GROUP":
+                group_members = (
+                    session.query(ResourceGroupMember)
+                    .filter(
+                        ResourceGroupMember.resource_group_id
+                        == user_permission.resource_id
+                    )
+                    .all()
+                )
+                for group_member in group_members:
+                    user_permissions.append(
+                        UserPermission(
+                            user_email=user_permission.user_email,
+                            resource_type=group_member.resource_type,
+                            resource_id=group_member.resource_id,
+                            permission=user_permission.permission,
+                        )
+                    )
+
         return user_permissions
     finally:
         session.close()
 
 
-def has_permission(
-    user: User, resource_type: str, resource_id: str, required_permission: AccessLevel
-) -> bool:
-    """
-    Check if user has required permission for a specific resource.
-
-    Args:
-        user: User to check permissions for
-        resource_type: Type of resource (DATASET, GROUP, BUCKET)
-        resource_id: ID of the resource
-        required_permission: Required permission level
-
-    Returns:
-        bool: True if user has required permission, False otherwise
-    """
-    user_permissions = determine_user_permissions(user)
-
-    # Check for wildcard permissions (admin)
-    for permission in user_permissions:
-        if (
-            permission.resource_type == "*"
-            and permission.resource_id == "*"
-            and permission.permission == AccessLevel.DOWNLOAD
-        ):
-            return True
-
-    # Check for specific resource permissions
-    relevant_permissions = [
-        perm.permission
-        for perm in user_permissions
-        if (perm.resource_type == resource_type and perm.resource_id == resource_id)
-    ]
-
-    if not relevant_permissions:
-        return False
-
-    highest_permission = determine_highest_permission(relevant_permissions)
-
-    # Check if highest permission meets requirement
-    if required_permission == AccessLevel.DOWNLOAD:
-        return highest_permission == AccessLevel.DOWNLOAD
-    elif required_permission == AccessLevel.VIEW:
-        return highest_permission in [AccessLevel.VIEW, AccessLevel.DOWNLOAD]
-    else:
-        return True
 
 
 def require_admin(user: User) -> None:
@@ -160,25 +142,6 @@ def require_admin(user: User) -> None:
         raise AuthorizationError("Admin privileges required")
 
 
-def require_permission(
-    user: User, resource_type: str, resource_id: str, required_permission: AccessLevel
-) -> None:
-    """
-    Ensure user has required permission for resource.
-
-    Args:
-        user: User to check
-        resource_type: Type of resource
-        resource_id: ID of resource
-        required_permission: Required permission level
-
-    Raises:
-        AuthorizationError: If user lacks required permission
-    """
-    if not has_permission(user, resource_type, resource_id, required_permission):
-        raise AuthorizationError(
-            f"Insufficient permissions for {resource_type}:{resource_id}"
-        )
 
 
 def check_for_global_permission(user_permission: UserPermission) -> bool:
@@ -223,7 +186,6 @@ def user_has_dataset_download_access(
         return True
 
     for user_permission in user_permissions:
-        print(user_permission.__dict__)
         if (
             user_permission.resource_type == "DATASET"
             and user_permission.resource_id == dataset.ds_id

@@ -54,8 +54,6 @@ class FilestoreService(BaseService):
     ):
         """
         Upload a file to S3 with metadata.
-
-        EXACT BUSINESS LOGIC from filestore.py:54-74
         """
         try:
             prefix = self._get_prefix_for_dataset(dataset_id, version_type)
@@ -86,8 +84,6 @@ class FilestoreService(BaseService):
     def list_files_in_s3(self, dataset_id: str, version_type: VersionType):
         """
         List files in S3 bucket with metadata.
-
-        EXACT BUSINESS LOGIC from filestore.py:76-96
         """
         try:
             prefix = self._get_prefix_for_dataset(dataset_id, version_type)
@@ -118,8 +114,6 @@ class FilestoreService(BaseService):
     def delete_file(self, dataset_id: str, version_type: VersionType, file_name: str):
         """
         Delete a file from S3.
-
-        EXACT BUSINESS LOGIC from filestore.py:98-101
         """
         try:
             prefix = self._get_prefix_for_dataset(dataset_id, version_type)
@@ -135,8 +129,6 @@ class FilestoreService(BaseService):
     ):
         """
         Generate a presigned download link.
-
-        EXACT BUSINESS LOGIC from filestore.py:103-109
         """
         prefix = self._get_prefix_for_dataset(dataset_id, version_type)
         download_link = self.s3_client.generate_presigned_url(

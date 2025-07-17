@@ -22,8 +22,6 @@ class AdminDatasetService(BaseService):
     def create_raw_dataset(self, raw_dataset: RawDatasetCreate):
         """
         Create a new raw dataset.
-
-        EXACT BUSINESS LOGIC from admin.py:95-107
         """
         try:
             created_raw_dataset = database.create_raw_dataset(raw_dataset)
@@ -37,8 +35,6 @@ class AdminDatasetService(BaseService):
     def create_data_owner(self, data_owner: DataOwnerCreate):
         """
         Create a new data owner.
-
-        EXACT BUSINESS LOGIC from admin.py:180-192
         """
         try:
             created_data_owner = database.create_data_owner(data_owner)
@@ -52,8 +48,6 @@ class AdminDatasetService(BaseService):
     def get_data_owners(self):
         """
         Get all data owners.
-
-        EXACT BUSINESS LOGIC from admin.py:195-205
         """
         try:
             data_owners = database.get_data_owners()
@@ -67,8 +61,6 @@ class AdminDatasetService(BaseService):
     def create_collection(self, collection: CollectionCreate):
         """
         Create a new collection.
-
-        EXACT BUSINESS LOGIC from admin.py:208-220
         """
         try:
             created_collection = database.create_collection(collection)
@@ -82,8 +74,6 @@ class AdminDatasetService(BaseService):
     def get_collections(self):
         """
         Get all collections.
-
-        EXACT BUSINESS LOGIC from admin.py:223-233
         """
         try:
             collections = database.get_collections()
@@ -97,8 +87,6 @@ class AdminDatasetService(BaseService):
     def create_dataset(self, dataset: DatasetCreate):
         """
         Create a new dataset.
-
-        EXACT BUSINESS LOGIC from admin.py:158-165
         """
         try:
             if not dataset.ds_id[:6] == dataset.collection_id:
@@ -128,8 +116,6 @@ class AdminDatasetService(BaseService):
     ):
         """
         Create/upload a dataset table.
-
-        EXACT BUSINESS LOGIC from admin.py:201-220
         """
         # Table metadata should also be provided
         try:
@@ -158,8 +144,6 @@ class AdminDatasetService(BaseService):
     ):
         """
         Delete a dataset table.
-
-        EXACT BUSINESS LOGIC from admin.py:233-242
         """
         try:
             self.filestore_service.delete_file(dataset_id, bucket_type, table_name)

@@ -20,8 +20,6 @@ class UserService(BaseService):
     def get_user_datasets(self, user: User, limit: int = 100):
         """
         Get datasets for a user with permissions applied.
-
-        EXACT BUSINESS LOGIC from user.py:35-46
         """
         try:
             user_permissions = determine_user_permissions(user)
@@ -43,8 +41,6 @@ class UserService(BaseService):
     ):
         """
         Get dataset table list with permission checks.
-
-        EXACT BUSINESS LOGIC from user.py:58-91
         """
         # TODO: Response should have table metadata as well.
 

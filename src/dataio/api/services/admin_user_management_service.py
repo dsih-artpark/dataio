@@ -20,8 +20,6 @@ class AdminUserManagementService(BaseService):
     def create_user(self, user_to_be_created: UserCreate):
         """
         Create a new user.
-
-        EXACT BUSINESS LOGIC from admin.py:42-53
         """
         try:
             created_user = database.create_user(user_to_be_created)
@@ -39,8 +37,6 @@ class AdminUserManagementService(BaseService):
     def get_users(self):
         """
         Get all users.
-
-        EXACT BUSINESS LOGIC from admin.py:59-65
         """
         try:
             return database.get_users()
@@ -53,8 +49,6 @@ class AdminUserManagementService(BaseService):
     def create_user_group(self, user_group: UserGroupCreate):
         """
         Create a new user group.
-
-        EXACT BUSINESS LOGIC from admin.py:73-80
         """
         try:
             created_user_group = database.create_user_group(user_group)
@@ -68,8 +62,6 @@ class AdminUserManagementService(BaseService):
     def create_resource_group(self, resource_group: ResourceGroupCreate):
         """
         Create a new resource group.
-
-        EXACT BUSINESS LOGIC from admin.py:88-95
         """
         try:
             created_resource_group = database.create_resource_group(resource_group)
@@ -86,8 +78,6 @@ class AdminUserManagementService(BaseService):
     ):
         """
         Create a new resource group member.
-
-        EXACT BUSINESS LOGIC from admin.py:102-109
         """
         try:
             created_resource_group_member = database.create_resource_group_member(
@@ -104,8 +94,6 @@ class AdminUserManagementService(BaseService):
     def create_user_permission(self, user_permission: UserPermissionCreate):
         """
         Create a new user permission.
-
-        EXACT BUSINESS LOGIC from admin.py:121-129
         """
         try:
             created_user_permission = database.create_user_permission(user_permission)

@@ -18,8 +18,10 @@ handlers:
     stream: ext://sys.stdout
   file:
     formatter: default
-    class: logging.FileHandler
-    filename: api.log
+    class: logging.handlers.RotatingFileHandler
+    filename: logs/dataio-api.log
+    maxBytes: 10485760
+    backupCount: 5
     mode: a
 loggers:
   uvicorn.error:

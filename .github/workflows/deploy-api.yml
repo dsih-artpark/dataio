@@ -33,5 +33,6 @@ jobs:
           git clone git@github.com:dsih-artpark/dataio.git
           cp /home/ubuntu/infra/.dataio-env /home/ubuntu/staging/dataio/.env
           cd dataio
+          mkdir logs
           uv sync
           sudo supervisorctl restart dataio-app

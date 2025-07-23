@@ -42,7 +42,7 @@ If you want to restore the database to a specific previous version, checkout the
 
 ## Starting the API
 ```
-uv run fastapi dev src/dataio/api/api
+uv run fastapi dev src/dataio/api
 ```
 
 ## Development Guidelines

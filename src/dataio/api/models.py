@@ -43,7 +43,7 @@ class DatasetCreate(BaseModel):
     additional_metadata: Optional[dict] = Field(None, description="Additional metadata")
     tags: Optional[List[str]] = Field(None, description="Tags for the dataset")
     raw_dataset_ids: List[str] = Field(
-        min_items=1,
+        min_length=1,
         description="Raw dataset IDs for the dataset",
     )
 

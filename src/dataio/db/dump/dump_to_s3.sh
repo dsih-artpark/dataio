@@ -90,18 +90,20 @@ aws s3api put-object \
   --bucket "$S3_BUCKET" \
   --key "${S3_PREFIX}/${SCHEMA_VERSION}/${S3_SCHEMA_FILENAME}" \
   --body "$LOCAL_SCHEMA_DUMP_LOCATION" \
-  --tagging "schema_version=$SCHEMA_VERSION&timestamp=$TIMESTAMP"
+  --tagging "schema_version=$SCHEMA_VERSION&timestamp=$TIMESTAMP" \
+  --profile dataio-vm
 
 echo "Uploading Data to S3..."
 aws s3api put-object \
   --bucket "$S3_BUCKET" \
   --key "${S3_PREFIX}/${SCHEMA_VERSION}/${S3_DATA_FILENAME}" \
   --body "$LOCAL_DATA_DUMP_LOCATION" \
-  --tagging "schema_version=$SCHEMA_VERSION&timestamp=$TIMESTAMP"
+  --tagging "schema_version=$SCHEMA_VERSION&timestamp=$TIMESTAMP" \ 
+  --profile dataio-vm
 
 # Verify uploads
 echo "Verifying Tags on S3..."
 echo "Schema: $S3_BUCKET/$S3_PREFIX/$S3_SCHEMA_FILENAME"
-aws s3api get-object-tagging --bucket "$S3_BUCKET" --key "${S3_PREFIX}/${SCHEMA_VERSION}/${S3_SCHEMA_FILENAME}" --output table
+aws s3api get-object-tagging --bucket "$S3_BUCKET" --key "${S3_PREFIX}/${SCHEMA_VERSION}/${S3_SCHEMA_FILENAME}" --output table --profile dataio-vm
 echo "Data: $S3_BUCKET/$S3_PREFIX/$S3_DATA_FILENAME"
-aws s3api get-object-tagging --bucket "$S3_BUCKET" --key "${S3_PREFIX}/${SCHEMA_VERSION}/${S3_DATA_FILENAME}" --output table
+aws s3api get-object-tagging --bucket "$S3_BUCKET" --key "${S3_PREFIX}/${SCHEMA_VERSION}/${S3_DATA_FILENAME}" --output table --profile dataio-vm

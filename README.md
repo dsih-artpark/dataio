@@ -35,11 +35,11 @@ bash ./src/dataio/db/init/recreate_full.sh
 
 Starting the API Server
 ```
-uv run fastapi dev src/dataio/api/api
+uv run fastapi dev src/dataio/api
 ```
 
 To start with logging & autoreload enabled
 ```
-uvicorn src.dataio.api.api.main:app --log-config log_config.yml --reload
+uvicorn src.dataio.api.main:app --log-config log_config.yml --reload
 ```
 

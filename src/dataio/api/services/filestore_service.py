@@ -65,6 +65,10 @@ class FilestoreService(BaseService):
                     "table_name in metadata and filename are not matching!"
                 )
 
+            # check if table of same name already exists
+            if table_metadata.table_name in metadata_object["tables"]:
+                raise ValidationError("table of same name already exists!")
+
             remote_filepath = f"{prefix}/{os.path.basename(file.filename)}"
             metadata_object["tables"][table_metadata.table_name] = (
                 table_metadata.model_dump()

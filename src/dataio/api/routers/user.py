@@ -29,6 +29,7 @@ async def get_datasets(
     Returns:
     - List of datasets
     """
+    logger.info(f"CATALOGUE_VIEW_REQUEST: {user.email}")
     return user_service.get_user_datasets(user, limit)
 
 
@@ -44,4 +45,7 @@ async def get_dataset_table_list(
     user: User = Depends(get_user),
     user_service: UserService = Depends(UserService),
 ):
+    logger.info(
+        f"DATASET_DOWNLOAD_REQUEST: {user.email} for dataset {dataset_id} bucket_type {bucket_type}"
+    )
     return user_service.get_dataset_table_list(dataset_id, bucket_type, user)

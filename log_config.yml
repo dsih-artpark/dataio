@@ -37,7 +37,7 @@ loggers:
       - file
     propagate: no
 root:
-  level: DEBUG
+  level: INFO
   handlers:
     - default
     - file

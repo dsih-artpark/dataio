@@ -124,8 +124,6 @@ async def create_dataset(
     return admin_dataset_service.create_dataset(dataset)
 
 
-
-
 @admin_router.post(
     "/datasets/{dataset_id}/{bucket_type}/tables", tags=["admin/datasets"]
 )
@@ -202,3 +200,15 @@ async def get_collections(
     return admin_dataset_service.get_collections()
 
 
+#### SHAPEFILES
+
+
+@admin_router.post("/shapefiles/{region_id}", tags=["admin/shapefiles"])
+@admin_required
+async def post_shapefile(
+    shapefile: UploadFile,
+    region_id: str,
+    user: User = Depends(get_user),
+    admin_dataset_service: AdminDatasetService = Depends(AdminDatasetService),
+):
+    return admin_dataset_service.upload_shapefile(shapefile, region_id)

@@ -1,4 +1,6 @@
+import json
 from fastapi import HTTPException
+import gzip
 from dataio.api.models import User, VersionType
 from dataio.api.database import functions as database
 from dataio.api.auth import (
@@ -75,4 +77,25 @@ class UserService(BaseService):
             self.logger.error(f"Failed to get dataset files: {str(e)}")
             raise HTTPException(
                 status_code=500, detail="Failed to get dataset files. Contact support."
+            )
+
+    def get_shapefile(self, region_id: str, user_email: str):
+        try:
+            parent_id = database.get_parentID_of_region(region_id)
+            if database.check_rate_limit_exceeded(user_email, "shapefile"):
+                raise HTTPException(
+                    status_code=429,
+                    detail="You have reached the maximum number of requests. Please try again later.",
+                )
+            database.update_shapefile_download_count(user_email)
+            compressed_shapefile_geojson = self.filestore_service.get_shapefile(
+                region_id, parent_id
+            )
+            shapefile_geojson = gzip.decompress(compressed_shapefile_geojson)
+            shapefile_geojson = json.loads(shapefile_geojson)
+            return shapefile_geojson
+        except Exception as e:
+            self.logger.error(f"Failed to get shapefile: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail="Failed to get shapefile. Contact support."
             )

@@ -140,3 +140,22 @@ class FilestoreService(BaseService):
             ExpiresIn=3600,
         )
         return download_link
+
+    def upload_shapefile(self, file: bytes, region_id: str, parent_id: str):
+        """
+        Upload shapefile to S3
+        """
+        self.bucket.put_object(
+            Body=file,
+            Key=f"shapefiles/{parent_id}/{region_id}.geojson.gz",
+        )
+
+    def get_shapefile(self, region_id: str, parent_id: str):
+        """
+        Get shapefile from S3
+        """
+        return (
+            self.bucket.Object(f"shapefiles/{parent_id}/{region_id}.geojson.gz")
+            .get()["Body"]
+            .read()
+        )

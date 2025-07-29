@@ -33,11 +33,6 @@ async def get_datasets(
     return user_service.get_user_datasets(user, limit)
 
 
-##
-## FILESTORE MODIFICATION ENDPOINTS
-##
-
-
 @user_router.get("/datasets/{dataset_id}/{bucket_type}/tables")
 async def get_dataset_table_list(
     dataset_id: str,
@@ -49,3 +44,12 @@ async def get_dataset_table_list(
         f"DATASET_DOWNLOAD_REQUEST: {user.email} for dataset {dataset_id} bucket_type {bucket_type}"
     )
     return user_service.get_dataset_table_list(dataset_id, bucket_type, user)
+
+
+@user_router.get("/shapefiles/{region_id}")
+async def get_shapefile(
+    region_id: str,
+    user: User = Depends(get_user),
+    user_service: UserService = Depends(UserService),
+):
+    return user_service.get_shapefile(region_id, user.email)

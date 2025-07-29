@@ -5,6 +5,7 @@ import bcrypt
 import secrets
 import dateutil
 from sqlalchemy import select
+from datetime import datetime, timedelta
 
 from dataio.api.database.config import Session
 from dataio.api.database.enums import ResourceType
@@ -23,6 +24,8 @@ from dataio.api.database.models import (
     DatasetTag,
     RawDataset,
     DatasetRawDataset,
+    Region,
+    RateLimit,
 )
 from dataio.api.auth.permissions import determine_highest_permission
 from dataio.api.models import (
@@ -464,6 +467,73 @@ def create_raw_dataset(raw_dataset: RawDatasetCreate):
         return raw_dataset
     except Exception as e:
         logger.error(f"Error creating raw dataset: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def get_parentID_of_region(region_id: str):
+    session = Session()
+    try:
+        region = session.query(Region).filter(Region.region_id == region_id).first()
+        parent_id = region.parent_region_id
+        return parent_id
+    except Exception as e:
+        logger.error(f"Error fetching parent id from DB: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def check_rate_limit_exceeded(user_email: str, access_point: str):
+    session = Session()
+    try:
+        rate_limit = (
+            session.query(RateLimit)
+            .filter(
+                RateLimit.user_email == user_email,
+                RateLimit.access_point == access_point,
+            )
+            .first()
+        )
+        if not rate_limit:
+            print("Rate limit not found")
+            return False
+        if rate_limit.last_access_timestamp < datetime.now() - timedelta(minutes=1):
+            rate_limit.number_of_attempts = 0
+            session.commit()
+            session.refresh(rate_limit)
+        return rate_limit.number_of_attempts >= rate_limit.max_limit_per_second
+    except Exception as e:
+        logger.error(f"Error checking rate limit exceeded: {str(e)}")
+        raise
+
+
+def update_shapefile_download_count(user_email: str):
+    session = Session()
+    try:
+        rate_limit = (
+            session.query(RateLimit)
+            .filter(
+                RateLimit.user_email == user_email
+                and RateLimit.access_point == "shapefile"
+            )
+            .first()
+        )
+        if not rate_limit:
+            rate_limit = RateLimit(
+                user_email=user_email, access_point="shapefile", number_of_attempts=1
+            )
+            session.add(rate_limit)
+            session.commit()
+            session.refresh(rate_limit)
+        else:
+            rate_limit.number_of_attempts += 1
+            rate_limit.last_access_timestamp = datetime.now()
+            session.commit()
+            session.refresh(rate_limit)
+    except Exception as e:
+        logger.error(f"Error updating shapefile download count: {str(e)}")
         raise
     finally:
         session.close()

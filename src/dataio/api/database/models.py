@@ -7,9 +7,11 @@ from sqlalchemy import (
     Text,
     Date,
     Boolean,
+    DateTime,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, declarative_base
+from datetime import datetime
 from dataio.api.database.enums import (
     AccessLevel,
     SpatialResolution,
@@ -145,3 +147,13 @@ class ResourceGroupMember(Base):
     resource_id = Column(Text, nullable=False, primary_key=True)
     resource_type = Column(SQLEnum(ResourceType), nullable=False)
     resource_json = Column(JSONB, nullable=True)
+
+
+class RateLimit(Base):
+    __tablename__ = "rate_limit"
+
+    user_email = Column(Text, primary_key=True)
+    number_of_attempts = Column(Integer, nullable=False, default=0)
+    max_limit_per_second = Column(Integer, nullable=False, default=5)
+    last_access_timestamp = Column(DateTime, nullable=False, default=datetime.now)
+    access_point = Column(Text, nullable=False)

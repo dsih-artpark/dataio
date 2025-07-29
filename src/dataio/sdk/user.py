@@ -205,7 +205,7 @@ class DataIOAPI:
 
         for table_name, table_link in download_links.items():
             file_content = self._get_file(table_link)
-            with open(f"{dataset_dir}/{table_name.replace('-', '_')}.csv", "wb") as f:
+            with open(f"{dataset_dir}/{dataset_id}-{dataset_title}.csv", "wb") as f:
                 f.write(file_content)
 
         if get_metadata:

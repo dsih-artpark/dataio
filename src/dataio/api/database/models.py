@@ -154,6 +154,6 @@ class RateLimit(Base):
 
     user_email = Column(Text, primary_key=True)
     number_of_attempts = Column(Integer, nullable=False, default=0)
-    max_limit_per_second = Column(Integer, nullable=False, default=5)
+    max_limit_per_minute = Column(Integer, nullable=False, default=5)
     last_access_timestamp = Column(DateTime, nullable=False, default=datetime.now)
     access_point = Column(Text, nullable=False)

@@ -476,10 +476,33 @@ def get_parentID_of_region(region_id: str):
     session = Session()
     try:
         region = session.query(Region).filter(Region.region_id == region_id).first()
+        if region is None:
+            return None
         parent_id = region.parent_region_id
         return parent_id
     except Exception as e:
         logger.error(f"Error fetching parent id from DB: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def get_regions_by_ids(region_ids: List[str]):
+    """
+    Get region names by their region_ids.
+
+    Args:
+        region_ids: List of region_id strings
+
+    Returns:
+        Dict mapping region_id to region_name
+    """
+    session = Session()
+    try:
+        regions = session.query(Region).filter(Region.region_id.in_(region_ids)).all()
+        return {region.region_id: region.region_name for region in regions}
+    except Exception as e:
+        logger.error(f"Error fetching regions from DB: {str(e)}")
         raise
     finally:
         session.close()
@@ -503,7 +526,7 @@ def check_rate_limit_exceeded(user_email: str, access_point: str):
             rate_limit.number_of_attempts = 0
             session.commit()
             session.refresh(rate_limit)
-        return rate_limit.number_of_attempts >= rate_limit.max_limit_per_second
+        return rate_limit.number_of_attempts >= rate_limit.max_limit_per_minute
     except Exception as e:
         logger.error(f"Error checking rate limit exceeded: {str(e)}")
         raise

@@ -46,10 +46,25 @@ async def get_dataset_table_list(
     return user_service.get_dataset_table_list(dataset_id, bucket_type, user)
 
 
+@user_router.get("/shapefiles")
+async def get_shapefiles_list(
+    user: User = Depends(get_user), user_service: UserService = Depends(UserService)
+):
+    """
+    Get list of shapefiles available on S3.
+
+    Returns:
+    - List of available shapefiles with metadata
+    """
+    logger.info(f"SHAPEFILE_LIST_REQUEST: {user.email}")
+    return user_service.get_shapefiles_list(user)
+
+
 @user_router.get("/shapefiles/{region_id}")
 async def get_shapefile(
     region_id: str,
     user: User = Depends(get_user),
     user_service: UserService = Depends(UserService),
 ):
+    logger.info(f"SHAPEFILE_DOWNLOAD_REQUEST: {user.email} for region {region_id}")
     return user_service.get_shapefile(region_id, user.email)

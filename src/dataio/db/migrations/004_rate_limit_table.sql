@@ -9,4 +9,6 @@ CREATE TABLE rate_limit (
     PRIMARY KEY (user_email, access_point)
 );
 
+SELECT add_migration(4, '004_rate_limit_table');
+
 COMMIT;

@@ -1,5 +1,6 @@
 import boto3
 from botocore.client import Config
+from botocore.exceptions import ClientError
 import dotenv
 import os
 from fastapi import UploadFile
@@ -140,3 +141,53 @@ class FilestoreService(BaseService):
             ExpiresIn=3600,
         )
         return download_link
+
+    def upload_shapefile(self, file: bytes, region_id: str, parent_id: str):
+        """
+        Upload shapefile to S3
+        """
+        self.bucket.put_object(
+            Body=file,
+            Key=f"shapefiles/{parent_id}/{region_id}.geojson.gz",
+        )
+
+    def get_shapefile(self, region_id: str, parent_id: str):
+        """
+        Get shapefile from S3
+        """
+        return (
+            self.bucket.Object(f"shapefiles/{parent_id}/{region_id}.geojson.gz")
+            .get()["Body"]
+            .read()
+        )
+
+    def list_shapefiles(self):
+        """
+        List all available shapefiles from S3 shapefiles/ prefix.
+        Returns organized data with parent_id and region_id information.
+        """
+        try:
+            shapefiles_list = []
+
+            for obj in self.bucket.objects.filter(Prefix="shapefiles/"):
+                if obj.key.endswith(".geojson.gz"):
+                    # Parse the key structure: shapefiles/{parent_id}/{region_id}.geojson.gz
+                    key_parts = obj.key.split("/")
+                    if len(key_parts) >= 3:
+                        parent_id = key_parts[1]
+                        region_filename = key_parts[2]
+                        region_id = region_filename.replace(".geojson.gz", "")
+
+                        shapefile_info = {
+                            "region_id": region_id,
+                            "parent_id": parent_id,
+                            "last_modified": obj.last_modified.isoformat()
+                            if obj.last_modified
+                            else None,
+                        }
+                        shapefiles_list.append(shapefile_info)
+
+            return shapefiles_list
+        except Exception as e:
+            self.logger.error(f"Failed to list shapefiles: {str(e)}")
+            raise e

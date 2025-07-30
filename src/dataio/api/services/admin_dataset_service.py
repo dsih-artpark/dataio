@@ -1,4 +1,5 @@
 from fastapi import HTTPException, UploadFile
+import gzip
 from dataio.api.models import (
     RawDatasetCreate,
     DataOwnerCreate,
@@ -154,3 +155,18 @@ class AdminDatasetService(BaseService):
                 status_code=500,
                 detail="Failed to delete dataset version file. Contact support.",
             )
+
+    def upload_shapefile(self, file: UploadFile, region_id: str):
+        """
+        Compress and upload shapefile to S3
+        """
+        try:
+            file_contents = file.file.read()
+            compressed_contents = gzip.compress(file_contents)
+            parent_id = database.get_parentID_of_region(region_id)
+            self.filestore_service.upload_shapefile(
+                compressed_contents, region_id, parent_id
+            )
+        except Exception as e:
+            self.logger.error("Failed to upload shapefile.")
+            raise HTTPException(status_code=500, detail="Failed to upload shape file.")

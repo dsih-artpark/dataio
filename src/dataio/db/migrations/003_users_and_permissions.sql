@@ -93,4 +93,7 @@ CREATE TRIGGER validate_group_membership_trigger
     FOR EACH ROW
     EXECUTE FUNCTION validate_group_membership();
 
+SELECT add_migration(3, '003_users_and_permissions');
+
+
 COMMIT;

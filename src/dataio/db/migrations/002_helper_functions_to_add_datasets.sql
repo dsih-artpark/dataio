@@ -123,6 +123,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-SELECT add_migration(2, '002_helper_functions_to_add_datasets.sql');
+SELECT add_migration(2, '002_helper_functions_to_add_datasets');
 
 COMMIT;

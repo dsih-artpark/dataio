@@ -532,7 +532,7 @@ def check_rate_limit_exceeded(user_email: str, access_point: str):
         raise
 
 
-def update_shapefile_download_count(user_email: str):
+def update_shapefile_rate_limit(user_email: str):
     session = Session()
     try:
         rate_limit = (

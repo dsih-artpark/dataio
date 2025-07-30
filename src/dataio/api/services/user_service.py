@@ -93,7 +93,7 @@ class UserService(BaseService):
                     status_code=429,
                     detail="You have reached the maximum number of requests. Please try again later.",
                 )
-            database.update_shapefile_download_count(user_email)
+            database.update_shapefile_rate_limit(user_email)
             compressed_shapefile_geojson = self.filestore_service.get_shapefile(
                 region_id, parent_id
             )

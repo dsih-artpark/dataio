@@ -87,18 +87,11 @@ def download_shapefile(
             "-f", "--shp-folder", help="The folder to download the shapefile to."
         ),
     ] = ".data/GS0012DS0051-Shapefiles_India",
-    compress: Annotated[
-        bool,
-        typer.Option(
-            "-c",
-            "--compress",
-            help="Whether to compress the shapefile.",
-        ),
-    ] = False,
 ):
     """Download a shapefile."""
     client = DataIOAPI()
-    shp_path = client.download_shapefile(**locals())
+    args = {k: v for k, v in locals().items() if k != "client"}
+    shp_path = client.download_shapefile(**args)
     console = Console()
     console.print(f"Shapefile {region_id} downloaded to {shp_path}")
 

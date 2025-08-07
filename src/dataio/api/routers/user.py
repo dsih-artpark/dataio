@@ -1,4 +1,5 @@
 from fastapi import HTTPException, Query, Depends, APIRouter
+from fastapi.responses import Response
 import logging
 from dataio.api.models import User, VersionType
 from dataio.api.auth import get_user
@@ -67,4 +68,10 @@ async def get_shapefile(
     user_service: UserService = Depends(UserService),
 ):
     logger.info(f"SHAPEFILE_DOWNLOAD_REQUEST: {user.email} for region {region_id}")
-    return user_service.get_shapefile(region_id, user.email)
+    return Response(
+        content=user_service.get_shapefile(region_id, user.email),
+        headers={
+            "Content-Disposition": f'attachment; filename="{region_id}.geojson.gz"'
+        },
+        media_type="application/gzip",
+    )

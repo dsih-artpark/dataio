@@ -97,9 +97,9 @@ class UserService(BaseService):
             compressed_shapefile_geojson = self.filestore_service.get_shapefile(
                 region_id, parent_id
             )
-            shapefile_geojson = gzip.decompress(compressed_shapefile_geojson)
-            shapefile_geojson = json.loads(shapefile_geojson)
-            return shapefile_geojson
+            # shapefile_geojson = gzip.decompress(compressed_shapefile_geojson)
+            # shapefile_geojson = json.loads(shapefile_geojson)
+            return compressed_shapefile_geojson
         except HTTPException as e:
             self.logger.error(f"Failed to get shapefile: {str(e)}")
             raise e

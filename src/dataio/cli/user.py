@@ -10,7 +10,31 @@ app = typer.Typer()
 
 
 @app.command("list-datasets")
-def list_datasets(limit: int = 100):
+def list_datasets(
+    limit: Annotated[
+        int,
+        typer.Option(
+            ...,
+            help="The number of datasets to list.",
+        ),
+    ] = 100,
+    collection: Annotated[
+        str,
+        typer.Option(
+            "-cl",
+            "--collection",
+            help="The collection to list datasets from.",
+        ),
+    ] = None,
+    category: Annotated[
+        str,
+        typer.Option(
+            "-cg",
+            "--category",
+            help="The category to list datasets from.",
+        ),
+    ] = None,
+):
     """List all datasets."""
     client = DataIOAPI()
     datasets = client.list_datasets(limit=limit)
@@ -19,11 +43,36 @@ def list_datasets(limit: int = 100):
     table.add_column("ID", justify="right", style="cyan", no_wrap=True)
     table.add_column("Title", style="magenta")
     table.add_column("Description", style="green")
+    table.add_column("Data Owner", style="red")
 
     for dataset in datasets:
-        table.add_row(dataset["ds_id"], dataset["title"], dataset["description"])
+        return_dataset = True
+        if collection and (
+            dataset["collection"]["collection_name"] != collection
+            and dataset["collection"]["collection_id"] != collection
+        ):
+            return_dataset = False
+        if category and (
+            dataset["collection"]["category_name"] != category
+            and dataset["collection"]["category_id"] != category
+        ):
+            return_dataset = False
+        if return_dataset:
+            table.add_row(
+                dataset["ds_id"],
+                dataset["title"],
+                dataset["description"],
+                dataset["data_owner"]["name"],
+            )
+
     console = Console()
-    console.print(table)
+    if not table.rows:
+        console.print(
+            "No datasets found matching the given criteria Collection: "
+            f"{collection} Category: {category}"
+        )
+    else:
+        console.print(table)
 
 
 @app.command("download-dataset")

@@ -1,7 +1,9 @@
+import gzip
 import json
 import os
 import re
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Optional, Union
 
 import dotenv
 import requests
@@ -51,16 +53,19 @@ class DataIOAPI:
         response.raise_for_status()
         return response.json()
 
-    def list_datasets(self, limit=100):
+    def list_datasets(self, limit=None):
         """
         Get a list of all datasets.
 
-        :param limit: The maximum number of datasets to return. Defaults to 100.
+        :param limit: The maximum number of datasets to return. Defaults to None, which returns 100 datasets by default.
         :type limit: int
         :returns: A list of datasets.
         :rtype: list
         """
-        return self._request("GET", f"/datasets?limit={limit}")
+        if limit is None or limit == 100:
+            return self._request("GET", "/datasets")
+        else:
+            return self._request("GET", f"/datasets?limit={limit}")
 
     def list_dataset_tables(self, dataset_id, bucket_type="STANDARDISED"):
         """Get a list of tables for a given dataset, with download links for each table
@@ -87,7 +92,7 @@ class DataIOAPI:
         response.raise_for_status()
         return response.content
 
-    def get_dataset_details(self, dataset_id):
+    def get_dataset_details(self, dataset_id: Union[str, int]):
         """Get the details of a dataset - this is the dataset level metadata.
 
         :param dataset_id: The ID of the dataset to get details for. This is the ``ds_id`` field in the dataset metadata.
@@ -95,9 +100,27 @@ class DataIOAPI:
         :returns: The dataset details.
         """
         dataset_list = self.list_datasets()
-        dataset_details = [
-            each_ds for each_ds in dataset_list if each_ds["ds_id"] == dataset_id
-        ]
+
+        assert isinstance(dataset_id, (str, int)), (
+            "dataset_id must be a string or integer"
+        )
+
+        if isinstance(dataset_id, int):
+            dataset_id = str(dataset_id).zfill(4)
+        elif isinstance(dataset_id, str) and len(dataset_id) < 4:
+            dataset_id = dataset_id.zfill(4)
+
+        if len(dataset_id) == 4:
+            dataset_details = [
+                each_ds
+                for each_ds in dataset_list
+                if each_ds["ds_id"].endswith(dataset_id)
+            ]
+        else:
+            dataset_details = [
+                each_ds for each_ds in dataset_list if each_ds["ds_id"] == dataset_id
+            ]
+
         if len(dataset_details) == 0:
             raise ValueError(f"Dataset with ID {dataset_id} not found")
         dataset_details = dataset_details[0]
@@ -175,6 +198,8 @@ class DataIOAPI:
         root_dir=".data",
         get_metadata=True,
         metadata_format="yaml",
+        update_sync_history=True,
+        sync_history_file="sync-history.yaml",
     ):
         """Download a dataset, along with its metadata.
 
@@ -194,6 +219,7 @@ class DataIOAPI:
         # Set up the dataset directory
         bucket_type = bucket_type.upper()
         dataset_details = self.get_dataset_details(dataset_id)
+        dataset_id = dataset_details["ds_id"]
         dataset_title = re.sub(
             r"_+", "_", re.sub(r"[^a-zA-Z0-9]", "_", dataset_details["title"])
         )
@@ -221,4 +247,66 @@ class DataIOAPI:
                     f"Invalid metadata format: {metadata_format.lower()}. Valid options are 'yaml' and 'json'."
                 )
 
+        if update_sync_history:
+            sync_history_file = f"{root_dir}/{sync_history_file}"
+            if not os.path.exists(sync_history_file):
+                sync_history = {}
+            else:
+                sync_history = yaml.safe_load(open(sync_history_file, "r"))
+            sync_history[dataset_id] = {
+                "dataset_title": dataset_details["title"],
+                "downloaded_at": datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%d %H:%M:%S UTC"
+                ),
+            }
+            with open(sync_history_file, "w") as f:
+                yaml.dump(sync_history, f, indent=4)
+
         return dataset_dir
+
+    def get_shapefile_list(self):
+        """Get a list of all shapefiles.
+
+        :returns: A list of shapefiles.
+        :rtype: list
+        """
+        return self._request("GET", "/shapefiles")
+
+    def download_shapefile(
+        self, region_id: str, shp_folder: str = ".data/GS0012DS0051-Shapefiles_India"
+    ):
+        """Download a shapefile.
+
+        :param region_id: The ID of the region to download the shapefile for.
+        :type region_id: str
+        :param shp_folder: The folder to download the shapefile to. Defaults to ".data/GS0012DS0051-Shapefiles_India".
+        :type shp_folder: str
+        :param compress: Whether to compress the shapefile. Defaults to True.
+        :type compress: bool
+        :returns: The shapefile.
+        :rtype: bytes
+        """
+        shapefile_list = self.get_shapefile_list()
+        shapefile_exists = any(
+            [
+                True
+                for each_shapefile in shapefile_list
+                if each_shapefile["region_id"] == region_id
+            ]
+        )
+        if not shapefile_exists:
+            raise ValueError(f"Shapefile for region {region_id} not found")
+
+        url = f"{self.base_url}/shapefiles/{region_id}"
+        response = self.session.request("GET", url)
+        response.raise_for_status()
+        shapefile = response.content
+
+        shapefile = json.loads(gzip.decompress(shapefile).decode("utf-8"))
+
+        shp_path = f"{shp_folder}/{region_id}.geojson"
+        os.makedirs(shp_folder, exist_ok=True)
+        with open(shp_path, "w", encoding="utf-8") as f:
+            json.dump(shapefile, f, indent=4)
+
+        return shp_path

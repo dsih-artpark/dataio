@@ -1,9 +1,16 @@
 [project]
 name = "dataio"
 version = "0.3.0-alpha"
-description = "Postgres and FASTAPI based Dataset Management System (DMS)"
+description = "Postgres and FASTAPI based Dataset Management System (DMS), with a CLI and SDK for interacting with the API."
 readme = "README.md"
 requires-python = ">=3.12"
+license = "GPL-3.0-or-later"
+authors = [
+    { name = "Akhil Balaji", email = "akhil@artpark.in" },
+    { name = "Sneha S", email = "sneha@artpark.in" },
+]
+license-files = ["LICENSE"]
+
 dependencies = [
     "boto3>=1.38.29",
     "dotenv>=0.9.9",
@@ -20,6 +27,7 @@ dependencies = [
     "pyyaml>=6.0.2",
     "requests>=2.32.4",
     "sqlalchemy>=2.0.41",
+    "typer>=0.16.0",
 ]
 
 [dependency-groups]
@@ -37,6 +45,9 @@ docs = [
     "sphinx-design>=0.6.1",
     "sphinx-togglebutton>=0.3.2",
 ]
+
+[project.scripts]
+dataio = "dataio.cli.cli:app"
 
 [build-system]
 requires = ["hatchling"]

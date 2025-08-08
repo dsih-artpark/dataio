@@ -63,7 +63,7 @@ class DataIOAPI:
         :rtype: list
         """
         if limit is None or limit == 100:
-            return self._request("GET", "/datasets/")
+            return self._request("GET", "/datasets")
         else:
             return self._request("GET", f"/datasets?limit={limit}")
 
@@ -270,7 +270,7 @@ class DataIOAPI:
         :returns: A list of shapefiles.
         :rtype: list
         """
-        return self._request("GET", "/shapefiles/")
+        return self._request("GET", "/shapefiles")
 
     def download_shapefile(
         self, region_id: str, shp_folder: str = ".data/GS0012DS0051-Shapefiles_India"
@@ -297,7 +297,7 @@ class DataIOAPI:
         if not shapefile_exists:
             raise ValueError(f"Shapefile for region {region_id} not found")
 
-        url = f"{self.base_url}/shapefiles/{region_id}/"
+        url = f"{self.base_url}/shapefiles/{region_id}"
         response = self.session.request("GET", url)
         response.raise_for_status()
         shapefile = response.content

@@ -191,6 +191,8 @@ def create_dataset(dataset_create: DatasetCreate):
                 if not existing_tag:
                     existing_tag = Tag(tag_name=tag)
                     session.add(existing_tag)
+                    # flush gets the existing tag id, without committing the transaction
+                    session.flush()
                 dataset_tag = DatasetTag(dataset_id=dataset.id, tag_id=existing_tag.id)
                 session.add(dataset_tag)
 

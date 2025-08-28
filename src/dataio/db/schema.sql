@@ -514,6 +514,19 @@ ALTER TABLE public.db_migration_history ALTER COLUMN id ADD GENERATED ALWAYS AS 
 
 
 --
+-- Name: rate_limit; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.rate_limit (
+    user_email text NOT NULL,
+    number_of_attempts integer DEFAULT 0 NOT NULL,
+    max_limit_per_minute integer DEFAULT 5 NOT NULL,
+    last_access_timestamp timestamp without time zone DEFAULT now() NOT NULL,
+    access_point text NOT NULL
+);
+
+
+--
 -- Name: raw_datasets_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 

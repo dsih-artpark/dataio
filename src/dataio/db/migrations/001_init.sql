@@ -28,7 +28,7 @@ create type access_level as enum('NONE', 'VIEW', 'DOWNLOAD');
 
 create type temporal_resolution as enum('NONE', 'YEAR', 'MONTH', 'WEEK', 'DATE', 'HOUR', 'MINUTE', 'SECOND');
 
-create type spatial_resolution as enum('COUNTRY', 'STATE', 'UT', 'DISTRICT', 'SUBDISTRICT', 'MUNICIPALITY', 'VILLAGE', 'WARD', 'PRABHAG', 'ULB', 'LAT/LONG', 'OTHER');
+create type spatial_resolution as enum('COUNTRY', 'STATE', 'UT', 'DISTRICT', 'SUBDISTRICT', 'MUNICIPALITY', 'VILLAGE', 'WARD', 'PRABHAG', 'ULB', 'LAT_LONG', 'OTHER');
 
 create table if not exists collections (
     id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,

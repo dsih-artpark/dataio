@@ -98,8 +98,7 @@ aws s3api put-object \
   --bucket "$S3_BUCKET" \
   --key "${S3_PREFIX}/${SCHEMA_VERSION}/${S3_DATA_FILENAME}" \
   --body "$LOCAL_DATA_DUMP_LOCATION" \
-  --tagging "schema_version=$SCHEMA_VERSION&timestamp=$TIMESTAMP" \ 
-  --profile dataio-vm
+  --tagging "schema_version=$SCHEMA_VERSION&timestamp=$TIMESTAMP" --profile dataio-vm
 
 # Verify uploads
 echo "Verifying Tags on S3..."

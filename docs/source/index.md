@@ -138,3 +138,7 @@ When you list the tables in a dataset, you will get a list of dictionaries, each
 :::{warning}
 The download link is a signed link that will expire in 1 hour.
 :::
+
+## Endpoints
+
+The API endpoints are documented in the [Endpoints](https://staging.dataio.artpark.ai/endpoints) page.

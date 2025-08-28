@@ -28,11 +28,15 @@ jobs:
         key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
         script: |
           export PATH="/home/ubuntu/.local/bin:$PATH"
+          d=$(date +%Y%m%d-%H%M%S)
           cd /home/ubuntu/staging
+          cp dataio/logs/dataio-api.log logs_backup/dataio/$d.log
           rm -rf dataio
           git clone git@github.com:dsih-artpark/dataio.git
           cp /home/ubuntu/infra/.dataio-env /home/ubuntu/staging/dataio/.env
           cd dataio
           mkdir logs
-          uv sync
+          uv sync --group docs
+          uv run sphinx-build -b html docs/source docs/build
           sudo supervisorctl restart dataio-app
+

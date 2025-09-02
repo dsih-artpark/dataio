@@ -108,10 +108,10 @@ current_working_directory/
 ```
 
 :::{tip}
-You can also specify a different directory to download the dataset to by passing the `data_dir` argument to the `download_dataset` method.
+You can also specify a different directory to download the dataset to by passing the `root_dir` argument to the `download_dataset` method.
 
 ```python
-client.download_dataset("TS0001DS9999", data_dir="custom_directory") # Downloads the dataset to the specified directory
+client.download_dataset("TS0001DS9999", root_dir="custom_directory") # Downloads the dataset to the specified directory
 ```
 
 ```bash

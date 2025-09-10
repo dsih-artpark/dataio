@@ -23,7 +23,7 @@ class DataIOAPI:
     """
 
     def __init__(self, base_url: Optional[str] = None, api_key: Optional[str] = None):
-        dotenv.load_dotenv()
+        dotenv.load_dotenv(override=True)
         if base_url is None:
             base_url = os.getenv("DATAIO_API_BASE_URL", None)
         if base_url is None:

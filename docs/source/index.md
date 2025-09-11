@@ -147,5 +147,6 @@ The API endpoints are documented in the [Endpoints](https://staging.dataio.artpa
 :maxdepth: 2
 :caption: Contents:
 
+Introduction <self>
 examples
 ```

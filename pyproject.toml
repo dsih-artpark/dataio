@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "GPL-3.0-or-later"
 authors = [
-    { name = "Akhil Balaji", email = "akhil@artpark.in" },
+    { name = "Akhil B", email = "akhil@artpark.in" },
     { name = "Sneha S", email = "sneha@artpark.in" },
 ]
 license-files = ["LICENSE"]

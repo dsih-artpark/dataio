@@ -19,13 +19,13 @@ ARTPARK Data Management System (DMS) is a platform for managing and sharing data
 Using uv:
 
 ```bash
-uv add git+https://github.com/dsih-artpark/dataio.git
+uv add git+https://github.com/dsih-artpark/dataio.git@staging
 ```
 
 or using pip:
 
 ```bash
-pip install git+https://github.com/dsih-artpark/dataio.git
+pip install git+https://github.com/dsih-artpark/dataio.git@staging
 ```
 
 It is always recommended to use a virtual environment to install the package, regardless of the installation method. ```uv``` provides a seamless way to create and manage virtual environments within the same command.
@@ -142,3 +142,10 @@ The download link is a signed link that will expire in 1 hour.
 ## Endpoints
 
 The API endpoints are documented in the [Endpoints](https://staging.dataio.artpark.ai/endpoints) page.
+
+```{toctree}
+:maxdepth: 2
+:caption: Contents:
+
+examples
+```

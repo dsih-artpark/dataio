@@ -44,7 +44,7 @@ The DMS uses the following terminology:
 
 The client relies on two variables to authenticate with the DMS API:
 
-1. `DATAIO_API_BASE_URL`: The base URL of the DMS API. The current staging environment is at http://staging.dataio.artpark.ai
+1. `DATAIO_API_BASE_URL`: The base URL of the DMS API. The current staging environment is at http://staging.dataio.artpark.ai/api/v1
 2. `DATAIO_API_KEY`: The API key for the DMS API.
 
 

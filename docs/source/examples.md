@@ -1,8 +1,6 @@
-# Example Code Snippets
+# Downloading Dataset By Tags
 
-This page contains practical examples of using the ARTPARK Data Management System.
-
-## Basic Usage Examples
+This page contains a example of using dataio to download all datasets with a particular tag, for eg "Livestock".
 
 ### Setting up the Client
 
@@ -90,3 +88,4 @@ for dataset in livestock_datasets:
     print("-" * 50)
 ```
 
+You can modify the example code for other tags.

@@ -1,7 +1,7 @@
-# ARTPARK Data Management System Documentation
+# ARTPARK DataIO Documentation
 
 :::{caution}
-ARTPARK's Data Management System is in alpha (v0.3.0-alpha) and is neither a release candidate nor ready for production use.
+ARTPARK's dataio is in alpha (v0.3.0-alpha) and is neither a release candidate nor ready for production use.
 :::
 
 :::{note}
@@ -10,7 +10,8 @@ This documentation is a work in progress. Feedback on how to improve it is welco
 
 ## Overview
 
-ARTPARK Data Management System (DMS) is a platform for managing and sharing data. It is built using FastAPI and PostgreSQL, with a python SDK for interacting with the DMS.
+ARTPARK's DataIO is a platform for managing and sharing data. It consists of our internal API server which manages the catalogue, and a python SDK
+and CLI for users. This documentation is for the SDK, which you can use to access our data. Please contact us for getting API keys.
 
 ## Installation
 
@@ -32,28 +33,26 @@ It is always recommended to use a virtual environment to install the package, re
 
 ## Terminology
 
-The DMS uses the following terminology:
+DataIO uses the following terminology:
 
 | Term | Description | Example |
 |------|-------------|---------|
 | **Table** | A table is usually a csv file, but can also be a parquet file. This is a collection of records for a specific topic. | Karnataka livestock census district level data |
 | **Dataset** | A dataset is a collection of tables, usually related to a specific overarching topic. | State Livestock Census Data, containing tables for Karnataka and Maharashtra |
-| **Bucket Type** | A bucket type can be either `STANDARDISED` or `PREPROCESSED`: <br> **Standardised**: The data is in a standardised format, ready to be used. This is the default bucket type and the data made available to analysts.<br> **Preprocessed**: The data has been preprocessed by the DMS team and stripped of PII/sensitive information. Not generally made available to analysts. | |
+| **Bucket Type** | A bucket type can be either `STANDARDISED` or `PREPROCESSED`: <br> **Standardised**: The data is in a standardised format, ready to be used. This is the default bucket type and the data made available to analysts.<br> **Preprocessed**: The data has been preprocessed by the team and stripped of PII/sensitive information. Not generally made available to analysts. | |
 
 ## Configuration
 
-The client relies on two variables to authenticate with the DMS API:
+The client relies on two variables to authenticate with the API Server:
 
-1. `DATAIO_API_BASE_URL`: The base URL of the DMS API. The current staging environment is at http://staging.dataio.artpark.ai/api/v1
-2. `DATAIO_API_KEY`: The API key for the DMS API.
+1. `DATAIO_API_BASE_URL`: The base URL of the API. The current staging environment is at http://staging.dataio.artpark.ai/api/v1
+2. `DATAIO_API_KEY`: The API key for the API.
 
-
-You can set these variables in your environment or pass them as arguments to the `DataIOAPI` constructor.
-Contact the DMS administrators to get the API key and the base URL. The base URL is not yet publicly available.
+You can set these variables in a .env file or pass them as arguments to the `DataIOAPI` constructor.
 
 ## Usage
 
-The package builds an API client for interacting with the DMS API and the S3 filestore. The simplest way to use it is to create an instance of the `DataIOAPI` client class and use the methods to interact with the DMS.
+The package builds an API client for interacting with the API and the S3 filestore. The simplest way to use it is to create an instance of the `DataIOAPI` client class.
 
 ```python
 from dataio import DataIOAPI
@@ -66,9 +65,10 @@ client = DataIOAPI(base_url="api_base_url", api_key="your_api_key") # Use when e
 
 The major functionalities currently supported are:
 
-1. Listing datasets and their tables from the DMS
+1. Listing datasets and their tables
 2. Downloading a complete dataset
 3. Listing tables in a dataset
+4. Downloading shapefiles
 
 
 ### Listing All Datasets
@@ -147,5 +147,6 @@ The API endpoints are documented in the [Endpoints](https://staging.dataio.artpa
 :maxdepth: 2
 :caption: Contents:
 
+Introduction <self>
 examples
 ```

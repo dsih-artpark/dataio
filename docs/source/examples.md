@@ -2,7 +2,7 @@
 
 This page contains a example of using dataio to download all datasets with a particular tag, for eg "Livestock".
 
-### Setting up the Client
+## Setting up the Client
 
 ```python
 from dataio import DataIOAPI
@@ -24,7 +24,7 @@ DATAIO_API_BASE_URL=https://staging.dataio.artpark.ai/api/v1
 DATAIO_API_KEY=your_api_key_here
 ```
 
-### Tags
+## Tags
 
 View available tags in the system to understand what categories of datasets are available:
 
@@ -49,7 +49,7 @@ for tag_name in sorted(all_tags.keys()):
     print(f"Tag: {tag_name} (ID: {tag_info['id']}, {tag_info['count']} datasets)")
 ```
 
-### Downloading Livestock Datasets
+## Downloading Livestock Datasets
 
 Find and download datasets that contain the "Livestock" tag:
 

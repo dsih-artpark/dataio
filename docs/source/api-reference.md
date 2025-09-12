@@ -96,6 +96,10 @@ Get a list of tables within a dataset, including download links.
 - `dataset_id` (str): The dataset ID to get tables for.
 - `bucket_type` (str, optional): Type of bucket. Either "STANDARDISED" or "PREPROCESSED". Defaults to "STANDARDISED".
 
+:::{note}
+Currently, only "STANDARDISED" datasets are available. "PREPROCESSED" datasets are not yet accessible through the API.
+:::
+
 **Returns:**
 - `list`: List of table dictionaries, each containing:
   - `table_name`: Name of the table

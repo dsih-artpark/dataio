@@ -98,7 +98,7 @@ def download_dataset(
         typer.Option(
             "-r", "--root-dir", help="The root directory to download the dataset to."
         ),
-    ] = ".data",
+    ] = "data",
     get_metadata: Annotated[
         bool,
         typer.Option(
@@ -135,7 +135,7 @@ def download_shapefile(
         typer.Option(
             "-f", "--shp-folder", help="The folder to download the shapefile to."
         ),
-    ] = ".data/GS0012DS0051-Shapefiles_India",
+    ] = "data/GS0012DS0051-Shapefiles_India",
 ):
     """Download a shapefile."""
     client = DataIOAPI()

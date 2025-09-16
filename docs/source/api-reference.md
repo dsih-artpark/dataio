@@ -126,7 +126,7 @@ Download a complete dataset with all its tables and metadata.
 **Parameters:**
 - `dataset_id` (str): The dataset ID to download.
 - `bucket_type` (str, optional): Bucket type to download. Defaults to "STANDARDISED".
-- `root_dir` (str, optional): Root directory for downloads. Defaults to ".data".
+- `root_dir` (str, optional): Root directory for downloads. Defaults to "data".
 - `get_metadata` (bool, optional): Whether to download metadata file. Defaults to True.
 - `metadata_format` (str, optional): Format for metadata ("yaml" or "json"). Defaults to "yaml".
 - `update_sync_history` (bool, optional): Whether to update sync history. Defaults to True.
@@ -214,13 +214,13 @@ for shapefile in shapefiles:
     print(f"Name: {shapefile['name']}")
 ```
 
-### `download_shapefile(region_id, shp_folder=".data/GS0012DS0051-Shapefiles_India")`
+### `download_shapefile(region_id, shp_folder="data/GS0012DS0051-Shapefiles_India")`
 
 Download a shapefile for a specific region.
 
 **Parameters:**
 - `region_id` (str): ID of the region to download shapefile for.
-- `shp_folder` (str, optional): Directory to save the shapefile. Defaults to ".data/GS0012DS0051-Shapefiles_India".
+- `shp_folder` (str, optional): Directory to save the shapefile. Defaults to "data/GS0012DS0051-Shapefiles_India".
 
 **Returns:**
 - `str`: Path to the downloaded GeoJSON file.
@@ -283,3 +283,18 @@ Set these in a `.env` file:
 DATAIO_API_BASE_URL=https://staging.dataio.artpark.ai/api/v1
 DATAIO_API_KEY=your_api_key_here
 ```
+
+---
+
+## Related Documentation
+
+### Overview
+- See [Installation](installation.md) for setup instructions
+- Return to the [Introduction](index.md) to access all documentation sections
+
+### SDK Documentation
+- Start with [Getting Started](getting-started.md) for your first API calls
+- Learn about [downloading datasets by tags](examples.md)
+
+### CLI Documentation
+- Use the [CLI Reference](cli-reference.md) for command-line operations

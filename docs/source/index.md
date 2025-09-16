@@ -40,10 +40,24 @@ The API endpoints are documented in the [Endpoints](https://staging.dataio.artpa
 
 ```{toctree}
 :maxdepth: 2
-:caption: Contents:
+:caption: Overview:
 
 Introduction <self>
+installation
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: SDK Documentation:
+
 getting-started
 examples
 api-reference
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: CLI Documentation:
+
+cli-reference
 ```

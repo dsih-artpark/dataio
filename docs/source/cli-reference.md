@@ -7,7 +7,7 @@ DataIO includes a command-line interface (CLI) built with Typer for convenient d
 The CLI is included when you install DataIO:
 
 ```bash
-uv add git+https://github.com/dsih-artpark/dataio.git@staging
+uv add dataio-artpark
 ```
 
 ## Running CLI Commands
@@ -15,15 +15,19 @@ uv add git+https://github.com/dsih-artpark/dataio.git@staging
 You can run CLI commands in two ways:
 
 **Option 1: Using uv run (recommended)**
+
 ```bash
+uv run dataio init
 uv run dataio list-datasets
 uv run dataio download-dataset TS0001DS9999
 ```
 
 **Option 2: Activate virtual environment**
+
 ```bash
 # Activate your virtual environment first
 source .venv/bin/activate  # or your venv activation command
+dataio init
 dataio list-datasets
 dataio download-dataset TS0001DS9999
 ```
@@ -68,17 +72,20 @@ All examples below assume you're using `uv run`. If you've activated your virtua
 List all available datasets with filtering options. Displays results in a formatted table.
 
 **Usage:**
+
 ```bash
 uv run dataio list-datasets [OPTIONS]
 ```
 
 **Options:**
+
 - `--limit INTEGER`: Number of datasets to list (default: 100)
 - `-cl, --collection TEXT`: Filter by collection name or ID
 - `-cg, --category TEXT`: Filter by category name or ID
 - `--help`: Show help message
 
 **Examples:**
+
 ```bash
 # List all datasets (up to 100)
 uv run dataio list-datasets
@@ -98,6 +105,7 @@ uv run dataio list-datasets --collection "Census Data" --category "Livestock" --
 
 **Output:**
 The command displays a formatted table with:
+
 - **ID**: Dataset identifier (ds_id)
 - **Title**: Dataset title
 - **Description**: Dataset description
@@ -112,16 +120,19 @@ If no datasets match the criteria, a helpful message is displayed.
 Download a complete dataset with all its tables and metadata.
 
 **Usage:**
+
 ```bash
 uv run dataio download-dataset DATASET_ID [OPTIONS]
 ```
 
 **Arguments:**
+
 - `DATASET_ID`: The dataset ID to download. Can be:
   - Full ID: `TS0001DS9999`
   - Last 4 digits: `9999`
 
 **Options:**
+
 - `-b, --bucket-type TEXT`: Bucket type to download (default: "STANDARDISED")
 - `-r, --root-dir TEXT`: Root directory for download (default: "data")
 - `-m, --get-metadata / --no-get-metadata`: Include metadata file (default: True)
@@ -129,6 +140,7 @@ uv run dataio download-dataset DATASET_ID [OPTIONS]
 - `--help`: Show help message
 
 **Examples:**
+
 ```bash
 # Basic download
 dataio download-dataset TS0001DS9999
@@ -151,6 +163,7 @@ dataio download-dataset TS0001DS9999 --bucket-type PREPROCESSED
 
 **Output:**
 The command shows the download progress and final destination:
+
 ```
 Dataset TS0001DS9999 downloaded to data/TS0001DS9999-Dataset_Title
 ```
@@ -166,18 +179,22 @@ Currently, only "STANDARDISED" datasets are available. "PREPROCESSED" datasets a
 Download geographic boundary data as GeoJSON files.
 
 **Usage:**
+
 ```bash
 uv run dataio download-shapefile REGION_ID [OPTIONS]
 ```
 
 **Arguments:**
+
 - `REGION_ID`: The region ID to download shapefile for (e.g., "state_29")
 
 **Options:**
+
 - `-f, --shp-folder TEXT`: Folder to download shapefile to (default: "data/GS0012DS0051-Shapefiles_India")
 - `--help`: Show help message
 
 **Examples:**
+
 ```bash
 # Download state shapefile
 dataio download-shapefile state_29
@@ -191,6 +208,7 @@ dataio download-shapefile district_560
 
 **Output:**
 The command shows the download destination:
+
 ```
 Shapefile state_29 downloaded to data/GS0012DS0051-Shapefiles_India/state_29.geojson
 ```
@@ -248,10 +266,12 @@ dataio user --help
 ## Related Documentation
 
 ### Overview
+
 - See [Installation](installation.md) for setup instructions
 - Return to the [Introduction](index.md) to access all documentation sections
 
 ### SDK Documentation
+
 - Start with [Getting Started](getting-started.md) for your first API calls
 - Learn about [downloading datasets by tags](examples.md)
 - Explore the [API Reference](api-reference.md) for complete method documentation

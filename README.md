@@ -1,6 +1,4 @@
-# README - Dataio
-
-[![Netlify Status](https://api.netlify.com/api/v1/badges/83e85c01-20b5-40fb-a972-65f95b1646d4/deploy-status)](https://app.netlify.com/projects/dataio/deploys)
+# dataio-artpark
 
 Dataio is a Postgres and FASTAPI based Dataset Management System (DMS) for users to access and manage datasets distributed by the Data Science Innovation Hub, ARTPARK. The scaffolding can be used to build a similar system for your own datasets.
 
@@ -9,13 +7,13 @@ Dataio is a Postgres and FASTAPI based Dataset Management System (DMS) for users
 Install the project using pip:
 
 ```bash
-pip install git+https://github.com/dsih-artpark/dataio.git
+pip install dataio-artpark
 ```
 
 or using uv:
 
 ```bash
-uv add git+https://github.com/dsih-artpark/dataio.git
+uv add dataio-artpark
 ```
 
 ## Development

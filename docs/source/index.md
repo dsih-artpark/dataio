@@ -15,11 +15,11 @@ and CLI for users. This documentation is for the SDK, which you can use to acces
 
 ## Key Features
 
-DataIO provides a Python SDK for accessing and managing datasets with these core capabilities:
+DataIO provides a Python SDK and a CLIfor accessing and managing datasets with these core capabilities:
 
 1. **Dataset Discovery** - List and search available datasets
 2. **Data Download** - Download complete datasets or individual tables
-3. **Tag-based Filtering** - Find datasets by categories like "Livestock" 
+3. **Tag-based Filtering** - Find datasets by categories like "Livestock"
 4. **Shapefile Support** - Download geographic boundary data
 5. **Metadata Access** - Get comprehensive dataset information
 
@@ -27,12 +27,11 @@ DataIO provides a Python SDK for accessing and managing datasets with these core
 
 DataIO uses the following terminology:
 
-| Term | Description | Example |
-|------|-------------|---------|
-| **Table** | A table is usually a csv file, but can also be a parquet file. This is a collection of records for a specific topic. | Karnataka livestock census district level data |
-| **Dataset** | A dataset is a collection of tables, usually related to a specific overarching topic. | State Livestock Census Data, containing tables for Karnataka and Maharashtra |
-| **Bucket Type** | A bucket type can be either `STANDARDISED` or `PREPROCESSED`: <br> **Standardised**: The data is in a standardised format, ready to be used. This is the default bucket type and the data made available to analysts.<br> **Preprocessed**: The data has been preprocessed by the team and stripped of PII/sensitive information. Not generally made available to analysts. | |
-
+| Term            | Description                                                                                                                                                                                                                                                                                                                                                                 | Example                                                                      |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| **Table**       | A table is usually a csv file, but can also be a parquet file. This is a collection of records for a specific topic.                                                                                                                                                                                                                                                        | Karnataka livestock census district level data                               |
+| **Dataset**     | A dataset is a collection of tables, usually related to a specific overarching topic.                                                                                                                                                                                                                                                                                       | State Livestock Census Data, containing tables for Karnataka and Maharashtra |
+| **Bucket Type** | A bucket type can be either `STANDARDISED` or `PREPROCESSED`: <br> **Standardised**: The data is in a standardised format, ready to be used. This is the default bucket type and the data made available to analysts.<br> **Preprocessed**: The data has been preprocessed by the team and stripped of PII/sensitive information. Not generally made available to analysts. |                                                                              |
 
 ## Endpoints
 
@@ -40,7 +39,7 @@ The API endpoints are documented in the [Endpoints](https://staging.dataio.artpa
 
 ```{toctree}
 :maxdepth: 2
-:caption: Overview:
+:caption: Overview
 
 Introduction <self>
 installation
@@ -48,7 +47,7 @@ installation
 
 ```{toctree}
 :maxdepth: 2
-:caption: SDK Documentation:
+:caption: SDK Documentation
 
 getting-started
 examples
@@ -57,7 +56,7 @@ api-reference
 
 ```{toctree}
 :maxdepth: 2
-:caption: CLI Documentation:
+:caption: CLI Documentation
 
 cli-reference
 ```

@@ -18,7 +18,7 @@ client = DataIOAPI()
 
 # Method 2: Passing credentials directly
 client = DataIOAPI(
-    base_url="https://staging.dataio.artpark.ai/api/v1", 
+    base_url="https://dataio.artpark.ai/api/v1",
     api_key="your_api_key"
 )
 ```
@@ -51,13 +51,16 @@ if datasets:
 Now that you have DataIO set up, you can:
 
 ### SDK Documentation
+
 - Learn about [downloading datasets by tags](examples.md)
 - Explore the [API Reference](api-reference.md) for complete method documentation
 
 ### CLI Documentation
+
 - Use the [CLI Reference](cli-reference.md) for command-line operations
 
 ### Overview
+
 - Return to [Installation](installation.md) if you need to set up DataIO
 - Return to the [Introduction](index.md) to access all documentation sections
 

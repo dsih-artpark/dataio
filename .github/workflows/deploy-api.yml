@@ -36,6 +36,6 @@ jobs:
             cp /home/ubuntu/infra/.dataio-env /home/ubuntu/${{ github.ref_name }}/dataio/.env
             cd dataio
             mkdir logs
-            uv sync --group docs
+            uv sync --group docs --group api
             uv run sphinx-build -b html docs/source docs/build
             sudo supervisorctl restart dataio-app

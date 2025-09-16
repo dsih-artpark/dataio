@@ -4,11 +4,11 @@ import os
 import re
 from datetime import datetime, timezone
 from typing import Optional, Union
-from tabulate import tabulate
 
 import dotenv
 import requests
 import yaml
+from tabulate import tabulate
 
 
 class DatasetList(list):
@@ -237,7 +237,7 @@ class DataIOAPI:
 
         for table_name, table_link in download_links.items():
             file_content = self._get_file(table_link)
-            with open(f"{dataset_dir}/{dataset_id}-{dataset_title}.csv", "wb") as f:
+            with open(f"{dataset_dir}/{table_name}.csv", "wb") as f:
                 f.write(file_content)
 
         if get_metadata:

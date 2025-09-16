@@ -14,10 +14,10 @@ jobs:
       - name: UV Sync & supervisorctl restart
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ secrets.PRIVATE_IP }}
+          host: ${{ secrets.JUMP_SERVER_IP }}
           username: ${{ secrets.USER }}
           key: ${{ secrets.JUMP_SERVER_PRIVATE_KEY }}
-          proxy_host: ${{ secrets.JUMP_SERVER_IP }}
+          proxy_host: ${{ secrets.PRIVATE_IP }}
           proxy_username: ${{ secrets.USER }}
           proxy_key: ${{ secrets.JUMP_SERVER_PRIVATE_KEY }}
           script: |

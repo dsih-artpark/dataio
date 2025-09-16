@@ -1,12 +1,54 @@
+import os
 from typing import Annotated
 
 import typer
+from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
 
 from dataio.sdk.user import DataIOAPI
 
 app = typer.Typer()
+
+
+@app.command("init")
+def init():
+    """Initialize the DataIO CLI."""
+    console = Console()
+    if os.path.exists(".env"):
+        load_dotenv()
+        if os.getenv("DATAIO_API_KEY") and os.getenv("DATAIO_API_BASE_URL"):
+            try:
+                _ = DataIOAPI()
+            except Exception as e:
+                console.print(f"Error initializing DataIO API: {e}")
+                console.print(
+                    "Please check your API Key and API Base URL in your .env file and try again."
+                )
+                return
+            console.print("DataIO CLI initialized successfully!")
+            return
+    # Get the user's API Key
+    api_key = typer.prompt("Enter your API Key")
+    # Get the user's API Base URL
+    api_base_url = typer.prompt(
+        "Enter your API Base URL", default="https://staging.dataio.artpark.ai/api/v1"
+    )
+    # Create a .env file with the API Key and API Base URL
+    with open(".env", "w") as f:
+        f.write(f"DATAIO_API_KEY={api_key}\n")
+        f.write(f"DATAIO_API_BASE_URL={api_base_url}")
+    # Initialize the DataIO API
+    try:
+        _ = DataIOAPI()
+    except Exception as e:
+        console.print(f"Error initializing DataIO CLI: {e}")
+        console.print(
+            "Please check your API Key and API Base URL in your .env file and try again."
+        )
+        return
+    console.print("DataIO CLI initialized successfully!")
+    return
 
 
 @app.command("list-datasets")
@@ -36,6 +78,9 @@ def list_datasets(
     ] = None,
 ):
     """List all datasets."""
+    console = Console()
+    if not os.path.exists(".env"):
+        init
     client = DataIOAPI()
     datasets = client.list_datasets(limit=limit)
 

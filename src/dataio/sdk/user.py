@@ -195,7 +195,7 @@ class DataIOAPI:
         self,
         dataset_id,
         bucket_type="STANDARDISED",
-        root_dir=".data",
+        root_dir="data",
         get_metadata=True,
         metadata_format="yaml",
         update_sync_history=True,
@@ -207,8 +207,8 @@ class DataIOAPI:
         :type dataset_id: str
         :param bucket_type: The type of bucket to download. Defaults to "STANDARDISED". Other option is "PREPROCESSED".
         :type bucket_type: str (default: "STANDARDISED")
-        :param root_dir: The directory to download the dataset to. Defaults to ".data".
-        :type root_dir: str (default: ".data")
+        :param root_dir: The directory to download the dataset to. Defaults to "data".
+        :type root_dir: str (default: "data")
         :param get_metadata: Whether to include metadata in the download links. Defaults to True.
         :type get_metadata: bool (default: True)
         :param metadata_format: The format to download the metadata in. Defaults to "yaml". Other option is "json".
@@ -273,13 +273,13 @@ class DataIOAPI:
         return self._request("GET", "/shapefiles")
 
     def download_shapefile(
-        self, region_id: str, shp_folder: str = ".data/GS0012DS0051-Shapefiles_India"
+        self, region_id: str, shp_folder: str = "data/GS0012DS0051-Shapefiles_India"
     ):
         """Download a shapefile.
 
         :param region_id: The ID of the region to download the shapefile for.
         :type region_id: str
-        :param shp_folder: The folder to download the shapefile to. Defaults to ".data/GS0012DS0051-Shapefiles_India".
+        :param shp_folder: The folder to download the shapefile to. Defaults to "data/GS0012DS0051-Shapefiles_India".
         :type shp_folder: str
         :param compress: Whether to compress the shapefile. Defaults to True.
         :type compress: bool

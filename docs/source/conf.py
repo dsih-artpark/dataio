@@ -32,7 +32,7 @@ extensions = [
     "sphinx.ext.viewcode",  # If you want to include source code
     "sphinx_design",
     "sphinx_copybutton",
-    # "autodoc2",
+    "autodoc2",
     "sphinx_togglebutton",
     # Add other extensions as needed
 ]

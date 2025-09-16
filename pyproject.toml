@@ -45,6 +45,7 @@ api = [
     "pyopenssl>=25.0.0",
     "python-multipart>=0.0.20",
     "sqlalchemy>=2.0.41",
+    "uvicorn>=0.34.3",
 ]
 [project.scripts]
 dataio = "dataio.cli.cli:app"

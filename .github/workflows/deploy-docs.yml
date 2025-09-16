@@ -2,9 +2,7 @@ name: Build and Deploy Docs from staging branch
 
 on:
   push:
-    branches:
-      - staging
-      - production
+    branches: [staging, production]
 
 jobs:
   build-and-deploy:
@@ -19,11 +17,10 @@ jobs:
 
       - name: Build documentation
         run: |
-            uv sync --group docs
-            uv run sphinx-build -b html docs/source docs/build/
-          
+          uv sync --group docs
+          uv run sphinx-build -b html docs/source docs/build/
 
-      - name: Deploy to dataio-docs (staging branch)
+      - name: Deploy to dataio-docs ({{ github.ref_name }} branch)
         uses: peaceiris/actions-gh-pages@v4
         with:
           personal_token: ${{ secrets.DOCS_DEPLOY_TOKEN }}
@@ -32,4 +29,4 @@ jobs:
           publish_branch: ${{ github.ref_name }}
           user_name: github-actions[bot]
           user_email: github-actions[bot]@users.noreply.github.com
-          commit_message: "Deploy docs from dataio@${{ github.sha }} to staging"
+          commit_message: "Deploy docs from dataio@${{ github.sha }} to ${{ github.ref_name }}"

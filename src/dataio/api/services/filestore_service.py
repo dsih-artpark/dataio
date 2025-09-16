@@ -121,8 +121,14 @@ class FilestoreService(BaseService):
         """
         try:
             prefix = self._get_prefix_for_dataset(dataset_id, version_type)
+            metadata_object = self._get_metadata_object(dataset_id, version_type)
+            metadata_object["tables"].pop(file_name)
+            self.bucket.put_object(
+                Body=json.dumps(metadata_object).encode("UTF-8"),
+                Key=f"{prefix}/metadata.json",
+            )
             self.bucket.delete_objects(
-                Delete={"Objects": [{"Key": f"{prefix}/{file_name}"}]}
+                Delete={"Objects": [{"Key": f"{prefix}/{file_name + '.csv'}"}]}
             )
         except Exception as e:
             self.logger.error(f"Failed to delete file: {str(e)}")

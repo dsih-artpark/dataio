@@ -149,6 +149,7 @@ data/*
 **/data_inserts/**
 *.zip
 .data/
+data/
 
 # AI Files
 CLAUDE.md

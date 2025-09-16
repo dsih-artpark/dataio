@@ -12,7 +12,7 @@ client = DataIOAPI()
 
 # Method 2: Passing credentials directly
 client = DataIOAPI(
-    base_url="https://staging.dataio.artpark.ai/api/v1",
+    base_url="https://dataio.artpark.ai/api/v1",
     api_key="your_api_key_here"
 )
 ```
@@ -20,7 +20,7 @@ client = DataIOAPI(
 For Method 1, create a `.env` file in your project root:
 
 ```bash
-DATAIO_API_BASE_URL=https://staging.dataio.artpark.ai/api/v1
+DATAIO_API_BASE_URL=https://dataio.artpark.ai/api/v1
 DATAIO_API_KEY=your_api_key_here
 ```
 
@@ -71,11 +71,11 @@ print(f"Found {len(livestock_datasets)} livestock datasets:")
 # Download all livestock datasets
 for dataset in livestock_datasets:
     print(f"Downloading: {dataset['title']}")
-    
+
     # Show all tags for this dataset
     tag_names = [tag['tag_name'] for tag in dataset.get('tags', [])]
     print(f"Tags: {tag_names}")
-    
+
     try:
         download_path = client.download_dataset(
             dataset['ds_id'],
@@ -84,7 +84,7 @@ for dataset in livestock_datasets:
         print(f"✓ Downloaded to: {download_path}")
     except Exception as e:
         print(f"✗ Failed to download {dataset['ds_id']}: {e}")
-    
+
     print("-" * 50)
 ```
 
@@ -95,12 +95,15 @@ You can modify the example code for other tags.
 ## Related Documentation
 
 ### Overview
+
 - See [Installation](installation.md) for setup instructions
 - Return to the [Introduction](index.md) to access all documentation sections
 
 ### SDK Documentation
+
 - See [Getting Started](getting-started.md) for your first API calls
 - Explore the [API Reference](api-reference.md) for complete method documentation
 
 ### CLI Documentation
+
 - Use the [CLI Reference](cli-reference.md) for command-line operations

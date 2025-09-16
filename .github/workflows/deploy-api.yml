@@ -29,11 +29,11 @@ jobs:
           script: |
             export PATH="/home/ubuntu/.local/bin:$PATH"
             d=$(date +%Y%m%d-%H%M%S)
-            cd /home/ubuntu/staging
+            cd /home/ubuntu/{{ github.ref_name }}
             cp dataio/logs/dataio-api.log logs_backup/dataio/$d.log
             rm -rf dataio
-            git clone git@github.com:dsih-artpark/dataio.git
-            cp /home/ubuntu/infra/.dataio-env /home/ubuntu/staging/dataio/.env
+            git clone -b {{ github.ref_name }} git@github.com:dsih-artpark/dataio.git
+            cp /home/ubuntu/infra/.dataio-env /home/ubuntu/{{ github.ref_name }}/dataio/.env
             cd dataio
             mkdir logs
             uv sync --group docs

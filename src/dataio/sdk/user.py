@@ -4,10 +4,16 @@ import os
 import re
 from datetime import datetime, timezone
 from typing import Optional, Union
+from tabulate import tabulate
 
 import dotenv
 import requests
 import yaml
+
+
+class DatasetList(list):
+    def __str__(self):
+        return tabulate(self, headers="keys")
 
 
 class DataIOAPI:
@@ -63,9 +69,9 @@ class DataIOAPI:
         :rtype: list
         """
         if limit is None or limit == 100:
-            return self._request("GET", "/datasets")
+            return DatasetList(self._request("GET", "/datasets"))
         else:
-            return self._request("GET", f"/datasets?limit={limit}")
+            return DatasetList(self._request("GET", f"/datasets?limit={limit}"))
 
     def list_dataset_tables(self, dataset_id, bucket_type="STANDARDISED"):
         """Get a list of tables for a given dataset, with download links for each table

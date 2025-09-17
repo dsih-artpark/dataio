@@ -1,4 +1,4 @@
-# ARTPARK DataIO Documentation
+# dataio
 
 :::{important}
 
@@ -80,8 +80,6 @@ The API endpoints are documented in the [Endpoints](https://dataio.artpark.ai/en
 3. Add additional advanced datasets
 4. Build a front end to view and interact with the data.
    :::
-
-## Table of Contents
 
 ```{toctree}
 :hidden:

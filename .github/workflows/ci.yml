@@ -1,4 +1,4 @@
-name: dataio API CI/CD to staging/production
+name: dataio CI
 
 on:
   push:

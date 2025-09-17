@@ -1,4 +1,4 @@
-# ARTPARK DataIO Documentation
+# dataio
 
 :::{important}
 
@@ -8,7 +8,9 @@ ARTPARK's dataio is now in alpha (v{{version}}). You can now use it and report y
 ## Overview
 
 ARTPARK's DataIO is a platform for managing and sharing data. It consists of our internal API server which manages the catalogue, and a python SDK
-and CLI for users. This documentation is for the SDK, which you can use to access our data. Please contact us for getting API keys.
+and CLI for users. This documentation is for the SDK, which you can use to access our data. You can find us on PyPI [here](https://pypi.org/project/dataio-artpark/).
+
+Please contact us for getting API keys.
 
 ## Quickstart
 
@@ -40,14 +42,14 @@ DataIO provides a Python SDK and a CLI for accessing and managing datasets with 
 
 We are currently working on a front end to view and interact with the data. For now, you can view the list of datasets using the CLI or SDK.
 
-### CLI
+#### CLI
 
 ```bash
 uv run dataio init
 uv run dataio list-datasets
 ```
 
-### SDK
+#### SDK
 
 ```python
 from dataio import DataIOAPI
@@ -79,9 +81,8 @@ The API endpoints are documented in the [Endpoints](https://dataio.artpark.ai/en
 4. Build a front end to view and interact with the data.
    :::
 
-## Table of Contents
-
 ```{toctree}
+:hidden:
 :maxdepth: 2
 Introduction <self>
 installation

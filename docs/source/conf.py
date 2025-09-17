@@ -48,6 +48,8 @@ autodoc2_skip_module_regexes = [
     r"^.*\.db$",  # Exclude the db module itself
     r"^.*\.db\..*$",  # Exclude any module that contains '.db.' in its path
 ]
+html_file_suffix = None
+html_link_suffix = None
 
 myst_substitutions = {
     "version": __version__,

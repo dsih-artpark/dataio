@@ -1,4 +1,4 @@
-# CLI Reference
+# CLI Documentation
 
 DataIO includes a command-line interface (CLI) built with Typer for convenient dataset management from the terminal. The CLI provides rich, formatted output with tables and colors.
 
@@ -225,6 +225,8 @@ dataio list-datasets --limit 10
 
 # 2. Filter by topic of interest
 dataio list-datasets --category "Livestock"
+# OR
+dataio list-datasets --cg "Livestock"
 
 # 3. Download a specific dataset
 dataio download-dataset TS0001DS9999
@@ -246,7 +248,7 @@ The CLI uses Rich library for enhanced terminal output:
 
 ## Help System
 
-Get help for any command:
+Get help for any command. For e.g.
 
 ```bash
 # General help
@@ -256,22 +258,11 @@ dataio --help
 dataio list-datasets --help
 dataio download-dataset --help
 dataio download-shapefile --help
-
-# User subcommand help
-dataio user --help
 ```
 
----
+```{toctree}
+:hidden:
+:titlesonly:
+:maxdepth: 2
 
-## Related Documentation
-
-### Overview
-
-- See [Installation](installation.md) for setup instructions
-- Return to the [Introduction](index.md) to access all documentation sections
-
-### SDK Documentation
-
-- Start with [Getting Started](getting-started.md) for your first API calls
-- Learn about [downloading datasets by tags](examples.md)
-- Explore the [API Reference](api-reference.md) for complete method documentation
+```

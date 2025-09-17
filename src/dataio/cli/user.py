@@ -22,18 +22,18 @@ def init():
     )
     if os.path.exists(".env"):
         load_dotenv()
-        if os.getenv("DATAIO_API_KEY") and os.getenv("DATAIO_API_BASE_URL"):
-            try:
-                _ = DataIOAPI()
-            except Exception as e:
-                console.print(f"Error initializing DataIO API: {e}", style="bold red")
-                console.print(
-                    "Please check your API Key and API Base URL in your .env file and try again.",
-                    style="bold red",
-                )
-                return
-            console.print("DataIO CLI initialized successfully!", style="bold green")
+    if os.getenv("DATAIO_API_KEY") and os.getenv("DATAIO_API_BASE_URL"):
+        try:
+            _ = DataIOAPI()
+        except Exception as e:
+            console.print(f"Error initializing DataIO API: {e}", style="bold red")
+            console.print(
+                "Please check your API Key and API Base URL in your .env file and try again.",
+                style="bold red",
+            )
             return
+        console.print("DataIO CLI initialized successfully!", style="bold green")
+        return
     # Get the user's API Key
     api_key = typer.prompt("Enter your API Key", hide_input=True)
     # Get the user's API Base URL

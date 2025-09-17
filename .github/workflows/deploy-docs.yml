@@ -2,7 +2,7 @@ name: Build and Deploy Docs from staging branch
 
 on:
   push:
-    branches: [staging, production]
+    branches: [staging]
 
 jobs:
   build-and-deploy:

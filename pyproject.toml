@@ -1,6 +1,6 @@
 [project]
 name = "dataio-artpark"
-version = "0.4.0b7"
+version = "0.4.0b11"
 description = "Postgres and FASTAPI based Dataset Management System (DMS), with a CLI and SDK for interacting with the API."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -19,6 +19,10 @@ dependencies = [
     "tabulate>=0.9.0",
     "typer>=0.16.0"
 ]
+
+[project.urls]
+Homepage = "https://dataio.artpark.ai"
+Github = "https://github.com/dsih-artpark/dataio"
 
 [dependency-groups]
 dev = [

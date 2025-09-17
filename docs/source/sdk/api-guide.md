@@ -1,4 +1,4 @@
-# API Reference
+# SDK API Guide
 
 Complete reference for the `DataIOAPI` client class.
 
@@ -33,7 +33,7 @@ client = DataIOAPI()
 
 # Passing credentials directly
 client = DataIOAPI(
-    base_url="https://staging.dataio.artpark.ai/api/v1",
+    base_url="https://dataio.artpark.ai/api/v1",
     api_key="your_api_key"
 )
 ```
@@ -309,24 +309,6 @@ The client uses these environment variables:
 Set these in a `.env` file:
 
 ```bash
-DATAIO_API_BASE_URL=https://staging.dataio.artpark.ai/api/v1
+DATAIO_API_BASE_URL=https://dataio.artpark.ai/api/v1
 DATAIO_API_KEY=your_api_key_here
 ```
-
----
-
-## Related Documentation
-
-### Overview
-
-- See [Installation](installation.md) for setup instructions
-- Return to the [Introduction](index.md) to access all documentation sections
-
-### SDK Documentation
-
-- Start with [Getting Started](getting-started.md) for your first API calls
-- Learn about [downloading datasets by tags](examples.md)
-
-### CLI Documentation
-
-- Use the [CLI Reference](cli-reference.md) for command-line operations

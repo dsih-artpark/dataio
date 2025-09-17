@@ -2,7 +2,7 @@
 
 :::{important}
 
-ARTPARK's dataio is now in alpha (v{{version}}). You can now use it and report your issues and feedback to (sneha) / (akhil) (AT) artpark (dot) in.
+ARTPARK's dataio is in beta (v{{version}})! You can now use it and report your issues and feedback to (sneha) / (akhil) (AT) artpark (dot) in.
 :::
 
 ## Overview

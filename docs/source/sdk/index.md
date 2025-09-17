@@ -1,9 +1,27 @@
-# Getting Started
+# SDK Documentation
 
-This guide will help you make your first API calls with ARTPARK DataIO.
+```{toctree}
+:hidden:
+:titlesonly:
+:maxdepth: 2
+:caption: Examples
+eg-download-dataset-by-tags
+```
+
+```{toctree}
+:hidden:
+:titlesonly:
+:maxdepth: 2
+:caption: API Reference
+api-guide
+```
+
+## Quick Start
+
+This guide will help you make your first API calls with ARTPARK DataIO using the python SDK.
 
 :::{note}
-Make sure you have completed the [Installation](installation.md) steps before proceeding.
+Make sure you have completed the [Installation](/installation.md) steps before proceeding.
 :::
 
 ## Creating Your First Client
@@ -18,7 +36,7 @@ client = DataIOAPI()
 
 # Method 2: Passing credentials directly
 client = DataIOAPI(
-    base_url="https://dataio.artpark.ai/api/v1",
+    base_url="https://dataio.artpark.ai/api/v1/",
     api_key="your_api_key"
 )
 ```
@@ -45,24 +63,6 @@ if datasets:
     print(f"First dataset: {first_dataset['title']}")
     print(f"Dataset ID: {first_dataset['ds_id']}")
 ```
-
-## What's Next?
-
-Now that you have DataIO set up, you can:
-
-### SDK Documentation
-
-- Learn about [downloading datasets by tags](examples.md)
-- Explore the [API Reference](api-reference.md) for complete method documentation
-
-### CLI Documentation
-
-- Use the [CLI Reference](cli-reference.md) for command-line operations
-
-### Overview
-
-- Return to [Installation](installation.md) if you need to set up DataIO
-- Return to the [Introduction](index.md) to access all documentation sections
 
 :::{tip}
 Contact the DataIO administrators to get your API key if you haven't already. The API endpoint is currently in staging and not publicly available.

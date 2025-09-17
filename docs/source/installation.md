@@ -24,10 +24,23 @@ It is always recommended to use a virtual environment to install the package, re
 
 The client relies on two variables to authenticate with the API Server:
 
-1. `DATAIO_API_BASE_URL`: The base URL of the API. The current staging environment is at http://staging.dataio.artpark.ai/api/v1
+1. `DATAIO_API_BASE_URL`: The base URL of the API. The current environment is at http://dataio.artpark.ai/api/v1/
 2. `DATAIO_API_KEY`: The API key for the API.
 
 You can set these variables in a .env file or pass them as arguments to the `DataIOAPI` constructor.
+
+You can also run
+
+```bash
+uv run dataio init
+# OR using venv
+source .venv/bin/activate
+dataio init
+```
+
+This will prompt you to enter your API key and set the default base URL to https://dataio.artpark.ai/api/v1/.
+
+This will create a .env file in your project root with the API key and base URL.
 
 ### Setting up Environment Variables
 
@@ -71,23 +84,9 @@ dataio --help
 ## Getting API Access
 
 :::{tip}
-Contact the DataIO administrators to get your API key if you haven't already. The API endpoint is currently in staging and not publicly available.
+Contact the DataIO administrators to get your API key if you haven't already.
 :::
 
 ## What's Next?
 
-Now that you have DataIO installed and configured, you can:
-
-### SDK Documentation
-
-- Continue with [Getting Started](getting-started.md) for your first API calls
-- Learn about [downloading datasets by tags](examples.md)
-- Explore the [API Reference](api-reference.md) for complete method documentation
-
-### CLI Documentation
-
-- Use the [CLI Reference](cli-reference.md) for command-line operations
-
-### Navigation
-
-Return to the [Introduction](index.md) to access all documentation sections.
+Now that you have DataIO installed and configured, you can continue with [Quick Start](/sdk/index.md) for your first API calls through the SDK, or use the [CLI Guide](/cli/index.md) for command-line operations

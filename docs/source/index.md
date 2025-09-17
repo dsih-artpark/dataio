@@ -1,11 +1,8 @@
 # ARTPARK DataIO Documentation
 
-:::{caution}
-ARTPARK's dataio is in alpha (v0.3.0-alpha) and is neither a release candidate nor ready for production use.
-:::
+:::{important}
 
-:::{note}
-This documentation is a work in progress. Feedback on how to improve it is welcome.
+ARTPARK's dataio is now in alpha (v{{version}}). You can now use it and report your issues and feedback to (sneha) / (akhil) (AT) artpark (dot) in.
 :::
 
 ## Overview
@@ -13,15 +10,52 @@ This documentation is a work in progress. Feedback on how to improve it is welco
 ARTPARK's DataIO is a platform for managing and sharing data. It consists of our internal API server which manages the catalogue, and a python SDK
 and CLI for users. This documentation is for the SDK, which you can use to access our data. Please contact us for getting API keys.
 
+## Quickstart
+
+You can start by reading the [Quick Start](/sdk/index.md) guide for the SDK, or the [CLI Guide](/cli/index.md) for the CLI. The package is available on PyPI, and you can install it using pip or uv.
+
+```bash
+venv .venv
+source .venv/bin/activate
+
+pip install dataio-artpark
+```
+
+or using uv:
+
+```bash
+uv init
+uv add dataio-artpark
+```
+
 ## Key Features
 
-DataIO provides a Python SDK and a CLIfor accessing and managing datasets with these core capabilities:
+DataIO provides a Python SDK and a CLI for accessing and managing datasets with these core capabilities:
 
 1. **Dataset Discovery** - List and search available datasets
 2. **Data Download** - Download complete datasets or individual tables
 3. **Tag-based Filtering** - Find datasets by categories like "Livestock"
 4. **Shapefile Support** - Download geographic boundary data
 5. **Metadata Access** - Get comprehensive dataset information
+
+We are currently working on a front end to view and interact with the data. For now, you can view the list of datasets using the CLI or SDK.
+
+### CLI
+
+```bash
+uv run dataio init
+uv run dataio list-datasets
+```
+
+### SDK
+
+```python
+from dataio import DataIOAPI
+
+client = DataIOAPI()
+datasets = client.list_datasets()
+print(datasets)
+```
 
 ## Terminology
 
@@ -35,28 +69,23 @@ DataIO uses the following terminology:
 
 ## Endpoints
 
-The API endpoints are documented in the [Endpoints](https://staging.dataio.artpark.ai/endpoints) page.
+The API endpoints are documented in the [Endpoints](https://dataio.artpark.ai/endpoints) page.
+
+:::{todo}
+
+1. Add support for additional file types
+2. Comply with NDAP/NITI Aayog's Data Standardisation Protocols for all geospatial data
+3. Add additional advanced datasets
+4. Build a front end to view and interact with the data.
+   :::
+
+## Table of Contents
 
 ```{toctree}
 :maxdepth: 2
-:caption: Overview
-
 Introduction <self>
 installation
-```
-
-```{toctree}
-:maxdepth: 2
-:caption: SDK Documentation
-
-getting-started
-examples
-api-reference
-```
-
-```{toctree}
-:maxdepth: 2
-:caption: CLI Documentation
-
-cli-reference
+sdk/index
+cli/index
+apidocs/index
 ```

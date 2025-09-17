@@ -32,13 +32,27 @@ extensions = [
     "sphinx.ext.viewcode",  # If you want to include source code
     "sphinx_design",
     "sphinx_copybutton",
-    # "autodoc2",
+    "autodoc2",
     "sphinx_togglebutton",
+    "sphinx.ext.todo",
     # Add other extensions as needed
 ]
 
 html_logo = "_static/logo.png"
-# autodoc2_packages = ["../../src/dataio"]
+autodoc2_packages = ["../../src/dataio"]
+autodoc2_render_plugin = "myst"
+
+autodoc2_skip_module_regexes = [
+    r"^.*\.api$",  # Exclude the api module itself (e.g., dataio.api)
+    r"^.*\.api\..*$",  # Exclude any module that contains '.api.' in its path
+    r"^.*\.db$",  # Exclude the db module itself
+    r"^.*\.db\..*$",  # Exclude any module that contains '.db.' in its path
+]
+
+myst_substitutions = {
+    "version": __version__,
+    "project_name": project,
+}
 
 # autodoc2_output_dir = "api"  # Where API docs will be stored
 # autodoc2_render_plugin = "myst"  # Use Markdown output for API docs

@@ -70,7 +70,7 @@ DataIO uses the following terminology:
 
 ## Endpoints
 
-The API endpoints are documented in the [Endpoints]({base_url}/api/{api_version}) page.
+The API endpoints are documented in the [Endpoints]({{base_url}}/api/{{api_version}}) page.
 
 :::{todo}
 

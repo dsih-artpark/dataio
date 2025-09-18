@@ -37,7 +37,7 @@ dataio download-dataset TS0001DS9999
 The CLI uses the same environment variables as the Python SDK:
 
 ```bash
-DATAIO_API_BASE_URL=https://staging.dataio.artpark.ai/api/v1
+DATAIO_API_BASE_URL="https://dataio.artpark.ai/api/v1"
 DATAIO_API_KEY=your_api_key_here
 ```
 

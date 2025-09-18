@@ -1,7 +1,6 @@
 # dataio
 
 :::{important}
-
 ARTPARK's dataio is in beta (v{{version}})! You can now use it and report your issues and feedback to (sneha) / (akhil) (AT) artpark (dot) in.
 :::
 
@@ -42,14 +41,14 @@ DataIO provides a Python SDK and a CLI for accessing and managing datasets with 
 
 We are currently working on a front end to view and interact with the data. For now, you can view the list of datasets using the CLI or SDK.
 
-#### CLI
+CLI:
 
 ```bash
 uv run dataio init
 uv run dataio list-datasets
 ```
 
-#### SDK
+SDK:
 
 ```python
 from dataio import DataIOAPI
@@ -71,7 +70,7 @@ DataIO uses the following terminology:
 
 ## Endpoints
 
-The API endpoints are documented in the [Endpoints](https://dataio.artpark.ai/endpoints) page.
+The API endpoints are documented in the {{ '[Endpoints](url)'.replace('url', api_url) }} page.
 
 :::{todo}
 
@@ -89,4 +88,6 @@ installation
 sdk/index
 cli/index
 apidocs/index
+CHANGELOG <CHANGELOG>
+CONTRIBUTING <CONTRIBUTING>
 ```

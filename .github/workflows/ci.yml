@@ -21,6 +21,7 @@ jobs:
           proxy_username: ${{ secrets.USER }}
           proxy_key: ${{ secrets.JUMP_SERVER_PRIVATE_KEY }}
           script: |
+            export ENV=${{ github.ref_name }}
             export PATH="/home/ubuntu/.local/bin:$PATH"
             d=$(date +%Y%m%d-%H%M%S)
             cd /home/ubuntu/${{ github.ref_name }}

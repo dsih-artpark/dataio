@@ -534,6 +534,27 @@ def check_rate_limit_exceeded(user_email: str, access_point: str):
         raise
 
 
+def get_children_regions(parent_region_id: str):
+    """
+    Get all direct children regions for a given parent region_id.
+
+    Args:
+        parent_region_id: The region_id of the parent region
+
+    Returns:
+        List of Region objects that have the specified parent_region_id
+    """
+    session = Session()
+    try:
+        children = session.query(Region).filter(Region.parent_region_id == parent_region_id).all()
+        return children
+    except Exception as e:
+        logger.error(f"Error fetching children regions from DB: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
 def update_shapefile_rate_limit(user_email: str):
     session = Session()
     try:

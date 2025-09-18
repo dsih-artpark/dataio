@@ -57,7 +57,7 @@ pg_dump -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
 
 echo "Dumping data to $LOCAL_DATA_DUMP_LOCATION..."
 pg_dump -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
-  --data-only --no-owner --no-acl > "$LOCAL_DATA_DUMP_LOCATION"
+  --data-only --exclude-table db_migration_history --no-owner --no-acl > "$LOCAL_DATA_DUMP_LOCATION"
 
 # Copy schema to repository location if needed
 cp "$LOCAL_SCHEMA_DUMP_LOCATION" "$REPO_SCHEMA_DUMP_LOCATION"

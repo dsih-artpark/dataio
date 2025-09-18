@@ -125,3 +125,9 @@ class TableMetadata(BaseModel):
     description: Optional[str] = None
     source: Optional[str] = None
     data_dictionary: Optional[Dict[str, DataDictionaryItem]] = None
+
+
+class RegionResponse(BaseModel):
+    region_id: str
+    region_name: str
+    parent_region_id: Optional[str] = None

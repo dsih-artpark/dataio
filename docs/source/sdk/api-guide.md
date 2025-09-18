@@ -217,7 +217,33 @@ metadata = client.construct_dataset_metadata(dataset_details)
 
 ---
 
-## Shapefile Methods
+## Region and Shapefile Methods
+
+### `get_children_regions(region_id)`
+
+Get all direct children regions for a given parent region.
+
+**Parameters:**
+
+- `region_id` (str): The ID of the parent region to get children for.
+
+**Returns:**
+
+- `list`: List of region dictionaries containing metadata for each child region.
+
+**Example:**
+
+```python
+# Get children of a state region
+children = client.get_children_regions("state_29")
+
+for child in children:
+    print(f"Region ID: {child['region_id']}")
+    print(f"Name: {child['region_name']}")
+    print(f"Parent: {child['parent_region_id']}")
+```
+
+**API Endpoint:** `GET /api/v1/regions/{region_id}/children`
 
 ### `get_shapefile_list()`
 

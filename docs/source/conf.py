@@ -5,6 +5,7 @@
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
+import os
 from datetime import date
 from typing import Any, Dict
 
@@ -54,7 +55,9 @@ html_link_suffix = None
 myst_substitutions = {
     "version": __version__,
     "project_name": project,
+    "api_version": "v1",
 }
+
 
 # autodoc2_output_dir = "api"  # Where API docs will be stored
 # autodoc2_render_plugin = "myst"  # Use Markdown output for API docs
@@ -104,3 +107,10 @@ html_theme_options: Dict[str, Any] = {
     "source_branch": "production",
     "source_directory": "docs/source",
 }
+
+if os.getenv("ENV").lower() == "production":
+    html_theme_options["source_branch"] = "production"
+    myst_substitutions["base_url"] = "https://dataio.artpark.ai"
+elif os.getenv("ENV").lower() == "staging":
+    html_theme_options["source_branch"] = "staging"
+    myst_substitutions["base_url"] = "https://staging.dataio.artpark.ai"

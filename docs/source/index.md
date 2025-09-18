@@ -1,7 +1,6 @@
 # dataio
 
 :::{important}
-
 ARTPARK's dataio is in beta (v{{version}})! You can now use it and report your issues and feedback to (sneha) / (akhil) (AT) artpark (dot) in.
 :::
 
@@ -71,7 +70,7 @@ DataIO uses the following terminology:
 
 ## Endpoints
 
-The API endpoints are documented in the [Endpoints](../api/v1) page.
+The API endpoints are documented in the [Endpoints]({base_url}/api/{api_version}) page.
 
 :::{todo}
 

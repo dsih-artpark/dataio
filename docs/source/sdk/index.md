@@ -1,0 +1,69 @@
+# SDK Documentation
+
+```{toctree}
+:hidden:
+:titlesonly:
+:maxdepth: 2
+:caption: Examples
+eg-download-dataset-by-tags
+```
+
+```{toctree}
+:hidden:
+:titlesonly:
+:maxdepth: 2
+:caption: API Reference
+api-guide
+```
+
+## Quick Start
+
+This guide will help you make your first API calls with ARTPARK DataIO using the python SDK.
+
+:::{note}
+Make sure you have completed the [Installation](/installation.md) steps before proceeding.
+:::
+
+## Creating Your First Client
+
+The package builds an API client for interacting with the API and the S3 filestore. The simplest way to use it is to create an instance of the `DataIOAPI` client class. It is assumed that you've already set up the environment variables for the API key and base URL, as described in the [](#configuration) guide.
+
+```python
+from dataio import DataIOAPI
+
+# Method 1: Using environment variables (recommended)
+client = DataIOAPI()
+
+# Method 2: Passing credentials directly
+client = DataIOAPI(
+    base_url="https://dataio.artpark.ai/api/v1/",
+    api_key="your_api_key"
+)
+```
+
+## Your First API Call
+
+Let's start by listing the datasets you have access to:
+
+```python
+from dataio import DataIOAPI
+
+# Create client
+client = DataIOAPI()
+
+# Get all available datasets
+datasets = client.list_datasets()
+
+# Print basic information
+print(f"You have access to {len(datasets)} datasets")
+
+# Show first dataset details
+if datasets:
+    first_dataset = datasets[0]
+    print(f"First dataset: {first_dataset['title']}")
+    print(f"Dataset ID: {first_dataset['ds_id']}")
+```
+
+:::{tip}
+Contact the DataIO administrators to get your API key if you haven't already. The API endpoint is currently in staging and not publicly available.
+:::

@@ -8,6 +8,12 @@ from typing import Optional, Union
 import dotenv
 import requests
 import yaml
+from tabulate import tabulate
+
+
+class DatasetList(list):
+    def __str__(self):
+        return tabulate(self, headers="keys")
 
 
 class DataIOAPI:
@@ -23,7 +29,7 @@ class DataIOAPI:
     """
 
     def __init__(self, base_url: Optional[str] = None, api_key: Optional[str] = None):
-        dotenv.load_dotenv()
+        dotenv.load_dotenv(override=True)
         if base_url is None:
             base_url = os.getenv("DATAIO_API_BASE_URL", None)
         if base_url is None:
@@ -63,9 +69,9 @@ class DataIOAPI:
         :rtype: list
         """
         if limit is None or limit == 100:
-            return self._request("GET", "/datasets")
+            return DatasetList(self._request("GET", "/datasets"))
         else:
-            return self._request("GET", f"/datasets?limit={limit}")
+            return DatasetList(self._request("GET", f"/datasets?limit={limit}"))
 
     def list_dataset_tables(self, dataset_id, bucket_type="STANDARDISED"):
         """Get a list of tables for a given dataset, with download links for each table
@@ -195,7 +201,7 @@ class DataIOAPI:
         self,
         dataset_id,
         bucket_type="STANDARDISED",
-        root_dir=".data",
+        root_dir="data",
         get_metadata=True,
         metadata_format="yaml",
         update_sync_history=True,
@@ -207,8 +213,8 @@ class DataIOAPI:
         :type dataset_id: str
         :param bucket_type: The type of bucket to download. Defaults to "STANDARDISED". Other option is "PREPROCESSED".
         :type bucket_type: str (default: "STANDARDISED")
-        :param root_dir: The directory to download the dataset to. Defaults to ".data".
-        :type root_dir: str (default: ".data")
+        :param root_dir: The directory to download the dataset to. Defaults to "data".
+        :type root_dir: str (default: "data")
         :param get_metadata: Whether to include metadata in the download links. Defaults to True.
         :type get_metadata: bool (default: True)
         :param metadata_format: The format to download the metadata in. Defaults to "yaml". Other option is "json".
@@ -231,7 +237,7 @@ class DataIOAPI:
 
         for table_name, table_link in download_links.items():
             file_content = self._get_file(table_link)
-            with open(f"{dataset_dir}/{dataset_id}-{dataset_title}.csv", "wb") as f:
+            with open(f"{dataset_dir}/{table_name}.csv", "wb") as f:
                 f.write(file_content)
 
         if get_metadata:
@@ -273,13 +279,13 @@ class DataIOAPI:
         return self._request("GET", "/shapefiles")
 
     def download_shapefile(
-        self, region_id: str, shp_folder: str = ".data/GS0012DS0051-Shapefiles_India"
+        self, region_id: str, shp_folder: str = "data/GS0012DS0051-Shapefiles_India"
     ):
         """Download a shapefile.
 
         :param region_id: The ID of the region to download the shapefile for.
         :type region_id: str
-        :param shp_folder: The folder to download the shapefile to. Defaults to ".data/GS0012DS0051-Shapefiles_India".
+        :param shp_folder: The folder to download the shapefile to. Defaults to "data/GS0012DS0051-Shapefiles_India".
         :type shp_folder: str
         :param compress: Whether to compress the shapefile. Defaults to True.
         :type compress: bool

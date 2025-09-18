@@ -1,12 +1,63 @@
+import os
 from typing import Annotated
 
 import typer
+from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
 
 from dataio.sdk.user import DataIOAPI
 
 app = typer.Typer()
+
+
+@app.command("init")
+def init():
+    """Initialize the DataIO CLI."""
+    console = Console()
+    console.print("Welcome to the DataIO CLI! Initializing...", style="bold green")
+    console.print(
+        "Checking if .env file with API Key and API Base URL exists...",
+        style="bold yellow",
+    )
+    if os.path.exists(".env"):
+        load_dotenv()
+    if os.getenv("DATAIO_API_KEY") and os.getenv("DATAIO_API_BASE_URL"):
+        try:
+            _ = DataIOAPI()
+        except Exception as e:
+            console.print(f"Error initializing DataIO API: {e}", style="bold red")
+            console.print(
+                "Please check your API Key and API Base URL in your .env file and try again.",
+                style="bold red",
+            )
+            return
+        console.print("DataIO CLI initialized successfully!", style="bold green")
+        return
+    # Get the user's API Key
+    api_key = typer.prompt("Enter your API Key", hide_input=True)
+    # Get the user's API Base URL
+    api_base_url = typer.prompt(
+        "Enter your API Base URL",
+        default="https://dataio.artpark.ai/api/v1",
+        show_default=True,
+    )
+    # Create a .env file with the API Key and API Base URL
+    with open(".env", "w") as f:
+        f.write(f"DATAIO_API_KEY={api_key}\n")
+        f.write(f"DATAIO_API_BASE_URL={api_base_url}")
+    # Initialize the DataIO API
+    try:
+        _ = DataIOAPI()
+    except Exception as e:
+        console.print(f"Error initializing DataIO CLI: {e}", style="bold red")
+        console.print(
+            "Please check your API Key and API Base URL in your .env file and try again.",
+            style="bold red",
+        )
+        return
+    console.print("DataIO CLI initialized successfully!", style="bold green")
+    return
 
 
 @app.command("list-datasets")
@@ -36,6 +87,9 @@ def list_datasets(
     ] = None,
 ):
     """List all datasets."""
+    console = Console()
+    if not os.path.exists(".env"):
+        init
     client = DataIOAPI()
     datasets = client.list_datasets(limit=limit)
 
@@ -98,7 +152,7 @@ def download_dataset(
         typer.Option(
             "-r", "--root-dir", help="The root directory to download the dataset to."
         ),
-    ] = ".data",
+    ] = "data",
     get_metadata: Annotated[
         bool,
         typer.Option(
@@ -135,7 +189,7 @@ def download_shapefile(
         typer.Option(
             "-f", "--shp-folder", help="The folder to download the shapefile to."
         ),
-    ] = ".data/GS0012DS0051-Shapefiles_India",
+    ] = "data/GS0012DS0051-Shapefiles_India",
 ):
     """Download a shapefile."""
     client = DataIOAPI()

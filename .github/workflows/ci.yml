@@ -1,0 +1,36 @@
+name: dataio CI
+
+on:
+  push:
+    branches: [staging, production]
+
+jobs:
+  deploy_api:
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.ref_name }}_api
+
+    steps:
+      - name: UV Sync & supervisorctl restart
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.PRIVATE_IP }}
+          username: ${{ secrets.USER }}
+          key: ${{ secrets.JUMP_SERVER_PRIVATE_KEY }}
+          proxy_host: ${{ secrets.JUMP_SERVER_IP }}
+          proxy_username: ${{ secrets.USER }}
+          proxy_key: ${{ secrets.JUMP_SERVER_PRIVATE_KEY }}
+          script: |
+            export ENV=${{ github.ref_name }}
+            export PATH="/home/ubuntu/.local/bin:$PATH"
+            d=$(date +%Y%m%d-%H%M%S)
+            cd /home/ubuntu/${{ github.ref_name }}
+            cp dataio/logs/dataio-api.log logs_backup/dataio/$d.log
+            rm -rf dataio
+            git clone -b ${{ github.ref_name }} git@github.com:dsih-artpark/dataio.git
+            cp /home/ubuntu/infra/.dataio-env /home/ubuntu/${{ github.ref_name }}/dataio/.env
+            cd dataio
+            mkdir logs
+            uv sync --group docs --group api
+            uv run sphinx-build -b html docs/source docs/build
+            sudo supervisorctl restart dataio-app

@@ -1,7 +1,8 @@
+from typing import List
 from fastapi import HTTPException, Query, Depends, APIRouter
 from fastapi.responses import Response
 import logging
-from dataio.api.models import User, VersionType
+from dataio.api.models import User, VersionType, RegionResponse
 from dataio.api.auth import get_user
 from dataio.api.services import UserService
 from dataio.api.auth.exceptions import AuthenticationError
@@ -75,3 +76,22 @@ async def get_shapefile(
         },
         media_type="application/gzip",
     )
+
+
+@user_router.get("/regions/{region_id}/children", response_model=List[RegionResponse])
+async def get_children_regions(
+    region_id: str,
+    user: User = Depends(get_user),
+    user_service: UserService = Depends(UserService),
+):
+    """
+    Get all direct children regions for a given region_id.
+
+    Parameters:
+    - region_id: The ID of the parent region
+
+    Returns:
+    - List of direct children regions with their metadata
+    """
+    logger.info(f"CHILDREN_REGIONS_REQUEST: {user.email} for region {region_id}")
+    return user_service.get_children_regions(region_id, user)

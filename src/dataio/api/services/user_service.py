@@ -156,3 +156,31 @@ class UserService(BaseService):
                 status_code=500,
                 detail="Failed to get shapefiles list. Contact support.",
             )
+
+    def get_children_regions(self, region_id: str, user: User):
+        """
+        Get all direct children regions for a given region_id.
+        """
+        try:
+            children_regions = database.get_children_regions(region_id)
+
+            if not children_regions:
+                return []
+
+            # Convert to response format
+            children_list = [
+                {
+                    "region_id": region.region_id,
+                    "region_name": region.region_name,
+                    "parent_region_id": region.parent_region_id,
+                }
+                for region in children_regions
+            ]
+
+            return children_list
+        except Exception as e:
+            self.logger.error(f"Failed to get children regions: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to get children regions. Contact support.",
+            )

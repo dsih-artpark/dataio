@@ -49,6 +49,8 @@ autodoc2_skip_module_regexes = [
     r"^.*\.api\..*$",  # Exclude any module that contains '.api.' in its path
     r"^.*\.db$",  # Exclude the db module itself
     r"^.*\.db\..*$",  # Exclude any module that contains '.db.' in its path
+    r"^.*\.cli$",  # Exclude the cli module itself (e.g., dataio.cli)
+    r"^.*\.cli\..*$",  # Exclude any module that contains '.cli.' in its path
 ]
 html_file_suffix = None
 html_link_suffix = None

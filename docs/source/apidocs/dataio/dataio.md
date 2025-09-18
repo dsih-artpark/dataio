@@ -13,7 +13,6 @@
 :titlesonly:
 :maxdepth: 3
 
-dataio.cli
 dataio.sdk
 ```
 

@@ -20,11 +20,13 @@ pip install dataio-artpark
 
 It is always recommended to use a virtual environment to install the package, regardless of the installation method. `uv` provides a seamless way to create and manage virtual environments within the same command.
 
+(configuration)=
+
 ## Configuration
 
 The client relies on two variables to authenticate with the API Server:
 
-1. `DATAIO_API_BASE_URL`: The base URL of the API. The current environment is at http://dataio.artpark.ai/api/v1/
+1. `DATAIO_API_BASE_URL`: The base URL of the API. Generally, this is https://dataio.artpark.ai/api/v1/
 2. `DATAIO_API_KEY`: The API key for the API.
 
 You can set these variables in a .env file or pass them as arguments to the `DataIOAPI` constructor.
@@ -38,18 +40,14 @@ source .venv/bin/activate
 dataio init
 ```
 
-This will prompt you to enter your API key and set the default base URL to https://dataio.artpark.ai/api/v1/.
-
-This will create a .env file in your project root with the API key and base URL.
-
-### Setting up Environment Variables
-
-Create a `.env` file in your project root:
+This will prompt you to enter your API key and set the default base URL and create an `.env` file in your project root:
 
 ```bash
 DATAIO_API_BASE_URL=https://dataio.artpark.ai/api/v1
 DATAIO_API_KEY=your_api_key_here
 ```
+
+You can also di this manually.
 
 ## Verifying Installation
 

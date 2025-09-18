@@ -70,7 +70,7 @@ DataIO uses the following terminology:
 
 ## Endpoints
 
-The API endpoints are documented in the [Endpoints]({{base_url}}/api/{{api_version}}) page.
+The API endpoints are documented in the {{ '[Endpoints](url)'.replace('url', api_url) }} page.
 
 :::{todo}
 
@@ -88,4 +88,6 @@ installation
 sdk/index
 cli/index
 apidocs/index
+CHANGELOG <CHANGELOG>
+CONTRIBUTING <CONTRIBUTING>
 ```

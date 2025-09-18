@@ -39,7 +39,7 @@ def init():
     # Get the user's API Base URL
     api_base_url = typer.prompt(
         "Enter your API Base URL",
-        default="https://staging.dataio.artpark.ai/api/v1",
+        default="https://dataio.artpark.ai/api/v1",
         show_default=True,
     )
     # Create a .env file with the API Key and API Base URL

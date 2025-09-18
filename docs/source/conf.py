@@ -5,6 +5,7 @@
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
+import os
 from datetime import date
 from typing import Any, Dict
 
@@ -37,6 +38,7 @@ extensions = [
     "sphinx.ext.todo",
     # Add other extensions as needed
 ]
+todo_include_todos = True
 
 html_logo = "_static/logo.png"
 autodoc2_packages = ["../../src/dataio"]
@@ -54,7 +56,9 @@ html_link_suffix = None
 myst_substitutions = {
     "version": __version__,
     "project_name": project,
+    "api_version": "v1",
 }
+
 
 # autodoc2_output_dir = "api"  # Where API docs will be stored
 # autodoc2_render_plugin = "myst"  # Use Markdown output for API docs
@@ -104,3 +108,20 @@ html_theme_options: Dict[str, Any] = {
     "source_branch": "production",
     "source_directory": "docs/source",
 }
+
+env = os.getenv("ENV", "").lower()
+if env == "production":
+    html_theme_options["source_branch"] = "production"
+    myst_substitutions["api_url"] = (
+        f"https://dataio.artpark.ai/api/{myst_substitutions['api_version']}"
+    )
+elif env == "staging":
+    html_theme_options["source_branch"] = "staging"
+    myst_substitutions["api_url"] = (
+        f"https://staging.dataio.artpark.ai/api/{myst_substitutions['api_version']}"
+    )
+else:
+    html_theme_options["source_branch"] = "develop"
+    myst_substitutions["api_url"] = (
+        f"http://localhost:8000/api/{myst_substitutions['api_version']}"
+    )

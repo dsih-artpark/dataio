@@ -270,6 +270,16 @@ class DataIOAPI:
 
         return dataset_dir
 
+    def get_children_regions(self, region_id: str):
+        """Get all direct children regions for a given parent region.
+
+        :param region_id: The ID of the parent region to get children for.
+        :type region_id: str
+        :returns: A list of child regions with their metadata.
+        :rtype: list
+        """
+        return self._request("GET", f"/regions/{region_id}/children")
+
     def get_shapefile_list(self):
         """Get a list of all shapefiles.
 

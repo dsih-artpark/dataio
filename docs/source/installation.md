@@ -4,7 +4,7 @@ This guide covers how to install and configure DataIO for both SDK and CLI usage
 
 ## Installing DataIO
 
-`dataio` is not yet available on PyPI. You can install it from the source code.
+`dataio` is available on [PyPI](https://pypi.org/project/dataio-artpark/). The latest version is {{version}}.
 
 Using uv:
 
@@ -15,10 +15,28 @@ uv add dataio-artpark
 or using pip:
 
 ```bash
+venv .venv
+source .venv/bin/activate
 pip install dataio-artpark
 ```
 
 It is always recommended to use a virtual environment to install the package, regardless of the installation method. `uv` provides a seamless way to create and manage virtual environments within the same command.
+
+You can also install it from source:
+
+```bash
+uv install https://github.com/dsih-artpark/dataio.git
+```
+
+OR clone from source and install:
+
+```bash
+git clone https://github.com/dsih-artpark/dataio.git
+cd dataio
+uv sync
+```
+
+Installing from source will give you the latest version of the code, which may not be stable. It's recommended that for specificity, you specify the version you want to install.
 
 (configuration)=
 

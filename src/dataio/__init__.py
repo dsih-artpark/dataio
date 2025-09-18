@@ -7,4 +7,7 @@ __all__ = ["DataIOAPI"]
 try:
     __version__ = version(__name__)
 except PackageNotFoundError:
-    __version__ = version("dataio-artpark")
+    try:
+        __version__ = version("dataio-artpark")
+    except PackageNotFoundError:
+        __version__ = "dev"

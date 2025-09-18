@@ -113,6 +113,14 @@ Bases: {py:obj}`list`
 
 ````
 
+````{py:method} get_children_regions(region_id: str)
+:canonical: dataio.sdk.user.DataIOAPI.get_children_regions
+
+```{autodoc2-docstring} dataio.sdk.user.DataIOAPI.get_children_regions
+```
+
+````
+
 ````{py:method} get_shapefile_list()
 :canonical: dataio.sdk.user.DataIOAPI.get_shapefile_list
 

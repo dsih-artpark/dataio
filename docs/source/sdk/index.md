@@ -26,7 +26,7 @@ Make sure you have completed the [Installation](/installation.md) steps before p
 
 ## Creating Your First Client
 
-The package builds an API client for interacting with the API and the S3 filestore. The simplest way to use it is to create an instance of the `DataIOAPI` client class.
+The package builds an API client for interacting with the API and the S3 filestore. The simplest way to use it is to create an instance of the `DataIOAPI` client class. It is assumed that you've already set up the environment variables for the API key and base URL, as described in the [](#configuration) guide.
 
 ```python
 from dataio import DataIOAPI

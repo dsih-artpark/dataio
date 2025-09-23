@@ -42,13 +42,20 @@ def init():
         default="https://dataio.artpark.ai/api/v1",
         show_default=True,
     )
+    # Get the user's Data Directory
+    data_dir = typer.prompt(
+        "Enter your Data Directory",
+        default="data",
+        show_default=True,
+    )
     # Create a .env file with the API Key and API Base URL
     with open(".env", "w") as f:
         f.write(f"DATAIO_API_KEY={api_key}\n")
         f.write(f"DATAIO_API_BASE_URL={api_base_url}")
+        f.write(f"DATAIO_DATA_DIR={data_dir}")
     # Initialize the DataIO API
     try:
-        _ = DataIOAPI()
+        _ = DataIOAPI(data_dir=data_dir)
     except Exception as e:
         console.print(f"Error initializing DataIO CLI: {e}", style="bold red")
         console.print(
@@ -152,7 +159,7 @@ def download_dataset(
         typer.Option(
             "-r", "--root-dir", help="The root directory to download the dataset to."
         ),
-    ] = "data",
+    ] = None,
     get_metadata: Annotated[
         bool,
         typer.Option(
@@ -169,7 +176,7 @@ def download_dataset(
     ] = "yaml",
 ):
     """Download a dataset."""
-    client = DataIOAPI()
+    client = DataIOAPI(data_dir=root_dir)
 
     args = {k: v for k, v in locals().items() if k != "client"}
 
@@ -189,10 +196,14 @@ def download_shapefile(
         typer.Option(
             "-f", "--shp-folder", help="The folder to download the shapefile to."
         ),
-    ] = "data/GS0012DS0051-Shapefiles_India",
+    ] = None,
 ):
     """Download a shapefile."""
     client = DataIOAPI()
+    if shp_folder is None:
+        shp_folder = f"{client.data_dir}/GS0012DS0051-Shapefiles_India"
+    else:
+        shp_folder = f"{client.data_dir}/{shp_folder}"
     args = {k: v for k, v in locals().items() if k != "client"}
     shp_path = client.download_shapefile(**args)
     console = Console()

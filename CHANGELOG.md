@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.4.0b13
+
+- Ensure uv.lock is updated.
+- Update docs and changelog.
+
+## 0.4.0b12
+
+- Added a `data_dir` parameter to the `DataIOAPI` constructor.
+- Added a `DATAIO_DATA_DIR` environment variable.
+- Update docs
+
 ## 0.4.0b11
 
 - Stable Beta Release

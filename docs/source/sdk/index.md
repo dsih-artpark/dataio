@@ -37,7 +37,8 @@ client = DataIOAPI()
 # Method 2: Passing credentials directly
 client = DataIOAPI(
     base_url="https://dataio.artpark.ai/api/v1/",
-    api_key="your_api_key"
+    api_key="your_api_key",
+    data_dir="data"
 )
 ```
 

@@ -12,7 +12,7 @@ The main client class for interacting with the DataIO API.
 
 ### Constructor
 
-#### `DataIOAPI(base_url=None, api_key=None)`
+#### `DataIOAPI(base_url=None, api_key=None, data_dir=None)`
 
 Initialize a new DataIO API client.
 
@@ -20,6 +20,7 @@ Initialize a new DataIO API client.
 
 - `base_url` (str, optional): The base URL of the DataIO API. If not provided, uses the `DATAIO_API_BASE_URL` environment variable.
 - `api_key` (str, optional): The API key for authentication. If not provided, uses the `DATAIO_API_KEY` environment variable.
+- `data_dir` (str, optional): The directory to download the data to. If not provided, uses the `DATAIO_DATA_DIR` environment variable.
 
 **Raises:**
 
@@ -34,7 +35,8 @@ client = DataIOAPI()
 # Passing credentials directly
 client = DataIOAPI(
     base_url="https://dataio.artpark.ai/api/v1",
-    api_key="your_api_key"
+    api_key="your_api_key",
+    data_dir="data"
 )
 ```
 
@@ -270,7 +272,7 @@ Download a shapefile for a specific region.
 **Parameters:**
 
 - `region_id` (str): ID of the region to download shapefile for.
-- `shp_folder` (str, optional): Directory to save the shapefile. Defaults to "data/GS0012DS0051-Shapefiles_India".
+- `shp_folder` (str, optional): Directory to save the shapefile. Defaults to "{data_dir}/GS0012DS0051-Shapefiles_India", where data_dir is derived from the API client.
 
 **Returns:**
 
@@ -331,10 +333,12 @@ The client uses these environment variables:
 
 - `DATAIO_API_BASE_URL`: Base URL for the DataIO API
 - `DATAIO_API_KEY`: API key for authentication
+- `DATAIO_DATA_DIR`: Directory to download the data to.
 
 Set these in a `.env` file:
 
 ```bash
 DATAIO_API_BASE_URL=https://dataio.artpark.ai/api/v1
 DATAIO_API_KEY=your_api_key_here
+DATAIO_DATA_DIR=data
 ```

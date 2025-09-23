@@ -260,7 +260,7 @@ shapefiles = client.get_shapefile_list()
 
 for shapefile in shapefiles:
     print(f"Region ID: {shapefile['region_id']}")
-    print(f"Name: {shapefile['name']}")
+    print(f"Name: {shapefile['region_name']}")
 ```
 
 ### `download_shapefile(region_id, shp_folder="data/GS0012DS0051-Shapefiles_India")`

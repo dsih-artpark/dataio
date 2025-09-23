@@ -63,6 +63,7 @@ This will prompt you to enter your API key and set the default base URL and crea
 ```bash
 DATAIO_API_BASE_URL=https://dataio.artpark.ai/api/v1
 DATAIO_API_KEY=your_api_key_here
+DATAIO_DATA_DIR=data
 ```
 
 You can also di this manually.

@@ -24,11 +24,19 @@ class DataIOAPI:
     :type base_url: str
     :param api_key: The API key for the DataIO API. Defaults to the value of the
         ``DATAIO_API_KEY`` environment variable.
+    :param data_dir: The directory to download the data to. Defaults to the value of the
+        ``DATAIO_DATA_DIR`` environment variable.
+    :type data_dir: str
     :type api_key: str
 
     """
 
-    def __init__(self, base_url: Optional[str] = None, api_key: Optional[str] = None):
+    def __init__(
+        self,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        data_dir: Optional[str] = None,
+    ):
         dotenv.load_dotenv(override=True)
         if base_url is None:
             base_url = os.getenv("DATAIO_API_BASE_URL", None)
@@ -46,6 +54,9 @@ class DataIOAPI:
             )
         if api_key:
             self.session.headers.update({"X-API-Key": f"{api_key}"})
+        if data_dir is None:
+            data_dir = os.getenv("DATAIO_DATA_DIR", "data")
+        self.data_dir = data_dir
 
     def _request(self, method, endpoint, **kwargs):
         """Make a request to the DataIO API.
@@ -201,7 +212,7 @@ class DataIOAPI:
         self,
         dataset_id,
         bucket_type="STANDARDISED",
-        root_dir="data",
+        root_dir=None,
         get_metadata=True,
         metadata_format="yaml",
         update_sync_history=True,
@@ -223,6 +234,9 @@ class DataIOAPI:
         :rtype: str
         """
         # Set up the dataset directory
+
+        if root_dir is None:
+            root_dir = self.data_dir
         bucket_type = bucket_type.upper()
         dataset_details = self.get_dataset_details(dataset_id)
         dataset_id = dataset_details["ds_id"]
@@ -288,20 +302,23 @@ class DataIOAPI:
         """
         return self._request("GET", "/shapefiles")
 
-    def download_shapefile(
-        self, region_id: str, shp_folder: str = "data/GS0012DS0051-Shapefiles_India"
-    ):
+    def download_shapefile(self, region_id: str, shp_folder: str = None):
         """Download a shapefile.
 
         :param region_id: The ID of the region to download the shapefile for.
         :type region_id: str
-        :param shp_folder: The folder to download the shapefile to. Defaults to "data/GS0012DS0051-Shapefiles_India".
+        :param shp_folder: The folder with the data directory to download the shapefile to. Defaults to "{data_dir}/GS0012DS0051-Shapefiles_India", where data_dir is derived from the API client.
         :type shp_folder: str
         :param compress: Whether to compress the shapefile. Defaults to True.
         :type compress: bool
         :returns: The shapefile.
         :rtype: bytes
         """
+
+        if shp_folder is None:
+            shp_folder = f"{self.data_dir}/GS0012DS0051-Shapefiles_India"
+        else:
+            shp_folder = f"{self.data_dir}/{shp_folder}"
         shapefile_list = self.get_shapefile_list()
         shapefile_exists = any(
             [

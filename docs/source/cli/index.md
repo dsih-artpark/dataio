@@ -39,6 +39,7 @@ The CLI uses the same environment variables as the Python SDK:
 ```bash
 DATAIO_API_BASE_URL="https://dataio.artpark.ai/api/v1"
 DATAIO_API_KEY=your_api_key_here
+DATAIO_DATA_DIR=data
 ```
 
 Set these in a `.env` file in your current working directory or as environment variables.
@@ -190,7 +191,7 @@ uv run dataio download-shapefile REGION_ID [OPTIONS]
 
 **Options:**
 
-- `-f, --shp-folder TEXT`: Folder to download shapefile to (default: "data/GS0012DS0051-Shapefiles_India")
+- `-f, --shp-folder TEXT`: Folder to download shapefile to (default: "{data_dir}/GS0012DS0051-Shapefiles_India", where data_dir is derived from the API client)
 - `--help`: Show help message
 
 **Examples:**

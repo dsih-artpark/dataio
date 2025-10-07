@@ -1,13 +1,11 @@
-import logging
-
-import bcrypt
-from fastapi import Request, Security
+from fastapi import Security
 from fastapi.security import APIKeyHeader
-
-from dataio.api.auth.exceptions import AuthenticationError
-from dataio.api.database.config import Session
-from dataio.api.database.models import User as DBUser
 from dataio.api.models import User
+from dataio.api.database.models import User as DBUser
+from dataio.api.database.config import Session
+from dataio.api.auth.exceptions import AuthenticationError
+import bcrypt
+import logging
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -58,27 +56,3 @@ def get_user(api_key_header: str = Security(api_key_header)) -> User:
     raise AuthenticationError("Invalid API key")
 
 
-async def get_user_with_request_state(
-    request: Request, api_key_header: str = Security(api_key_header)
-) -> User:
-    """
-    Validate API key and return authenticated user, also store in request state.
-
-    Args:
-        request: FastAPI request object
-        api_key_header: API key from request header
-
-    Returns:
-        User: Authenticated user object
-
-    Raises:
-        AuthenticationError: If API key is invalid or missing
-    """
-    if not api_key_header:
-        raise AuthenticationError("Missing API key")
-    user = check_api_key(api_key_header)
-    if user:
-        # Store user in request state for middleware access
-        request.state.user = user
-        return user
-    raise AuthenticationError("Invalid API key")

@@ -9,7 +9,14 @@ import os
 from datetime import date
 from typing import Any, Dict
 
-from dataio import __version__
+try:
+    from dataio import __version__
+except ImportError:
+    import tomllib
+
+    with open("../../pyproject.toml", "rb") as f:
+        data = tomllib.load(f)
+        __version__ = data["project"]["version"]
 
 project = "dataio"
 author = "ARTPARK @ IISc"

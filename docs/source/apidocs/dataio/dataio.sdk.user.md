@@ -37,7 +37,7 @@ Bases: {py:obj}`list`
 
 `````
 
-`````{py:class} DataIOAPI(base_url: typing.Optional[str] = None, api_key: typing.Optional[str] = None)
+`````{py:class} DataIOAPI(base_url: typing.Optional[str] = None, api_key: typing.Optional[str] = None, data_dir: typing.Optional[str] = None)
 :canonical: dataio.sdk.user.DataIOAPI
 
 ```{autodoc2-docstring} dataio.sdk.user.DataIOAPI
@@ -105,7 +105,7 @@ Bases: {py:obj}`list`
 
 ````
 
-````{py:method} download_dataset(dataset_id, bucket_type='STANDARDISED', root_dir='data', get_metadata=True, metadata_format='yaml', update_sync_history=True, sync_history_file='sync-history.yaml')
+````{py:method} download_dataset(dataset_id, bucket_type='STANDARDISED', root_dir=None, get_metadata=True, metadata_format='yaml', update_sync_history=True, sync_history_file='sync-history.yaml')
 :canonical: dataio.sdk.user.DataIOAPI.download_dataset
 
 ```{autodoc2-docstring} dataio.sdk.user.DataIOAPI.download_dataset
@@ -129,7 +129,7 @@ Bases: {py:obj}`list`
 
 ````
 
-````{py:method} download_shapefile(region_id: str, shp_folder: str = 'data/GS0012DS0051-Shapefiles_India')
+````{py:method} download_shapefile(region_id: str, shp_folder: str = None)
 :canonical: dataio.sdk.user.DataIOAPI.download_shapefile
 
 ```{autodoc2-docstring} dataio.sdk.user.DataIOAPI.download_shapefile

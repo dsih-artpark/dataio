@@ -88,6 +88,7 @@ installation
 sdk/index
 cli/index
 apidocs/index
+Endpoints <{{ 'url'.replace('url', api_url) }}>
 CHANGELOG <CHANGELOG>
 CONTRIBUTING <CONTRIBUTING>
 ```

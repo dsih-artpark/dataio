@@ -1,11 +1,9 @@
 import logging
-import os
 
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from dataio.api.middleware import UsageTrackingMiddleware
 from dataio.api.routers.admin import admin_router
 from dataio.api.routers.user import user_router
 
@@ -22,10 +20,6 @@ app = FastAPI(
     openapi_url="/api/v1/openapi.json",
     redoc_url=None,
 )
-
-# Add usage tracking middleware
-usage_db_path = os.getenv("USAGE_TRACKING_DB_PATH", "usage_tracking.db")
-app.add_middleware(UsageTrackingMiddleware, db_path=usage_db_path)
 
 app.include_router(user_router)
 app.include_router(admin_router)

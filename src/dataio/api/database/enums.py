@@ -53,3 +53,4 @@ class ResourceType(str, enum.Enum):
     DATASET = "DATASET"
     GROUP = "GROUP"
     BUCKET = "BUCKET"
+    WEATHER_DATA_API = "WEATHER_DATA_API"

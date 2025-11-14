@@ -131,3 +131,44 @@ class RegionResponse(BaseModel):
     region_id: str
     region_name: str
     parent_region_id: Optional[str] = None
+
+
+# Weather Data Models
+
+
+class WeatherVariableMetadata(BaseModel):
+    """Metadata for a single weather variable."""
+
+    name: str
+    long_name: Optional[str] = None
+    units: Optional[str] = None
+    spatial_resolution: Optional[str] = None  # e.g., "0.25 degrees", "25 km"
+    temporal_resolution: Optional[str] = None  # e.g., "hourly", "daily"
+
+
+class WeatherDatasetMetadata(BaseModel):
+    """Metadata for a weather dataset in the Zarr store."""
+
+    dataset_name: str
+    variables: List[WeatherVariableMetadata]
+    temporal_coverage_start: str
+    temporal_coverage_end: str
+    spatial_bounds: Dict[str, float]  # {min_lat, max_lat, min_lon, max_lon}
+
+
+class WeatherDataRequest(BaseModel):
+    """Request model for weather data download."""
+
+    variables: List[str] = Field(
+        ..., description="List of variables to extract", min_length=1
+    )
+    start_date: str = Field(
+        ...,
+        description="Start date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)",
+    )
+    end_date: str = Field(
+        ..., description="End date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"
+    )
+    geojson: Dict = Field(
+        ..., description="GeoJSON object defining spatial coverage (Feature or FeatureCollection)"
+    )

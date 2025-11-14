@@ -51,7 +51,7 @@ def init():
     # Create a .env file with the API Key and API Base URL
     with open(".env", "w") as f:
         f.write(f"DATAIO_API_KEY={api_key}\n")
-        f.write(f"DATAIO_API_BASE_URL={api_base_url}")
+        f.write(f"DATAIO_API_BASE_URL={api_base_url}\n")
         f.write(f"DATAIO_DATA_DIR={data_dir}")
     # Initialize the DataIO API
     try:

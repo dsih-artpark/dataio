@@ -6,6 +6,7 @@
 :maxdepth: 2
 :caption: Examples
 eg-download-dataset-by-tags
+eg-weather-data
 ```
 
 ```{toctree}

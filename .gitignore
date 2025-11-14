@@ -150,6 +150,6 @@ data/*
 *.zip
 .data/
 data/
-
+*.nc
 # AI Files
 CLAUDE.md

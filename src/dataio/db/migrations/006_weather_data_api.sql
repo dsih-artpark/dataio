@@ -1,0 +1,6 @@
+BEGIN;
+
+ALTER TYPE resource_type ADD VALUE 'WEATHER_DATA_API';
+
+
+COMMIT;

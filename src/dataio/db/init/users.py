@@ -85,7 +85,10 @@ def generate_group(email):
 def add_test_users():
     conn = connect_to_db()
     cur = conn.cursor()
-    test_users = [generate_user("admin@artpark.in", True)]
+    test_users = [
+        generate_user("admin@artpark.in", True),
+        generate_user("analyst@artpark.in", False),
+    ]
 
     print(test_users)
 

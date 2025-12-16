@@ -193,3 +193,41 @@ def user_has_dataset_download_access(
         ) or check_for_global_permission(user_permission):
             return True
     return False
+
+
+def user_has_weather_data_view_access(user_permissions: List[UserPermission]) -> bool:
+    """
+    Check if user has VIEW access to weather data metadata.
+
+    Args:
+        user_permissions: List of user permissions
+
+    Returns:
+        bool: True if user has weather data view access, False otherwise
+    """
+    for user_permission in user_permissions:
+        if (
+            user_permission.resource_type == "WEATHER_DATA_API"
+            and user_permission.permission in ["VIEW", "DOWNLOAD"]
+        ) or check_for_global_permission(user_permission):
+            return True
+    return False
+
+
+def user_has_weather_data_download_access(user_permissions: List[UserPermission]) -> bool:
+    """
+    Check if user has DOWNLOAD access to weather data.
+
+    Args:
+        user_permissions: List of user permissions
+
+    Returns:
+        bool: True if user has weather data download access, False otherwise
+    """
+    for user_permission in user_permissions:
+        if (
+            user_permission.resource_type == "WEATHER_DATA_API"
+            and user_permission.permission == "DOWNLOAD"
+        ) or check_for_global_permission(user_permission):
+            return True
+    return False

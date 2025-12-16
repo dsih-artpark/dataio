@@ -3,7 +3,8 @@ import json
 import os
 import re
 from datetime import datetime, timezone
-from typing import Optional, Union
+from pathlib import Path
+from typing import Optional, Union, List, Dict
 
 import dotenv
 import requests
@@ -343,3 +344,113 @@ class DataIOAPI:
             json.dump(shapefile, f, indent=4)
 
         return shp_path
+
+    def list_weather_datasets(self):
+        """Get a list of all available weather datasets with metadata.
+
+        :returns: A list of weather datasets with variables, temporal/spatial coverage, and resolution info.
+        :rtype: list
+        """
+        return self._request("GET", "/weather/datasets")
+
+    def _load_geojson(self, geojson: Union[str, Dict]) -> Dict:
+        """Load geojson from dict, file path, or region_id.
+
+        :param geojson: GeoJSON as dict, path to .geojson file, or region_id to fetch from API.
+        :type geojson: Union[str, Dict]
+        :returns: GeoJSON dictionary.
+        :rtype: dict
+        """
+        if isinstance(geojson, dict):
+            return geojson
+        elif isinstance(geojson, str):
+            # Check if it's a file path
+            if os.path.exists(geojson):
+                with open(geojson, "r") as f:
+                    return json.load(f)
+            else:
+                # Assume it's a region_id, fetch shapefile from API
+                shp_path = self.download_shapefile(geojson)
+                with open(shp_path, "r") as f:
+                    return json.load(f)
+        else:
+            raise ValueError(
+                "geojson must be a dict, path to .geojson file, or region_id string"
+            )
+
+    def download_weather_data(
+        self,
+        dataset_name: str,
+        variables: List[str],
+        start_date: str,
+        end_date: str,
+        geojson: Union[str, Dict],
+        output_dir: Optional[str] = None,
+    ):
+        """Download weather data with spatial and temporal filtering.
+
+        :param dataset_name: Name of the weather dataset (e.g., "era5_sfc").
+        :type dataset_name: str
+        :param variables: List of variables to extract (e.g., ["t2m", "d2m", "tp"]).
+        :type variables: List[str]
+        :param start_date: Start date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS).
+        :type start_date: str
+        :param end_date: End date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS).
+        :type end_date: str
+        :param geojson: GeoJSON as dict, path to .geojson file, or region_id to fetch from API.
+        :type geojson: Union[str, Dict]
+        :param output_dir: Directory to save the NetCDF file. Defaults to "{data_dir}/weather/{dataset_name}".
+        :type output_dir: Optional[str]
+        :returns: xarray Dataset with the weather data.
+        :rtype: xarray.Dataset
+        """
+        # Load geojson
+        geojson_dict = self._load_geojson(geojson)
+
+        # Prepare request body
+        request_body = {
+            "variables": variables,
+            "start_date": start_date,
+            "end_date": end_date,
+            "geojson": geojson_dict,
+        }
+
+        # Make POST request
+        url = f"{self.base_url}/weather/datasets/{dataset_name}/download"
+        response = self.session.request("POST", url, json=request_body)
+        response.raise_for_status()
+
+        # Get NetCDF bytes
+        netcdf_bytes = response.content
+
+        # Extract filename from Content-Disposition header
+        content_disposition = response.headers.get("Content-Disposition", "")
+        if "filename=" in content_disposition:
+            filename = content_disposition.split("filename=")[1].strip('"')
+        else:
+            # Fallback filename
+            filename = f"{dataset_name}_data.nc"
+
+        # Set up output directory
+        if output_dir is None:
+            output_dir = f"{self.data_dir}/weather/{dataset_name}"
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Save NetCDF file
+        output_path = f"{output_dir}/{filename}"
+        with open(output_path, "wb") as f:
+            f.write(netcdf_bytes)
+
+        print(f"Weather data saved to: {output_path}")
+
+        # Load and return xarray Dataset
+        try:
+            import xarray as xr
+
+            ds = xr.open_dataset(output_path)
+            return ds
+        except ImportError:
+            print(
+                "Warning: xarray not installed. Install with 'pip install xarray' to work with the dataset directly."
+            )
+            return output_path

@@ -150,6 +150,7 @@ data/*
 *.zip
 .data/
 data/
-
+*.nc
+*.geojson
 # AI Files
 CLAUDE.md

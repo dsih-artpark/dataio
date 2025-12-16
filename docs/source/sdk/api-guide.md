@@ -299,6 +299,133 @@ path = client.download_shapefile(
 
 ---
 
+## Weather Data Methods
+
+### `list_weather_datasets()`
+
+Get a list of all available weather datasets with metadata.
+
+**Returns:**
+
+- `list`: List of weather dataset dictionaries, each containing:
+  - `dataset_name`: Name of the weather dataset (e.g., "era5_sfc")
+  - `variables`: List of variable metadata dictionaries
+  - `temporal_coverage_start`: Start date of available data
+  - `temporal_coverage_end`: End date of available data
+  - `spatial_bounds`: Dictionary with min_lat, max_lat, min_lon, max_lon
+
+**Example:**
+
+```python
+# List all weather datasets
+datasets = client.list_weather_datasets()
+
+for dataset in datasets:
+    print(f"Dataset: {dataset['dataset_name']}")
+    print(f"Time range: {dataset['temporal_coverage_start']} to {dataset['temporal_coverage_end']}")
+    print(f"Variables: {len(dataset['variables'])}")
+
+    for var in dataset['variables']:
+        print(f"  - {var['name']}: {var['long_name']} ({var['units']})")
+        print(f"    Resolution: {var['spatial_resolution']} (spatial), {var['temporal_resolution']} (temporal)")
+```
+
+**API Endpoint:** `GET /api/v1/weather/datasets`
+
+### `download_weather_data(dataset_name, variables, start_date, end_date, geojson, output_dir=None)`
+
+Download weather data with spatial and temporal filtering.
+
+**Parameters:**
+
+- `dataset_name` (str): Name of the weather dataset (e.g., "era5_sfc").
+- `variables` (List[str]): List of variables to extract (e.g., ["t2m", "d2m", "tp"]).
+- `start_date` (str): Start date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS).
+- `end_date` (str): End date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS).
+- `geojson` (Union[str, Dict]): GeoJSON for spatial filtering. Can be:
+  - Python dict with GeoJSON structure
+  - Path to a `.geojson` file (will be loaded automatically)
+  - Region ID string (will fetch shapefile from API automatically)
+- `output_dir` (str, optional): Directory to save the NetCDF file. Defaults to `{data_dir}/weather/{dataset_name}`.
+
+**Returns:**
+
+- `xarray.Dataset`: The weather data as an xarray Dataset object (if xarray is installed).
+- `str`: Path to the saved NetCDF file (if xarray is not installed).
+
+**Example:**
+
+```python
+# Download using a region ID (fetches shapefile automatically)
+ds = client.download_weather_data(
+    dataset_name="era5_sfc",
+    variables=["t2m", "d2m"],
+    start_date="2024-01-01",
+    end_date="2024-01-31",
+    geojson="state_29"  # Karnataka region ID
+)
+
+# Download using a geojson file path
+ds = client.download_weather_data(
+    dataset_name="era5_sfc",
+    variables=["tp"],
+    start_date="2024-06-01",
+    end_date="2024-06-07",
+    geojson="path/to/region.geojson"
+)
+
+# Download using a geojson dict
+bbox_geojson = {
+    "type": "Feature",
+    "properties": {"region_id": "custom_bbox"},
+    "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+            [70, 10], [80, 10], [80, 20], [70, 20], [70, 10]
+        ]]
+    }
+}
+
+ds = client.download_weather_data(
+    dataset_name="era5_sfc",
+    variables=["t2m"],
+    start_date="2024-01-01",
+    end_date="2024-01-02",
+    geojson=bbox_geojson,
+    output_dir="./my_weather_data"
+)
+
+# Work with the xarray Dataset
+print(ds)
+print(f"Dimensions: {dict(ds.dims)}")
+print(f"Variables: {list(ds.data_vars)}")
+
+# Access data
+temperature = ds['t2m']
+mean_temp = temperature.mean()
+print(f"Mean temperature: {mean_temp.values} K")
+```
+
+**Output File Naming:**
+
+Files are saved with descriptive names in the format:
+```
+{dataset_name}_{variable1}_{variable2}_{YYYYMMDD_start}_{YYYYMMDD_end}_{region_id}.nc
+```
+
+For example:
+- `era5_sfc_t2m_d2m_20240101_20240131_state_29.nc`
+- `era5_sfc_tp_20240601_20240607.nc`
+
+**API Endpoint:** `POST /api/v1/weather/datasets/{dataset_name}/download`
+
+**Requirements:**
+
+- Weather data access requires DOWNLOAD permission for the `WEATHER_DATA_API` resource type.
+- Contact your DataIO administrator to grant weather data access permissions.
+
+---
+
 ## Error Handling
 
 The DataIO API client raises standard Python exceptions:

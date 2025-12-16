@@ -87,6 +87,7 @@ Introduction <self>
 installation
 sdk/index
 cli/index
+developer-guide
 apidocs/index
 CHANGELOG <CHANGELOG>
 CONTRIBUTING <CONTRIBUTING>

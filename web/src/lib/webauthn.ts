@@ -27,8 +27,8 @@ export async function registerPasskey(deviceName?: string): Promise<{
   const { options } = await api.getPasskeyRegistrationOptions();
   const parsedOptions = JSON.parse(options);
 
-  // Start the browser's registration ceremony
-  const credential = await startRegistration(parsedOptions);
+  // Start the browser's registration ceremony (v11+ API requires optionsJSON wrapper)
+  const credential = await startRegistration({ optionsJSON: parsedOptions });
 
   // Verify with server
   return api.verifyPasskeyRegistration(credential, deviceName);
@@ -46,8 +46,8 @@ export async function authenticateWithPasskey(email: string): Promise<{
   const { options } = await api.getPasskeyLoginOptions(email);
   const parsedOptions = JSON.parse(options);
 
-  // Start the browser's authentication ceremony
-  const credential = await startAuthentication(parsedOptions);
+  // Start the browser's authentication ceremony (v11+ API requires optionsJSON wrapper)
+  const credential = await startAuthentication({ optionsJSON: parsedOptions });
 
   // Verify with server
   return api.verifyPasskeyLogin(email, credential);

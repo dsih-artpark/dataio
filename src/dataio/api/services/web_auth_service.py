@@ -60,10 +60,11 @@ class WebAuthService(BaseService):
             # Check if user exists
             user = session.query(User).filter(User.email == email).first()
             if not user:
-                # For security, don't reveal if user exists
-                # Still "send" OTP to prevent enumeration attacks
                 self.logger.info(f"Login attempt for non-existent user: {email}")
-                return {"sent": True, "message": "If the email exists, a code has been sent"}
+                raise HTTPException(
+                    status_code=404,
+                    detail="No account found with this email. Please contact an administrator."
+                )
 
             if user.is_group:
                 raise HTTPException(status_code=400, detail="Cannot login as a group")

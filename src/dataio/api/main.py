@@ -22,6 +22,11 @@ app = FastAPI(
     docs_url="/api/v1",
     openapi_url="/api/v1/openapi.json",
     redoc_url=None,
+    servers=[
+        {"url": "https://data.artpark.ai", "description": "Production"},
+        {"url": "https://staging.data.artpark.ai", "description": "Staging"},
+        {"url": "http://localhost:8000", "description": "Local development"},
+    ],
 )
 
 # CORS configuration for web frontend

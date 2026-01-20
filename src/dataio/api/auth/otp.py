@@ -73,8 +73,12 @@ def create_otp(
         )
 
         if recent_otp:
+            # Handle timezone-naive datetimes from database
+            created_at = recent_otp.created_at
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
             time_remaining = (
-                recent_otp.created_at + timedelta(minutes=OTP_RATE_LIMIT_MINUTES)
+                created_at + timedelta(minutes=OTP_RATE_LIMIT_MINUTES)
             ) - datetime.now(timezone.utc)
             seconds = max(0, ceil(time_remaining.total_seconds()))
             raise ValueError(

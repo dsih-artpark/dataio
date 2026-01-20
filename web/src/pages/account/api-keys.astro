@@ -18,5 +18,11 @@ import APIKeyManager from '../../components/account/APIKeyManager';
 
 <script>
   import { initAuth, requireAuth } from '../../lib/auth';
-  initAuth().then(() => requireAuth());
+
+  // Check auth immediately before doing anything else
+  if (!requireAuth()) {
+    // Not authenticated, redirecting
+  } else {
+    initAuth();
+  }
 </script>

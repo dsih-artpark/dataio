@@ -1,0 +1,33 @@
+---
+import DashboardLayout from '../../layouts/DashboardLayout.astro';
+import UserList from '../../components/admin/UserList';
+---
+
+<DashboardLayout title="Users">
+  <div class="space-y-6">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">User Management</h1>
+      <p class="mt-1 text-gray-600">
+        Manage users and their permissions.
+      </p>
+    </div>
+
+    <UserList client:load />
+  </div>
+</DashboardLayout>
+
+<script>
+  import { initAuth, requireAuth, isAdmin } from '../../lib/auth';
+
+  // Check auth immediately
+  if (!requireAuth()) {
+    // Not authenticated, redirecting
+  } else {
+    // Initialize auth and check admin status
+    initAuth().then(() => {
+      if (!isAdmin()) {
+        window.location.replace('/dashboard');
+      }
+    });
+  }
+</script>

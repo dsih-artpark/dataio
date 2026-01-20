@@ -270,33 +270,52 @@ class WebUserService(BaseService):
             # Get user permissions
             user_permissions = determine_user_permissions(user)
 
-            # Get datasets with permission filtering
-            datasets = database.get_datasets(limit=limit, user_permissions=user_permissions)
+            # Get datasets with permission filtering (returns Dataset ORM objects)
+            dataset_objects = database.get_datasets(limit=10000, user_permissions=user_permissions)
 
-            # Apply additional filters
+            # Apply additional filters on ORM objects
             if search:
                 search_lower = search.lower()
-                datasets = [
-                    d for d in datasets
-                    if search_lower in d.get("title", "").lower()
-                    or search_lower in d.get("description", "").lower()
+                dataset_objects = [
+                    d for d in dataset_objects
+                    if search_lower in (d.title or "").lower()
+                    or search_lower in (d.description or "").lower()
                 ]
 
             if collection_id:
-                datasets = [
-                    d for d in datasets
-                    if d.get("collection_id") == collection_id
+                dataset_objects = [
+                    d for d in dataset_objects
+                    if d.collection and d.collection.id == collection_id
                 ]
 
             if data_owner_id:
-                datasets = [
-                    d for d in datasets
-                    if d.get("data_owner_id") == data_owner_id
+                dataset_objects = [
+                    d for d in dataset_objects
+                    if d.data_owner and d.data_owner.id == data_owner_id
                 ]
 
+            # Get total before pagination
+            total = len(dataset_objects)
+
             # Apply pagination
-            total = len(datasets)
-            datasets = datasets[offset:offset + limit]
+            dataset_objects = dataset_objects[offset:offset + limit]
+
+            # Convert to dicts for response
+            datasets = [
+                {
+                    "ds_id": d.ds_id,
+                    "title": d.title,
+                    "description": d.description,
+                    "collection_id": d.collection.id if d.collection else None,
+                    "collection_name": d.collection.collection_name if d.collection else None,
+                    "data_owner_id": d.data_owner.id if d.data_owner else None,
+                    "data_owner_name": d.data_owner.name if d.data_owner else None,
+                    "temporal_coverage_start_date": d.temporal_coverage_start_date.isoformat() if d.temporal_coverage_start_date else None,
+                    "temporal_coverage_end_date": d.temporal_coverage_end_date.isoformat() if d.temporal_coverage_end_date else None,
+                    "access_level": d.access_level.value if d.access_level else None,
+                }
+                for d in dataset_objects
+            ]
 
             return {
                 "datasets": datasets,
@@ -332,11 +351,21 @@ class WebUserService(BaseService):
             if not user.is_admin:
                 # Get accessible datasets for this user and check if requested dataset is included
                 accessible = database.get_datasets(limit=10000, user_permissions=user_permissions)
-                accessible_ids = {d.get("ds_id") for d in accessible}
+                accessible_ids = {d.ds_id for d in accessible}
                 if dataset_id not in accessible_ids:
                     raise HTTPException(status_code=403, detail="Access denied to this dataset")
 
-            # Get additional details
+            # Determine user's access level for this dataset
+            can_download = dataset.access_level and dataset.access_level.value == "DOWNLOAD"
+            if not can_download and not user.is_admin:
+                # Check if user has explicit download permission
+                for perm in user_permissions:
+                    if perm.resource_type in ("DATASET", "*") and perm.resource_id in (dataset_id, "*"):
+                        if perm.permission and perm.permission.value == "DOWNLOAD":
+                            can_download = True
+                            break
+
+            # Get additional details including raw datasets for download
             return {
                 "ds_id": dataset.ds_id,
                 "title": dataset.title,
@@ -356,6 +385,17 @@ class WebUserService(BaseService):
                 "temporal_coverage_end_date": dataset.temporal_coverage_end_date.isoformat() if dataset.temporal_coverage_end_date else None,
                 "temporal_resolution": dataset.temporal_resolution.value if dataset.temporal_resolution else None,
                 "access_level": dataset.access_level.value if dataset.access_level else None,
+                "can_download": can_download,
+                "raw_datasets": [
+                    {
+                        "id": rd.id,
+                        "rds_id": rd.rds_id,
+                        "title": rd.title,
+                        "source": rd.source if can_download else None,
+                    }
+                    for rd in (dataset.raw_datasets or [])
+                ] if can_download else [],
+                "tags": [tag.tag_name for tag in (dataset.tags or [])],
                 "additional_metadata": dataset.additional_metadata,
             }
         except HTTPException:

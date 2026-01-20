@@ -131,7 +131,7 @@ class WebAuthService(BaseService):
 
             # Create tokens
             access_token = create_access_token(email)
-            refresh_token, jti, expires_at = create_refresh_token(email)
+            refresh_token, _, expires_at = create_refresh_token(email)
 
             # Store session
             create_session(
@@ -203,7 +203,7 @@ class WebAuthService(BaseService):
 
         # Create new tokens
         new_access_token = create_access_token(user_email)
-        new_refresh_token, jti, expires_at = create_refresh_token(user_email)
+        new_refresh_token, _, expires_at = create_refresh_token(user_email)
 
         # Store new session
         create_session(
@@ -367,7 +367,7 @@ class WebAuthService(BaseService):
 
             # Create tokens
             access_token = create_access_token(email)
-            refresh_token, jti, expires_at = create_refresh_token(email)
+            refresh_token, _, expires_at = create_refresh_token(email)
 
             # Store session
             create_session(

@@ -119,9 +119,9 @@ BEGIN
     -- Delete expired WebAuthn challenges
     DELETE FROM webauthn_challenges WHERE expires_at < NOW();
 
-    -- Delete expired and revoked sessions older than 30 days
+    -- Delete expired sessions and revoked sessions older than 30 days
     DELETE FROM sessions
-    WHERE (expires_at < NOW() AND expires_at < NOW() - INTERVAL '30 days')
+    WHERE expires_at < NOW()
        OR (revoked_at IS NOT NULL AND revoked_at < NOW() - INTERVAL '30 days');
 END;
 $$ LANGUAGE plpgsql;

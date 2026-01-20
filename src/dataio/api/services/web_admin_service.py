@@ -6,7 +6,6 @@ and permissions through the web interface.
 """
 
 import logging
-from datetime import datetime, timezone
 from typing import Optional, List
 
 from fastapi import HTTPException
@@ -205,13 +204,14 @@ class WebAdminService(BaseService):
                     user_group = UserGroup(group_email=group_email, user_email=email)
                     session.add(user_group)
 
-            session.commit()
-
-            # Generate OTP for invitation
+            # Generate OTP for invitation before final commit
             try:
                 otp_code, _ = create_otp(email, purpose="invite")
             except ValueError as e:
+                session.rollback()
                 raise HTTPException(status_code=429, detail=str(e))
+
+            session.commit()
 
             # Send invitation email
             if not self.email_service.send_invite_email(

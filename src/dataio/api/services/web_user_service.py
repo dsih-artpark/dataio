@@ -327,8 +327,14 @@ class WebUserService(BaseService):
             if not dataset:
                 raise HTTPException(status_code=404, detail="Dataset not found")
 
-            # Check permissions
+            # Check permissions - verify user can access this dataset
             user_permissions = determine_user_permissions(user)
+            if not user.is_admin:
+                # Get accessible datasets for this user and check if requested dataset is included
+                accessible = database.get_datasets(limit=10000, user_permissions=user_permissions)
+                accessible_ids = {d.get("ds_id") for d in accessible}
+                if dataset_id not in accessible_ids:
+                    raise HTTPException(status_code=403, detail="Access denied to this dataset")
 
             # Get additional details
             return {

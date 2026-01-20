@@ -17,6 +17,7 @@ export default function AccountSettings() {
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
   const [passkeys, setPasskeys] = useState<Passkey[]>([]);
+  const [passkeysError, setPasskeysError] = useState('');
   const [showPasskeySetup, setShowPasskeySetup] = useState(false);
 
   const user = currentUser.value;
@@ -36,10 +37,11 @@ export default function AccountSettings() {
 
   const fetchPasskeys = async () => {
     try {
+      setPasskeysError('');
       const response = await api.listPasskeys();
       setPasskeys(response.passkeys as Passkey[]);
-    } catch {
-      // Ignore errors
+    } catch (err) {
+      setPasskeysError(err instanceof Error ? err.message : 'Failed to load passkeys');
     }
   };
 
@@ -176,7 +178,12 @@ export default function AccountSettings() {
           )}
         </div>
         <div class="card-body">
-          {passkeys.length === 0 ? (
+          {passkeysError && (
+            <div class="mb-4 px-4 py-3 rounded-lg text-sm bg-red-50 text-red-700 border border-red-200">
+              {passkeysError}
+            </div>
+          )}
+          {passkeys.length === 0 && !passkeysError ? (
             <div class="text-center py-6">
               <div class="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
                 <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">

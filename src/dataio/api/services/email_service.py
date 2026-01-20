@@ -225,7 +225,7 @@ class EmailService(BaseService):
         Returns:
             bool: True if sent successfully
         """
-        subject = f"Your DataIO login code: {otp_code}"
+        subject = "Your DataIO login code"
 
         html_body = f"""
 <!DOCTYPE html>

@@ -206,12 +206,14 @@ def verify_registration(
             expected_origin=WEBAUTHN_ORIGIN,
         )
 
-        # Store the credential
+        # Extract transports from credential response
         transports = []
-        if hasattr(credential, "response") and hasattr(credential["response"], "transports"):
-            transports = credential["response"].get("transports", [])
-        elif isinstance(credential, dict) and "response" in credential:
-            transports = credential.get("response", {}).get("transports", [])
+        if isinstance(credential, dict) and "response" in credential:
+            response = credential["response"]
+            if isinstance(response, dict):
+                transports = response.get("transports", [])
+            elif hasattr(response, "transports"):
+                transports = getattr(response, "transports", [])
 
         db_credential = WebAuthnCredential(
             user_email=user_email,

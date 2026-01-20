@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 bearer_scheme = HTTPBearer(auto_error=False)
 
 # Configuration from environment variables
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-me-in-production")
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not JWT_SECRET_KEY:
+    raise ValueError("JWT_SECRET_KEY environment variable must be set")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
 JWT_REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "7"))
@@ -216,13 +218,18 @@ def create_session(
 
     Args:
         user_email: The email of the user
-        refresh_token: The refresh token (hashed)
+        refresh_token: The refresh token (stored as-is since JWT is already cryptographically signed)
         expires_at: When the session expires
         user_agent: Optional browser user agent
         ip_address: Optional client IP address
 
     Returns:
         Session: The created session object
+
+    Note:
+        Refresh tokens are stored as-is (not hashed) because they are already
+        cryptographically signed JWTs. The token's signature provides integrity
+        protection, and we verify the signature before accepting the token.
     """
     session = DBSession()
     try:

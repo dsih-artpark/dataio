@@ -48,16 +48,13 @@ export default function OTPInput({ length, onComplete, disabled = false }: OTPIn
       });
       setValues(newValues);
 
-      // Focus the next empty input or the last one
+      // Focus the next empty input or the last one, and trigger callback if complete
       const nextEmpty = newValues.findIndex((v) => !v);
       if (nextEmpty >= 0) {
         inputRefs.current[nextEmpty]?.focus();
       } else {
         inputRefs.current[length - 1]?.focus();
-        // If complete, trigger callback
-        if (newValues.every((v) => v.length === 1)) {
-          onComplete(newValues.join(''));
-        }
+        onComplete(newValues.join(''));
       }
     }
   };

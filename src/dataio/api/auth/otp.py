@@ -8,6 +8,7 @@ for passwordless authentication via email.
 import os
 import secrets
 import logging
+from math import ceil
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -75,7 +76,7 @@ def create_otp(
             time_remaining = (
                 recent_otp.created_at + timedelta(minutes=OTP_RATE_LIMIT_MINUTES)
             ) - datetime.now(timezone.utc)
-            seconds = max(0, int(time_remaining.total_seconds()))
+            seconds = max(0, ceil(time_remaining.total_seconds()))
             raise ValueError(
                 f"Please wait {seconds} seconds before requesting another code"
             )

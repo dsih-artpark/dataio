@@ -6,3 +6,10 @@ import LoginForm from '../components/auth/LoginForm';
 <AuthLayout title="Sign In">
   <LoginForm client:load />
 </AuthLayout>
+
+<script>
+  import { redirectIfAuthenticated } from '../lib/auth';
+
+  // If already logged in, redirect to dashboard
+  redirectIfAuthenticated();
+</script>

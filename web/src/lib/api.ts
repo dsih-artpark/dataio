@@ -88,7 +88,7 @@ class ApiClient {
         // Refresh failed, clear tokens and redirect to login
         this.clearTokens();
         if (typeof window !== 'undefined') {
-          window.location.href = '/login';
+          window.location.replace('/login');
         }
         throw new Error('Session expired');
       }

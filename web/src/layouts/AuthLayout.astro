@@ -1,0 +1,36 @@
+---
+import BaseLayout from './BaseLayout.astro';
+
+interface Props {
+  title: string;
+}
+
+const { title } = Astro.props;
+---
+
+<BaseLayout title={title}>
+  <div class="min-h-screen flex flex-col justify-center py-12 sm:px-6 lg:px-8 bg-gradient-to-br from-primary-50 to-primary-100">
+    <div class="sm:mx-auto sm:w-full sm:max-w-md">
+      <div class="flex justify-center">
+        <a href="/" class="flex items-center space-x-2">
+          <div class="w-10 h-10 bg-primary-600 rounded-lg flex items-center justify-center">
+            <span class="text-white font-bold text-xl">D</span>
+          </div>
+          <span class="text-2xl font-bold text-gray-900">DataIO</span>
+        </a>
+      </div>
+    </div>
+
+    <div class="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
+      <div class="bg-white py-8 px-4 shadow-xl sm:rounded-2xl sm:px-10 border border-gray-100">
+        <slot />
+      </div>
+    </div>
+
+    <div class="mt-8 text-center">
+      <p class="text-sm text-gray-500">
+        A dataset management platform by ARTPARK
+      </p>
+    </div>
+  </div>
+</BaseLayout>

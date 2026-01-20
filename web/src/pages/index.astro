@@ -1,0 +1,25 @@
+---
+// Redirect to login or dashboard based on auth state
+// This is handled client-side since we can't access localStorage on the server
+---
+
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DataIO</title>
+  </head>
+  <body>
+    <script>
+      const token = localStorage.getItem('access_token');
+      if (token) {
+        window.location.href = '/dashboard';
+      } else {
+        window.location.href = '/login';
+      }
+    </script>
+    <noscript>
+      <meta http-equiv="refresh" content="0; url=/login" />
+    </noscript>
+  </body>
+</html>

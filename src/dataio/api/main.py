@@ -1,11 +1,14 @@
+import os
 import logging
 
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 
 from dataio.api.routers.admin import admin_router
 from dataio.api.routers.user import user_router
+from dataio.api.routers.web import web_router
 
 # Set up logging
 log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -21,8 +24,25 @@ app = FastAPI(
     redoc_url=None,
 )
 
+# CORS configuration for web frontend
+# Configurable via environment variable, comma-separated list of origins
+CORS_ORIGINS = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:3000,http://localhost:4321"  # Default for local dev
+).split(",")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include routers
 app.include_router(user_router)
 app.include_router(admin_router)
+app.include_router(web_router)
 
 app.mount("/docs", StaticFiles(directory="docs/build/", html=True), name="docs")
 

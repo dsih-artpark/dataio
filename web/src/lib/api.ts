@@ -93,8 +93,14 @@ class ApiClient {
         throw new Error('Session expired');
       }
     }
-
-    if (!response.ok) {
+    let errorMessage = 'Request failed';
+    try {
+      const error = await response.json() as ApiError;
+      errorMessage = error.detail || errorMessage;
+    } catch {
+      // Non-JSON response, use default message
+    }
+    throw new Error(errorMessage);
       const error = await response.json() as ApiError;
       throw new Error(error.detail || 'Request failed');
     }

@@ -91,10 +91,10 @@ export default function FilterPanel({
   }
 
   return (
-    <div class={`${isMobile ? 'h-full' : 'w-64 border-r border-gray-200'} bg-white flex flex-col`}>
+    <div class={`${isMobile ? 'h-full' : 'w-56 border-r border-gray-200'} bg-white flex flex-col`}>
       {/* Header */}
-      <div class="flex items-center justify-between p-4 border-b border-gray-200">
-        <h2 class="font-semibold text-gray-900">Filters</h2>
+      <div class="flex items-center justify-between px-4 py-4 border-b border-gray-200">
+        <h2 class="font-semibold text-gray-900 text-sm">Filters</h2>
         <div class="flex items-center gap-2">
           {hasActiveFilters && (
             <button

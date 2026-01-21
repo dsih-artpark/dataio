@@ -98,29 +98,29 @@ export default function DatasetDetailPanel({
   const canDownload = isAuthenticated && dataset.can_download;
 
   return (
-    <div class="h-full flex flex-col bg-white rounded-lg border border-gray-200 overflow-hidden">
+    <div class="h-full flex flex-col bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
       {/* Header */}
-      <div class="p-4 border-b border-gray-200">
-        <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0">
-            <h2 class="text-lg font-semibold text-gray-900 truncate">{dataset.title}</h2>
-            <p class="text-xs text-gray-500 mt-0.5 font-mono">{dataset.ds_id}</p>
+      <div class="px-6 py-5 border-b border-gray-200 bg-white">
+        <div class="flex items-start justify-between gap-4">
+          <div class="min-w-0 flex-1">
+            <h2 class="text-xl font-semibold text-gray-900 leading-tight">{dataset.title}</h2>
+            <p class="text-sm text-gray-500 mt-1 font-mono">{dataset.ds_id}</p>
           </div>
-          <span class={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-medium ${accessBadge.bg} ${accessBadge.text}`}>
+          <span class={`flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold ${accessBadge.bg} ${accessBadge.text}`}>
             {accessBadge.label}
           </span>
         </div>
       </div>
 
       {/* Tabs */}
-      <div class="flex border-b border-gray-200 px-2">
+      <div class="flex border-b border-gray-200 px-4 bg-gray-50/50">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            class={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium transition-colors ${
+            class={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
               activeTab === tab.id
-                ? 'text-primary-600 border-b-2 border-primary-600 -mb-px'
+                ? 'text-primary-600 border-b-2 border-primary-600 -mb-px bg-white'
                 : 'text-gray-500 hover:text-gray-700'
             }`}
           >
@@ -133,52 +133,52 @@ export default function DatasetDetailPanel({
       </div>
 
       {/* Tab content */}
-      <div class="flex-1 overflow-y-auto p-4">
+      <div class="flex-1 overflow-y-auto p-6">
         {activeTab === 'info' && (
-          <div class="space-y-5">
+          <div class="space-y-6">
             {/* Description */}
             {dataset.description && (
               <div>
-                <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Description</h3>
+                <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Description</h3>
                 <p class="text-sm text-gray-700 leading-relaxed">{dataset.description}</p>
               </div>
             )}
 
             {/* Metadata grid */}
             <div>
-              <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Details</h3>
-              <dl class="grid grid-cols-2 gap-3">
-                <div class="bg-gray-50 rounded-lg p-3">
-                  <dt class="text-xs text-gray-500">Collection</dt>
-                  <dd class="text-sm font-medium text-gray-900 mt-0.5">
+              <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Details</h3>
+              <dl class="grid grid-cols-2 gap-4">
+                <div class="bg-gray-50 rounded-xl p-4">
+                  <dt class="text-xs text-gray-500 font-medium">Collection</dt>
+                  <dd class="text-sm font-semibold text-gray-900 mt-1">
                     {dataset.collection?.name || '—'}
                   </dd>
                   {dataset.collection?.category && (
-                    <dd class="text-xs text-gray-500">{dataset.collection.category}</dd>
+                    <dd class="text-xs text-gray-500 mt-0.5">{dataset.collection.category}</dd>
                   )}
                 </div>
-                <div class="bg-gray-50 rounded-lg p-3">
-                  <dt class="text-xs text-gray-500">Data Owner</dt>
-                  <dd class="text-sm font-medium text-gray-900 mt-0.5">
+                <div class="bg-gray-50 rounded-xl p-4">
+                  <dt class="text-xs text-gray-500 font-medium">Data Owner</dt>
+                  <dd class="text-sm font-semibold text-gray-900 mt-1">
                     {dataset.data_owner?.name || '—'}
                   </dd>
                 </div>
-                <div class="bg-gray-50 rounded-lg p-3">
-                  <dt class="text-xs text-gray-500">Temporal Coverage</dt>
-                  <dd class="text-sm font-medium text-gray-900 mt-0.5">
+                <div class="bg-gray-50 rounded-xl p-4">
+                  <dt class="text-xs text-gray-500 font-medium">Temporal Coverage</dt>
+                  <dd class="text-sm font-semibold text-gray-900 mt-1">
                     {formatDate(dataset.temporal_coverage_start_date)} – {formatDate(dataset.temporal_coverage_end_date)}
                   </dd>
                   {dataset.temporal_resolution && dataset.temporal_resolution !== 'NONE' && (
-                    <dd class="text-xs text-gray-500">{dataset.temporal_resolution.toLowerCase()} resolution</dd>
+                    <dd class="text-xs text-gray-500 mt-0.5">{dataset.temporal_resolution.toLowerCase()} resolution</dd>
                   )}
                 </div>
-                <div class="bg-gray-50 rounded-lg p-3">
-                  <dt class="text-xs text-gray-500">Spatial Coverage</dt>
-                  <dd class="text-sm font-medium text-gray-900 mt-0.5">
+                <div class="bg-gray-50 rounded-xl p-4">
+                  <dt class="text-xs text-gray-500 font-medium">Spatial Coverage</dt>
+                  <dd class="text-sm font-semibold text-gray-900 mt-1">
                     {dataset.spatial_coverage_region_id || '—'}
                   </dd>
                   {dataset.spatial_resolution && (
-                    <dd class="text-xs text-gray-500">{dataset.spatial_resolution.toLowerCase()} level</dd>
+                    <dd class="text-xs text-gray-500 mt-0.5">{dataset.spatial_resolution.toLowerCase()} level</dd>
                   )}
                 </div>
               </dl>
@@ -187,12 +187,12 @@ export default function DatasetDetailPanel({
             {/* Tags */}
             {dataset.tags && dataset.tags.length > 0 && (
               <div>
-                <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Tags</h3>
-                <div class="flex flex-wrap gap-1.5">
+                <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Tags</h3>
+                <div class="flex flex-wrap gap-2">
                   {dataset.tags.map((tag) => (
                     <span
                       key={tag}
-                      class="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"
+                      class="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm font-medium"
                     >
                       {tag}
                     </span>
@@ -203,14 +203,14 @@ export default function DatasetDetailPanel({
 
             {/* Login prompt for unauthenticated users */}
             {!isAuthenticated && (
-              <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <div class="flex items-start gap-2">
-                  <svg class="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+              <div class="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                <div class="flex items-start gap-3">
+                  <svg class="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
                   </svg>
                   <div>
-                    <p class="text-sm text-blue-800 font-medium">Sign in for more</p>
-                    <p class="text-xs text-blue-700 mt-0.5">
+                    <p class="text-sm text-blue-800 font-semibold">Sign in for more</p>
+                    <p class="text-sm text-blue-700 mt-1">
                       <a href="/login" class="underline hover:text-blue-600">Sign in</a> to view file details and download datasets.
                     </p>
                   </div>
@@ -221,37 +221,37 @@ export default function DatasetDetailPanel({
         )}
 
         {activeTab === 'schema' && (
-          <div class="space-y-4">
+          <div class="space-y-6">
             {dataset.raw_datasets && dataset.raw_datasets.length > 0 ? (
               <>
                 <div>
-                  <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                  <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
                     Available Files ({dataset.raw_datasets.length})
                   </h3>
-                  <div class="space-y-2">
+                  <div class="space-y-3">
                     {dataset.raw_datasets.map((rd) => (
                       <div
                         key={rd.id}
-                        class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg"
+                        class="flex items-center gap-4 p-4 bg-gray-50 rounded-xl border border-gray-100"
                       >
-                        <div class="w-8 h-8 rounded bg-gray-200 flex items-center justify-center flex-shrink-0">
-                          <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <div class="w-10 h-10 rounded-lg bg-gray-200 flex items-center justify-center flex-shrink-0">
+                          <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                           </svg>
                         </div>
                         <div class="min-w-0 flex-1">
-                          <p class="text-sm font-medium text-gray-900 truncate">{rd.title}</p>
-                          <p class="text-xs text-gray-500 font-mono">{rd.rds_id}</p>
+                          <p class="text-sm font-semibold text-gray-900">{rd.title}</p>
+                          <p class="text-xs text-gray-500 font-mono mt-0.5">{rd.rds_id}</p>
                         </div>
                         {canDownload && rd.source && (
                           <a
                             href={rd.source}
                             target="_blank"
                             rel="noopener noreferrer"
-                            class="flex-shrink-0 p-2 text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
+                            class="flex-shrink-0 p-2.5 text-primary-600 hover:bg-primary-100 rounded-lg transition-colors"
                             title="Download"
                           >
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                             </svg>
                           </a>
@@ -262,23 +262,23 @@ export default function DatasetDetailPanel({
                 </div>
               </>
             ) : (
-              <div class="text-center py-8">
-                <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
-                  <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div class="text-center py-12">
+                <div class="w-14 h-14 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center">
+                  <svg class="w-7 h-7 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                   </svg>
                 </div>
                 {isAuthenticated ? (
                   <>
-                    <p class="text-sm text-gray-600 font-medium">No files available</p>
-                    <p class="text-xs text-gray-500 mt-1">
+                    <p class="text-sm text-gray-600 font-semibold">No files available</p>
+                    <p class="text-sm text-gray-500 mt-1">
                       This dataset doesn't have downloadable files yet
                     </p>
                   </>
                 ) : (
                   <>
-                    <p class="text-sm text-gray-600 font-medium">Sign in to view files</p>
-                    <p class="text-xs text-gray-500 mt-1">
+                    <p class="text-sm text-gray-600 font-semibold">Sign in to view files</p>
+                    <p class="text-sm text-gray-500 mt-1">
                       <a href="/login" class="text-primary-600 hover:text-primary-700 underline">Sign in</a> to view file details and download data
                     </p>
                   </>
@@ -289,10 +289,10 @@ export default function DatasetDetailPanel({
             {/* Data dictionary info */}
             {dataset.additional_metadata && Object.keys(dataset.additional_metadata).length > 0 && (
               <div>
-                <h3 class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
                   Additional Metadata
                 </h3>
-                <div class="bg-gray-50 rounded-lg p-3">
+                <div class="bg-gray-50 rounded-xl p-4 border border-gray-100">
                   <pre class="text-xs text-gray-600 overflow-x-auto">
                     {JSON.stringify(dataset.additional_metadata, null, 2)}
                   </pre>
@@ -310,10 +310,10 @@ export default function DatasetDetailPanel({
       </div>
 
       {/* Footer */}
-      <div class="p-4 border-t border-gray-200 bg-gray-50">
+      <div class="px-6 py-4 border-t border-gray-200 bg-gray-50/80">
         <a
           href={`/datasets/detail?id=${dataset.ds_id}`}
-          class="block w-full text-center py-2 px-4 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700 transition-colors"
+          class="block w-full text-center py-3 px-4 bg-primary-600 text-white rounded-xl text-sm font-semibold hover:bg-primary-700 transition-colors shadow-sm"
         >
           View Full Details
         </a>

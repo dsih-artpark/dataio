@@ -113,22 +113,22 @@ export default function DatasetListItem({
   return (
     <button
       onClick={onClick}
-      class={`w-full text-left p-3 border-b border-gray-100 transition-colors ${
+      class={`w-full text-left px-5 py-4 border-b border-gray-100 transition-all duration-150 ${
         isSelected
-          ? 'bg-primary-50 border-l-2 border-l-primary-600'
-          : 'hover:bg-gray-50 border-l-2 border-l-transparent'
+          ? 'bg-primary-50 border-l-3 border-l-primary-600'
+          : 'hover:bg-gray-50/80 border-l-3 border-l-transparent'
       }`}
     >
-      <div class="flex items-start gap-2">
-        <div class={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${badge.dot}`} />
+      <div class="flex items-start gap-3">
+        <div class={`w-2.5 h-2.5 rounded-full mt-1.5 flex-shrink-0 ${badge.dot}`} />
         <div class="flex-1 min-w-0">
           <h3
-            class={`font-medium truncate ${isSelected ? 'text-primary-900' : 'text-gray-900'}`}
+            class={`font-medium leading-snug ${isSelected ? 'text-primary-900' : 'text-gray-900'}`}
           >
             {dataset.title}
           </h3>
-          <div class="flex items-center gap-1.5 mt-0.5 text-xs text-gray-500">
-            <span class="truncate max-w-[120px]">{dataset.collection_name}</span>
+          <div class="flex items-center gap-2 mt-1 text-sm text-gray-500">
+            <span class="truncate">{dataset.collection_name}</span>
             {dateRange && (
               <>
                 <span class="text-gray-300">·</span>
@@ -138,7 +138,7 @@ export default function DatasetListItem({
           </div>
         </div>
         {isSelected && (
-          <svg class="w-4 h-4 text-primary-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-5 h-5 text-primary-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
         )}

@@ -183,12 +183,12 @@ export default function DatasetBrowser() {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 1024;
 
   return (
-    <div class="h-[calc(100vh-12rem)] lg:h-[calc(100vh-10rem)] flex flex-col">
+    <div class="h-[calc(100vh-11rem)] lg:h-[calc(100vh-9rem)] flex flex-col">
       {/* Mobile header with filter button */}
       <div class="lg:hidden flex items-center gap-3 mb-4">
         <button
           onClick={() => setMobileFilterOpen(true)}
-          class="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
+          class="flex items-center gap-2 px-4 py-2.5 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
@@ -206,15 +206,15 @@ export default function DatasetBrowser() {
             value={filters.search}
             onInput={(e) => handleFilterChange({ ...filters, search: (e.target as HTMLInputElement).value })}
             placeholder="Search datasets..."
-            class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+            class="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
         </div>
       </div>
 
       {/* Main content area */}
-      <div class="flex-1 flex overflow-hidden rounded-lg border border-gray-200 bg-white">
+      <div class="flex-1 flex overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
         {/* Filter panel - desktop */}
-        <div class={`hidden lg:block ${filterCollapsed ? 'w-12' : 'w-64'} flex-shrink-0 transition-all duration-200`}>
+        <div class={`hidden lg:block ${filterCollapsed ? 'w-12' : 'w-56'} flex-shrink-0 transition-all duration-200`}>
           <FilterPanel
             collections={collections}
             filters={filters}
@@ -225,25 +225,25 @@ export default function DatasetBrowser() {
         </div>
 
         {/* Dataset list */}
-        <div class="flex-1 lg:w-80 lg:flex-none border-r border-gray-200 flex flex-col min-w-0">
+        <div class="flex-1 lg:w-[340px] lg:min-w-[300px] lg:max-w-[400px] lg:flex-none border-r border-gray-200 flex flex-col min-w-0">
           {/* Results header */}
-          <div class="px-4 py-3 border-b border-gray-200 bg-gray-50 flex-shrink-0">
+          <div class="px-5 py-4 border-b border-gray-200 bg-gray-50/80 flex-shrink-0">
             <div class="flex items-center justify-between">
               <p class="text-sm text-gray-600">
                 {loading ? (
                   'Loading...'
                 ) : (
                   <>
-                    <span class="font-medium text-gray-900">{datasets.length}</span>
+                    <span class="font-semibold text-gray-900">{datasets.length}</span>
                     {' '}of{' '}
-                    <span class="font-medium text-gray-900">{total}</span>
+                    <span class="font-semibold text-gray-900">{total}</span>
                     {' '}datasets
                   </>
                 )}
               </p>
               {isAuthenticated && (
-                <span class="text-xs text-green-600 font-medium flex items-center gap-1">
-                  <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+                <span class="text-xs text-green-600 font-medium flex items-center gap-1.5">
+                  <span class="w-2 h-2 bg-green-500 rounded-full"></span>
                   Signed in
                 </span>
               )}
@@ -311,7 +311,7 @@ export default function DatasetBrowser() {
         </div>
 
         {/* Detail panel - desktop only */}
-        <div class="hidden lg:block flex-1 p-4 bg-gray-50 min-w-0">
+        <div class="hidden lg:block flex-1 p-5 bg-gray-50/50 min-w-0">
           <DatasetDetailPanel
             dataset={selectedDataset}
             loading={detailLoading}

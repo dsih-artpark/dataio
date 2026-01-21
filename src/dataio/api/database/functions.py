@@ -61,7 +61,25 @@ def check_if_dataset_exists(dataset_id: str):
 def get_dataset(dataset_id: str):
     session = Session()
     try:
-        dataset = session.query(Dataset).filter(Dataset.ds_id == dataset_id).first()
+        dataset = (
+            session.query(Dataset)
+            .options(
+                joinedload(Dataset.collection),
+                joinedload(Dataset.data_owner),
+                joinedload(Dataset.spatial_coverage_region),
+                joinedload(Dataset.raw_datasets),
+                joinedload(Dataset.tags),
+            )
+            .filter(Dataset.ds_id == dataset_id)
+            .first()
+        )
+        # Eagerly access relationships before session closes
+        if dataset:
+            _ = dataset.collection
+            _ = dataset.data_owner
+            _ = dataset.spatial_coverage_region
+            _ = list(dataset.raw_datasets) if dataset.raw_datasets else []
+            _ = list(dataset.tags) if dataset.tags else []
         return dataset
     except Exception as e:
         logger.error(f"Error getting dataset: {str(e)}")

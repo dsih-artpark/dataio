@@ -26,9 +26,9 @@ const { title, description = 'DataIO - Dataset Management System' } = Astro.prop
           </div>
           <nav class="flex items-center gap-4">
             <a href="/datasets" class="text-gray-600 hover:text-gray-900">
-              Browse Datasets
+              Datasets
             </a>
-            <a href="/login" class="btn-primary">
+            <a href="/login" id="auth-link" class="btn-primary">
               Sign In
             </a>
           </nav>
@@ -49,6 +49,25 @@ const { title, description = 'DataIO - Dataset Management System' } = Astro.prop
         </p>
       </div>
     </footer>
+
+    <script>
+      // Update nav for authenticated users
+      const token = localStorage.getItem('access_token');
+      if (token) {
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          if (payload.exp && payload.exp * 1000 > Date.now()) {
+            const authLink = document.getElementById('auth-link') as HTMLAnchorElement | null;
+            if (authLink) {
+              authLink.textContent = 'Account';
+              authLink.href = '/account';
+            }
+          }
+        } catch {
+          // Invalid token, keep sign in link
+        }
+      }
+    </script>
   </body>
 </html>
 

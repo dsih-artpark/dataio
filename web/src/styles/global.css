@@ -74,6 +74,11 @@
   .transition-panel {
     transition: width 0.2s ease-in-out, opacity 0.15s ease-in-out;
   }
+
+  /* Custom border widths */
+  .border-l-3 {
+    border-left-width: 3px;
+  }
 }
 
 /* Custom scrollbar for dataset list */

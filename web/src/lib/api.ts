@@ -2,6 +2,13 @@
  * API client for communicating with the DataIO backend.
  */
 
+import type {
+  DatasetDetail,
+  DatasetsResponse,
+  CollectionsResponse,
+  DataOwnersResponse,
+} from './types';
+
 const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
 interface ApiError {
@@ -276,7 +283,7 @@ class ApiClient {
     data_owner_id?: number;
     limit?: number;
     offset?: number;
-  }) {
+  }): Promise<DatasetsResponse> {
     const searchParams = new URLSearchParams();
     if (params?.search) searchParams.set('search', params.search);
     if (params?.collection_id) searchParams.set('collection_id', String(params.collection_id));
@@ -285,24 +292,19 @@ class ApiClient {
     if (params?.offset) searchParams.set('offset', String(params.offset));
 
     const query = searchParams.toString();
-    return this.request<{
-      datasets: object[];
-      total: number;
-      limit: number;
-      offset: number;
-    }>(`/datasets${query ? `?${query}` : ''}`);
+    return this.request<DatasetsResponse>(`/datasets${query ? `?${query}` : ''}`);
   }
 
-  async getDataset(datasetId: string) {
-    return this.request<object>(`/datasets/${datasetId}`);
+  async getDataset(datasetId: string): Promise<DatasetDetail> {
+    return this.request<DatasetDetail>(`/datasets/${datasetId}`);
   }
 
-  async getCollections() {
-    return this.request<{ collections: object[] }>('/collections');
+  async getCollections(): Promise<CollectionsResponse> {
+    return this.request<CollectionsResponse>('/collections');
   }
 
-  async getDataOwners() {
-    return this.request<{ data_owners: object[] }>('/data-owners');
+  async getDataOwners(): Promise<DataOwnersResponse> {
+    return this.request<DataOwnersResponse>('/data-owners');
   }
 
   // Public dataset endpoints (no authentication required)
@@ -312,7 +314,7 @@ class ApiClient {
     data_owner_id?: number;
     limit?: number;
     offset?: number;
-  }) {
+  }): Promise<DatasetsResponse> {
     const searchParams = new URLSearchParams();
     if (params?.search) searchParams.set('search', params.search);
     if (params?.collection_id) searchParams.set('collection_id', String(params.collection_id));
@@ -321,24 +323,19 @@ class ApiClient {
     if (params?.offset) searchParams.set('offset', String(params.offset));
 
     const query = searchParams.toString();
-    return this.request<{
-      datasets: object[];
-      total: number;
-      limit: number;
-      offset: number;
-    }>(`/public/datasets${query ? `?${query}` : ''}`, {}, false);
+    return this.request<DatasetsResponse>(`/public/datasets${query ? `?${query}` : ''}`, {}, false);
   }
 
-  async getPublicDataset(datasetId: string) {
-    return this.request<object>(`/public/datasets/${datasetId}`, {}, false);
+  async getPublicDataset(datasetId: string): Promise<DatasetDetail> {
+    return this.request<DatasetDetail>(`/public/datasets/${datasetId}`, {}, false);
   }
 
-  async getPublicCollections() {
-    return this.request<{ collections: object[] }>('/public/collections', {}, false);
+  async getPublicCollections(): Promise<CollectionsResponse> {
+    return this.request<CollectionsResponse>('/public/collections', {}, false);
   }
 
-  async getPublicDataOwners() {
-    return this.request<{ data_owners: object[] }>('/public/data-owners', {}, false);
+  async getPublicDataOwners(): Promise<DataOwnersResponse> {
+    return this.request<DataOwnersResponse>('/public/data-owners', {}, false);
   }
 
   // Admin endpoints

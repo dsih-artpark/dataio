@@ -82,14 +82,14 @@ export function requireAuth(): boolean {
 }
 
 /**
- * Redirect to dashboard if already authenticated.
+ * Redirect to datasets if already authenticated.
  * Returns true if not authenticated, false if redirecting.
  */
 export function redirectIfAuthenticated(): boolean {
   if (typeof window === 'undefined') return true;
 
   if (api.isAuthenticated()) {
-    window.location.replace('/dashboard');
+    window.location.replace('/datasets');
     return false;
   }
   return true;

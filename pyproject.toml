@@ -4,7 +4,7 @@ version = "0.4.0b15"
 description = "Postgres and FASTAPI based Dataset Management System (DMS), with a CLI and SDK for interacting with the API."
 readme = "README.md"
 requires-python = ">=3.12"
-license = "GPL-3.0-or-later"
+license = "AGPL-3.0-or-later"
 authors = [
     { name = "Akhil B", email = "akhil@artpark.in" },
     { name = "Sneha S", email = "sneha@artpark.in" },

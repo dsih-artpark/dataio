@@ -317,21 +317,23 @@ path = client.download_dataset(
 )</code></pre>
                   </div>
                   <!-- REST API Example -->
-                  <div id="code-api" class="code-content hidden">
+                  <div id="code-api" class="code-content hidden overflow-hidden">
                     <div class="flex items-center space-x-2 mb-4">
                       <span class="text-gray-400 text-sm">curl</span>
                     </div>
-                    <pre class="text-xs sm:text-sm text-gray-300 overflow-x-auto whitespace-pre-wrap"><code><span class="text-gray-500"># List datasets</span>
+                    <div class="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
+                      <pre class="text-xs sm:text-sm text-gray-300 min-w-max"><code><span class="text-gray-500"># List datasets</span>
 <span class="text-green-400">$</span> curl -H <span class="text-green-400">"X-API-Key: $API_KEY"</span> \
   <span class="text-green-400">"https://dataio.artpark.ai/api/v1/datasets"</span>
 
 <span class="text-gray-500"># Get dataset tables</span>
 <span class="text-green-400">$</span> curl -H <span class="text-green-400">"X-API-Key: $API_KEY"</span> \
-  <span class="text-green-400">"https://dataio.artpark.ai/api/v1/datasets/TS0001DS0042/STANDARDISED/tables"</span>
+  <span class="text-green-400">".../datasets/TS0001DS0042/STANDARDISED/tables"</span>
 
 <span class="text-gray-500"># Download shapefile as GeoJSON</span>
 <span class="text-green-400">$</span> curl -H <span class="text-green-400">"X-API-Key: $API_KEY"</span> \
-  <span class="text-green-400">"https://dataio.artpark.ai/api/v1/shapefiles/state_29"</span></code></pre>
+  <span class="text-green-400">".../shapefiles/state_29"</span></code></pre>
+                    </div>
                   </div>
                 </div>
               </div>

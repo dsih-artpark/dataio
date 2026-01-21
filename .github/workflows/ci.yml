@@ -39,8 +39,10 @@ jobs:
     runs-on: ubuntu-latest
     # Only deploy frontend on staging for now
     if: github.ref_name == 'staging'
+    # Wait for API deploy to finish (it re-clones the repo)
+    needs: deploy_api
     environment:
-      name: ${{ github.ref_name }}_api
+      name: ${{ github.ref_name }}_web
 
     steps:
       - name: Checkout code
@@ -64,7 +66,7 @@ jobs:
           PUBLIC_WEBAUTHN_RP_ID: ${{ secrets.PUBLIC_WEBAUTHN_RP_ID }}
         run: npm run build
 
-      - name: Clear old dist on server
+      - name: Prepare dist directory on server
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.PRIVATE_IP }}
@@ -74,6 +76,7 @@ jobs:
           proxy_username: ${{ secrets.USER }}
           proxy_key: ${{ secrets.JUMP_SERVER_PRIVATE_KEY }}
           script: |
+            mkdir -p /home/ubuntu/${{ github.ref_name }}/dataio/web/dist
             rm -rf /home/ubuntu/${{ github.ref_name }}/dataio/web/dist/*
 
       - name: Deploy dist to server

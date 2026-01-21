@@ -19,6 +19,11 @@ import DatasetTable from '../../components/datasets/DatasetTable';
 <script>
   import { initAuth, requireAuth } from '../../lib/auth';
 
-  // Initialize auth and require login
-  initAuth().then(() => requireAuth());
+  // Check auth immediately before doing anything else
+  if (!requireAuth()) {
+    // Not authenticated, redirecting - don't initialize anything
+  } else {
+    // Authenticated, initialize auth state
+    initAuth();
+  }
 </script>

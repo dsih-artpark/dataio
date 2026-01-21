@@ -60,6 +60,7 @@ class WebAuthService(BaseService):
             # Check if user exists
             user = session.query(User).filter(User.email == email).first()
             if not user:
+                self.logger.info(f"Login attempt for non-existent user: {email}")
                 # For security, don't reveal if user exists
                 # Still "send" OTP to prevent enumeration attacks
                 self.logger.info(f"Login attempt for non-existent user: {email}")

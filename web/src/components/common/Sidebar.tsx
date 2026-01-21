@@ -1,3 +1,4 @@
+import type { JSX } from 'preact';
 import { currentUser } from '../../lib/auth';
 
 interface NavItem {

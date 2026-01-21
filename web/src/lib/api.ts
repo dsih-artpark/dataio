@@ -88,19 +88,13 @@ class ApiClient {
         // Refresh failed, clear tokens and redirect to login
         this.clearTokens();
         if (typeof window !== 'undefined') {
-          window.location.href = '/login';
+          window.location.replace('/login');
         }
         throw new Error('Session expired');
       }
     }
-    let errorMessage = 'Request failed';
-    try {
-      const error = await response.json() as ApiError;
-      errorMessage = error.detail || errorMessage;
-    } catch {
-      // Non-JSON response, use default message
-    }
-    throw new Error(errorMessage);
+
+    if (!response.ok) {
       const error = await response.json() as ApiError;
       throw new Error(error.detail || 'Request failed');
     }
@@ -275,7 +269,7 @@ class ApiClient {
     });
   }
 
-  // Dataset endpoints
+  // Dataset endpoints (authenticated)
   async getDatasets(params?: {
     search?: string;
     collection_id?: number;
@@ -309,6 +303,42 @@ class ApiClient {
 
   async getDataOwners() {
     return this.request<{ data_owners: object[] }>('/data-owners');
+  }
+
+  // Public dataset endpoints (no authentication required)
+  async getPublicDatasets(params?: {
+    search?: string;
+    collection_id?: number;
+    data_owner_id?: number;
+    limit?: number;
+    offset?: number;
+  }) {
+    const searchParams = new URLSearchParams();
+    if (params?.search) searchParams.set('search', params.search);
+    if (params?.collection_id) searchParams.set('collection_id', String(params.collection_id));
+    if (params?.data_owner_id) searchParams.set('data_owner_id', String(params.data_owner_id));
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    if (params?.offset) searchParams.set('offset', String(params.offset));
+
+    const query = searchParams.toString();
+    return this.request<{
+      datasets: object[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(`/public/datasets${query ? `?${query}` : ''}`, {}, false);
+  }
+
+  async getPublicDataset(datasetId: string) {
+    return this.request<object>(`/public/datasets/${datasetId}`, {}, false);
+  }
+
+  async getPublicCollections() {
+    return this.request<{ collections: object[] }>('/public/collections', {}, false);
+  }
+
+  async getPublicDataOwners() {
+    return this.request<{ data_owners: object[] }>('/public/data-owners', {}, false);
   }
 
   // Admin endpoints

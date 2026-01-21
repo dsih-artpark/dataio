@@ -18,5 +18,11 @@ import AccountSettings from '../../components/account/AccountSettings';
 
 <script>
   import { initAuth, requireAuth } from '../../lib/auth';
-  initAuth().then(() => requireAuth());
+
+  // Check auth immediately before doing anything else
+  if (!requireAuth()) {
+    // Not authenticated, redirecting
+  } else {
+    initAuth();
+  }
 </script>

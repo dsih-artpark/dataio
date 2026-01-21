@@ -361,7 +361,79 @@ async def revoke_api_key(
 
 
 # =============================================================================
-# Dataset Endpoints
+# Public Dataset Endpoints (No Authentication Required)
+# =============================================================================
+
+
+@web_router.get("/public/datasets", tags=["public"])
+async def get_public_datasets(
+    search: Optional[str] = None,
+    collection_id: Optional[int] = None,
+    data_owner_id: Optional[int] = None,
+    limit: int = 100,
+    offset: int = 0,
+    user_service: WebUserService = Depends(WebUserService),
+):
+    """
+    Get publicly accessible datasets.
+
+    Returns datasets with VIEW or DOWNLOAD access level.
+    No authentication required.
+
+    Note: To download datasets, users must register and authenticate.
+    """
+    return user_service.get_public_datasets(
+        search=search,
+        collection_id=collection_id,
+        data_owner_id=data_owner_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@web_router.get("/public/datasets/{dataset_id}", tags=["public"])
+async def get_public_dataset(
+    dataset_id: str,
+    user_service: WebUserService = Depends(WebUserService),
+):
+    """
+    Get details for a specific public dataset.
+
+    Only returns datasets with VIEW or DOWNLOAD access level.
+    No authentication required.
+
+    Note: Download links are not included. Users must register and
+    authenticate to download datasets.
+    """
+    return user_service.get_public_dataset(dataset_id)
+
+
+@web_router.get("/public/collections", tags=["public"])
+async def get_public_collections(
+    user_service: WebUserService = Depends(WebUserService),
+):
+    """
+    Get all collections for filtering public datasets.
+
+    No authentication required.
+    """
+    return user_service.get_collections()
+
+
+@web_router.get("/public/data-owners", tags=["public"])
+async def get_public_data_owners(
+    user_service: WebUserService = Depends(WebUserService),
+):
+    """
+    Get all data owners for filtering public datasets.
+
+    No authentication required.
+    """
+    return user_service.get_data_owners()
+
+
+# =============================================================================
+# Dataset Endpoints (Authenticated)
 # =============================================================================
 
 

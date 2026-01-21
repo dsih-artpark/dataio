@@ -1,5 +1,5 @@
 ---
-// Redirect to login or dashboard based on auth state
+// Redirect to dashboard if authenticated, otherwise show public datasets
 // This is handled client-side since we can't access localStorage on the server
 ---
 
@@ -21,18 +21,21 @@
           } else {
             localStorage.removeItem('access_token');
             localStorage.removeItem('refresh_token');
-            window.location.href = '/login';
+            // Show public datasets for unauthenticated users
+            window.location.href = '/datasets';
           }
         } catch {
           localStorage.removeItem('access_token');
-          window.location.href = '/login';
+          // Show public datasets for unauthenticated users
+          window.location.href = '/datasets';
         }
       } else {
-        window.location.href = '/login';
+        // Show public datasets for unauthenticated users
+        window.location.href = '/datasets';
       }
     </script>
     <noscript>
-      <meta http-equiv="refresh" content="0; url=/login" />
+      <meta http-equiv="refresh" content="0; url=/datasets" />
     </noscript>
   </body>
 </html>

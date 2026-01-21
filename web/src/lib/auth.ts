@@ -68,18 +68,29 @@ export function isAdmin(): boolean {
 
 /**
  * Redirect to login if not authenticated.
+ * Returns true if authenticated, false if redirecting.
  */
-export function requireAuth(): void {
-  if (typeof window !== 'undefined' && !api.isAuthenticated()) {
-    window.location.href = '/login';
+export function requireAuth(): boolean {
+  if (typeof window === 'undefined') return true;
+
+  if (!api.isAuthenticated()) {
+    // Use replace to avoid back-button loops
+    window.location.replace('/login');
+    return false;
   }
+  return true;
 }
 
 /**
  * Redirect to dashboard if already authenticated.
+ * Returns true if not authenticated, false if redirecting.
  */
-export function redirectIfAuthenticated(): void {
-  if (typeof window !== 'undefined' && api.isAuthenticated()) {
-    window.location.href = '/dashboard';
+export function redirectIfAuthenticated(): boolean {
+  if (typeof window === 'undefined') return true;
+
+  if (api.isAuthenticated()) {
+    window.location.replace('/dashboard');
+    return false;
   }
+  return true;
 }

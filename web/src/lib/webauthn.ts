@@ -7,12 +7,6 @@ import {
   startAuthentication,
   browserSupportsWebAuthn,
 } from '@simplewebauthn/browser';
-import type {
-  PublicKeyCredentialCreationOptionsJSON,
-  PublicKeyCredentialRequestOptionsJSON,
-  RegistrationResponseJSON,
-  AuthenticationResponseJSON,
-} from '@simplewebauthn/browser';
 import { api } from './api';
 
 /**
@@ -31,10 +25,10 @@ export async function registerPasskey(deviceName?: string): Promise<{
 }> {
   // Get registration options from server
   const { options } = await api.getPasskeyRegistrationOptions();
-  const parsedOptions: PublicKeyCredentialCreationOptionsJSON = JSON.parse(options);
+  const parsedOptions = JSON.parse(options);
 
-  // Start the browser's registration ceremony
-  const credential: RegistrationResponseJSON = await startRegistration({ optionsJSON: parsedOptions });
+  // Start the browser's registration ceremony (v11+ API requires optionsJSON wrapper)
+  const credential = await startRegistration({ optionsJSON: parsedOptions });
 
   // Verify with server
   return api.verifyPasskeyRegistration(credential, deviceName);
@@ -50,10 +44,10 @@ export async function authenticateWithPasskey(email: string): Promise<{
 }> {
   // Get authentication options from server
   const { options } = await api.getPasskeyLoginOptions(email);
-  const parsedOptions: PublicKeyCredentialRequestOptionsJSON = JSON.parse(options);
+  const parsedOptions = JSON.parse(options);
 
-  // Start the browser's authentication ceremony
-  const credential: AuthenticationResponseJSON = await startAuthentication({ optionsJSON: parsedOptions });
+  // Start the browser's authentication ceremony (v11+ API requires optionsJSON wrapper)
+  const credential = await startAuthentication({ optionsJSON: parsedOptions });
 
   // Verify with server
   return api.verifyPasskeyLogin(email, credential);

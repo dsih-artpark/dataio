@@ -179,10 +179,13 @@ class WebUserService(BaseService):
             session.commit()
             session.refresh(api_key)
 
-            # Send notification email
-            self.email_service.send_api_key_created_email(user.email, name)
-
             self.logger.info(f"Created API key '{name}' for user: {user.email}")
+
+            # Send notification email (non-blocking - don't fail if email fails)
+            try:
+                self.email_service.send_api_key_created_email(user.email, name)
+            except Exception as email_error:
+                self.logger.warning(f"Failed to send API key notification email: {str(email_error)}")
 
             return {
                 "id": str(api_key.id),
@@ -449,11 +452,12 @@ class WebUserService(BaseService):
             tables = []
 
             # Try STANDARDISED first, fall back to PREPROCESSED
+            last_error = None
             for version_type in [VersionType.STANDARDISED, VersionType.PREPROCESSED]:
                 try:
-                    self.logger.info(f"Trying to list files for {dataset_id} with version {version_type}")
+                    self.logger.info(f"Trying to list files for {dataset_id} with version {version_type.value}")
                     files = filestore.list_files_in_s3(dataset_id, version_type)
-                    self.logger.info(f"Found {len(files) if files else 0} files for {dataset_id}")
+                    self.logger.info(f"Found {len(files) if files else 0} files for {dataset_id} with {version_type.value}")
                     if files:
                         tables = [
                             {
@@ -463,10 +467,15 @@ class WebUserService(BaseService):
                             }
                             for f in files
                         ]
+                        self.logger.info(f"Successfully retrieved {len(tables)} tables for download")
                         break
                 except Exception as e:
-                    self.logger.warning(f"Failed to list files for {dataset_id} with {version_type}: {str(e)}")
+                    last_error = e
+                    self.logger.warning(f"Failed to list files for {dataset_id} with {version_type.value}: {str(e)}", exc_info=True)
                     continue
+
+            if not tables and last_error:
+                self.logger.error(f"No tables found for {dataset_id}. Last error: {str(last_error)}")
 
             return {
                 "ds_id": dataset.ds_id,

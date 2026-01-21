@@ -25,17 +25,23 @@ interface Dataset {
   additional_metadata?: Record<string, unknown>;
 }
 
-interface Props {
-  datasetId: string;
-}
-
-export default function PublicDatasetDetail({ datasetId }: Props) {
+export default function PublicDatasetDetail() {
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
     const fetchDataset = async () => {
+      // Extract dataset ID from URL query params
+      const params = new URLSearchParams(window.location.search);
+      const datasetId = params.get('id');
+
+      if (!datasetId) {
+        setError('No dataset ID provided');
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       setError('');
 
@@ -50,7 +56,7 @@ export default function PublicDatasetDetail({ datasetId }: Props) {
     };
 
     fetchDataset();
-  }, [datasetId]);
+  }, []);
 
   const formatDate = (date?: string) => {
     if (!date) return '-';

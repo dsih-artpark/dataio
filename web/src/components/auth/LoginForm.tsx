@@ -11,7 +11,6 @@ export default function LoginForm() {
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
 
   const handleEmailSubmit = async (e: Event) => {
     e.preventDefault();
@@ -19,8 +18,7 @@ export default function LoginForm() {
     setLoading(true);
 
     try {
-      const response = await api.initiateLogin(email);
-      setMessage(response.message);
+      await api.initiateLogin(email);
       setStep('otp');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send code');

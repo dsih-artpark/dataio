@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
-import { api } from '../../lib/api';
+import { useState } from 'preact/hooks';
 import { currentUser, logout } from '../../lib/auth';
 
 export default function Header() {

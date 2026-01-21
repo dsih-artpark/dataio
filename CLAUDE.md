@@ -108,14 +108,21 @@ JWT_ALGORITHM=HS256
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES=15
 JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
 
-# Email (SMTP)
+# Email Configuration
 DEBUG_EMAIL=true                           # Set to true for local dev (prints OTPs to console)
+EMAIL_PROVIDER=ses                         # "ses" (default) or "smtp"
+EMAIL_FROM_ADDRESS=noreply@dataio.artpark.ai
+EMAIL_FROM_NAME=DataIO
+
+# AWS SES (when EMAIL_PROVIDER=ses)
+AWS_SES_REGION=ap-south-1
+
+# SMTP (when EMAIL_PROVIDER=smtp)
 SMTP_HOST=smtp.sendgrid.net
 SMTP_PORT=587
 SMTP_USER=apikey
 SMTP_PASSWORD=<your-api-key>
-SMTP_FROM_EMAIL=noreply@dataio.artpark.ai
-SMTP_FROM_NAME=DataIO
+SMTP_USE_TLS=true
 
 # WebAuthn/Passkeys
 WEBAUTHN_RP_ID=localhost                   # Domain for passkeys

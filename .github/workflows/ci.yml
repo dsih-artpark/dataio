@@ -34,3 +34,69 @@ jobs:
             uv sync --group docs --group api
             uv run sphinx-build -b html docs/source docs/build
             sudo supervisorctl restart dataio-app
+
+  deploy_web:
+    runs-on: ubuntu-latest
+    # Only deploy frontend on staging for now
+    if: github.ref_name == 'staging'
+    environment:
+      name: ${{ github.ref_name }}_web
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: 'web/.nvmrc'
+          cache: 'npm'
+          cache-dependency-path: 'web/package-lock.json'
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: web
+        env:
+          PUBLIC_API_URL: ${{ secrets.PUBLIC_API_URL }}
+          PUBLIC_WEBAUTHN_RP_ID: ${{ secrets.PUBLIC_WEBAUTHN_RP_ID }}
+        run: npm run build
+
+      - name: Clear old dist on server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.PRIVATE_IP }}
+          username: ${{ secrets.USER }}
+          key: ${{ secrets.JUMP_SERVER_PRIVATE_KEY }}
+          proxy_host: ${{ secrets.JUMP_SERVER_IP }}
+          proxy_username: ${{ secrets.USER }}
+          proxy_key: ${{ secrets.JUMP_SERVER_PRIVATE_KEY }}
+          script: |
+            rm -rf /home/ubuntu/${{ github.ref_name }}/dataio/web/dist/*
+
+      - name: Deploy dist to server
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.PRIVATE_IP }}
+          username: ${{ secrets.USER }}
+          key: ${{ secrets.JUMP_SERVER_PRIVATE_KEY }}
+          proxy_host: ${{ secrets.JUMP_SERVER_IP }}
+          proxy_username: ${{ secrets.USER }}
+          proxy_key: ${{ secrets.JUMP_SERVER_PRIVATE_KEY }}
+          source: "web/dist/*"
+          target: "/home/ubuntu/${{ github.ref_name }}/dataio/web/"
+          strip_components: 2
+
+      - name: Fix permissions for nginx
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.PRIVATE_IP }}
+          username: ${{ secrets.USER }}
+          key: ${{ secrets.JUMP_SERVER_PRIVATE_KEY }}
+          proxy_host: ${{ secrets.JUMP_SERVER_IP }}
+          proxy_username: ${{ secrets.USER }}
+          proxy_key: ${{ secrets.JUMP_SERVER_PRIVATE_KEY }}
+          script: |
+            chmod -R 755 /home/ubuntu/${{ github.ref_name }}/dataio/web/dist

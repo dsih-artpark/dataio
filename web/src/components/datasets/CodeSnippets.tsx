@@ -1,4 +1,5 @@
 import { useState } from 'preact/hooks';
+import type { JSX } from 'preact';
 
 interface CodeSnippetsProps {
   datasetId: string;

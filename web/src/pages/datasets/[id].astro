@@ -1,0 +1,10 @@
+---
+import PublicLayout from '../../layouts/PublicLayout.astro';
+import PublicDatasetDetail from '../../components/datasets/PublicDatasetDetail';
+
+const { id } = Astro.params;
+---
+
+<PublicLayout title="Dataset Details">
+  <PublicDatasetDetail client:load datasetId={id!} />
+</PublicLayout>

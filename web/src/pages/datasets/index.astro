@@ -1,0 +1,17 @@
+---
+import PublicLayout from '../../layouts/PublicLayout.astro';
+import PublicDatasetTable from '../../components/datasets/PublicDatasetTable';
+---
+
+<PublicLayout title="Browse Datasets">
+  <div class="space-y-6">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">Public Datasets</h1>
+      <p class="mt-1 text-gray-600">
+        Browse publicly available datasets. Sign in to download or access additional datasets.
+      </p>
+    </div>
+
+    <PublicDatasetTable client:load />
+  </div>
+</PublicLayout>

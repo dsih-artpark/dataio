@@ -452,3 +452,163 @@ class WebUserService(BaseService):
             }
         finally:
             session.close()
+
+    # ==========================================================================
+    # Public Dataset Access (No Authentication Required)
+    # ==========================================================================
+
+    def get_public_datasets(
+        self,
+        search: Optional[str] = None,
+        collection_id: Optional[int] = None,
+        data_owner_id: Optional[int] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict:
+        """
+        Get publicly accessible datasets (VIEW or DOWNLOAD access level).
+
+        No authentication required. Returns only datasets that are publicly
+        visible based on their access_level field.
+
+        Args:
+            search: Optional search term for title/description
+            collection_id: Optional filter by collection
+            data_owner_id: Optional filter by data owner
+            limit: Maximum number of results
+            offset: Pagination offset
+
+        Returns:
+            dict: List of public datasets and pagination info
+        """
+        session = DBSession()
+        try:
+            from dataio.api.database.models import AccessLevel
+            from sqlalchemy.orm import joinedload
+
+            # Query datasets with public access (VIEW or DOWNLOAD)
+            query = (
+                session.query(Dataset)
+                .options(
+                    joinedload(Dataset.collection),
+                    joinedload(Dataset.data_owner),
+                )
+                .filter(Dataset.access_level.in_([AccessLevel.VIEW, AccessLevel.DOWNLOAD]))
+            )
+
+            # Get all matching datasets first
+            dataset_objects = query.all()
+
+            # Apply additional filters in memory
+            if search:
+                search_lower = search.lower()
+                dataset_objects = [
+                    d for d in dataset_objects
+                    if search_lower in (d.title or "").lower()
+                    or search_lower in (d.description or "").lower()
+                ]
+
+            if collection_id:
+                dataset_objects = [
+                    d for d in dataset_objects
+                    if d.collection and d.collection.id == collection_id
+                ]
+
+            if data_owner_id:
+                dataset_objects = [
+                    d for d in dataset_objects
+                    if d.data_owner and d.data_owner.id == data_owner_id
+                ]
+
+            # Get total before pagination
+            total = len(dataset_objects)
+
+            # Apply pagination
+            dataset_objects = dataset_objects[offset:offset + limit]
+
+            # Convert to dicts for response (metadata only, no download info)
+            datasets = [
+                {
+                    "ds_id": d.ds_id,
+                    "title": d.title,
+                    "description": d.description,
+                    "collection_id": d.collection.id if d.collection else None,
+                    "collection_name": d.collection.collection_name if d.collection else None,
+                    "data_owner_id": d.data_owner.id if d.data_owner else None,
+                    "data_owner_name": d.data_owner.name if d.data_owner else None,
+                    "temporal_coverage_start_date": d.temporal_coverage_start_date.isoformat() if d.temporal_coverage_start_date else None,
+                    "temporal_coverage_end_date": d.temporal_coverage_end_date.isoformat() if d.temporal_coverage_end_date else None,
+                    "access_level": d.access_level.value if d.access_level else None,
+                }
+                for d in dataset_objects
+            ]
+
+            return {
+                "datasets": datasets,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
+        except Exception as e:
+            self.logger.error(f"Failed to get public datasets: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to get public datasets")
+        finally:
+            session.close()
+
+    def get_public_dataset(self, dataset_id: str) -> dict:
+        """
+        Get a single public dataset by ID.
+
+        No authentication required. Only returns datasets with VIEW or DOWNLOAD
+        access level. Never includes download URLs.
+
+        Args:
+            dataset_id: The dataset ID
+
+        Returns:
+            dict: Dataset details (metadata only, no download links)
+        """
+        session = DBSession()
+        try:
+            from dataio.api.database.models import AccessLevel
+
+            dataset = database.get_dataset(dataset_id)
+            if not dataset:
+                raise HTTPException(status_code=404, detail="Dataset not found")
+
+            # Check if dataset is publicly accessible
+            if dataset.access_level not in [AccessLevel.VIEW, AccessLevel.DOWNLOAD]:
+                raise HTTPException(status_code=404, detail="Dataset not found")
+
+            # Return metadata only - never include download URLs for public access
+            return {
+                "ds_id": dataset.ds_id,
+                "title": dataset.title,
+                "description": dataset.description,
+                "collection": {
+                    "id": dataset.collection.id,
+                    "name": dataset.collection.collection_name,
+                    "category": dataset.collection.category_name,
+                } if dataset.collection else None,
+                "data_owner": {
+                    "id": dataset.data_owner.id,
+                    "name": dataset.data_owner.name,
+                } if dataset.data_owner else None,
+                "spatial_coverage_region_id": dataset.spatial_coverage_region_id,
+                "spatial_resolution": dataset.spatial_resolution.value if dataset.spatial_resolution else None,
+                "temporal_coverage_start_date": dataset.temporal_coverage_start_date.isoformat() if dataset.temporal_coverage_start_date else None,
+                "temporal_coverage_end_date": dataset.temporal_coverage_end_date.isoformat() if dataset.temporal_coverage_end_date else None,
+                "temporal_resolution": dataset.temporal_resolution.value if dataset.temporal_resolution else None,
+                "access_level": dataset.access_level.value if dataset.access_level else None,
+                "can_download": False,  # Always false for public access - must login to download
+                "raw_datasets": [],  # Never expose download links for public access
+                "tags": [tag.tag_name for tag in (dataset.tags or [])],
+                "additional_metadata": dataset.additional_metadata,
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to get public dataset: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to get public dataset")
+        finally:
+            session.close()

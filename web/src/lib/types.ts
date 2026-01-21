@@ -114,3 +114,34 @@ export interface CollectionsResponse {
 export interface DataOwnersResponse {
   data_owners: DataOwner[];
 }
+
+// Metadata JSON structure (from metadata.json files in S3)
+export interface DataDictionaryField {
+  description: string | null;
+  comments: string | null;
+  access: boolean;
+}
+
+export interface TableMetadata {
+  table_name: string;
+  description: string | null;
+  source: string | null;
+  data_dictionary: Record<string, DataDictionaryField>;
+}
+
+export interface MetadataJson {
+  tables: Record<string, TableMetadata>;
+}
+
+// Download URLs response (from /datasets/{id}/download-urls endpoint)
+export interface DatasetDownloadUrls {
+  ds_id: string;
+  title: string;
+  tables: {
+    table_name: string;
+    download_url: string;
+    metadata: Record<string, unknown>;
+  }[];
+  readme_md: string | null;
+  data_dictionary_json: string | null;
+}

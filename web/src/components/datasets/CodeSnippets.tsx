@@ -37,10 +37,7 @@ uv run dataio init`,
       {
         label: 'Usage',
         description: 'Download this dataset',
-        code: `# Get dataset info
-uv run dataio get-dataset ${datasetId}
-
-# Download the dataset
+        code: `# Download the dataset
 uv run dataio download-dataset ${datasetId}`,
       },
     ],
@@ -49,9 +46,11 @@ uv run dataio download-dataset ${datasetId}`,
         label: 'Setup',
         description: 'Install and initialize',
         code: `# pip install dataio-artpark
-from dataio import DataIOAPI
+import os
+from dotenv import load_dotenv
+load_dotenv()  # Load DATAIO_API_KEY from .env
 
-# Initialize (reads API key from .env or config)
+from dataio import DataIOAPI
 client = DataIOAPI()`,
       },
       {
@@ -111,6 +110,12 @@ curl -H "X-API-Key: $API_KEY" -O \\
   };
 
   const currentBlocks = codeBlocks[activeTab];
+
+  const docsLinks: Record<TabId, { url: string; label: string }> = {
+    cli: { url: 'https://dataio.artpark.ai/docs/cli/', label: 'CLI documentation' },
+    python: { url: 'https://dataio.artpark.ai/docs/sdk', label: 'SDK documentation' },
+    api: { url: 'https://dataio.artpark.ai/api/v1', label: 'API reference' },
+  };
 
   const tabIcons: Record<string, JSX.Element> = {
     terminal: (
@@ -203,10 +208,10 @@ curl -H "X-API-Key: $API_KEY" -O \\
         })}
       </div>
 
-      {/* Help link */}
+      {/* Help link - changes based on active tab */}
       <div class="mt-4 pt-3 border-t border-gray-100 text-center">
         <a
-          href="https://dataio.artpark.ai/docs"
+          href={docsLinks[activeTab].url}
           target="_blank"
           rel="noopener noreferrer"
           class="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-primary-600 transition-colors"
@@ -214,7 +219,7 @@ curl -H "X-API-Key: $API_KEY" -O \\
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
           </svg>
-          View full documentation
+          View {docsLinks[activeTab].label}
         </a>
       </div>
     </div>

@@ -1,6 +1,9 @@
-import { useState } from 'preact/hooks';
-import type { DatasetDetail } from '../../lib/types';
+import { useState, useMemo } from 'preact/hooks';
+import type { DatasetDetail, MetadataJson, TableMetadata } from '../../lib/types';
 import CodeSnippets from './CodeSnippets';
+import { marked } from 'marked';
+import JSZip from 'jszip';
+import api from '../../lib/api';
 
 interface DatasetDetailPanelProps {
   dataset: DatasetDetail | null;
@@ -9,7 +12,7 @@ interface DatasetDetailPanelProps {
   isAuthenticated?: boolean;
 }
 
-type TabId = 'info' | 'schema' | 'code';
+type TabId = 'about' | 'metadata' | 'readme' | 'code';
 
 export default function DatasetDetailPanel({
   dataset,
@@ -17,13 +20,69 @@ export default function DatasetDetailPanel({
   error,
   isAuthenticated = false,
 }: DatasetDetailPanelProps) {
-  const [activeTab, setActiveTab] = useState<TabId>('info');
+  const [activeTab, setActiveTab] = useState<TabId>('about');
+  const [activeTableTab, setActiveTableTab] = useState<string | null>(null);
+  const [metadataFormat, setMetadataFormat] = useState<'json' | 'yaml'>('json');
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
-  const tabs: { id: TabId; label: string; icon: string }[] = [
-    { id: 'info', label: 'Info', icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
-    { id: 'schema', label: 'Schema', icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4' },
-    { id: 'code', label: 'Code', icon: 'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4' },
-  ];
+  // Parse the metadata JSON
+  const parsedMetadata = useMemo<MetadataJson | null>(() => {
+    if (!dataset?.data_dictionary_json) return null;
+    try {
+      return JSON.parse(dataset.data_dictionary_json) as MetadataJson;
+    } catch {
+      return null;
+    }
+  }, [dataset?.data_dictionary_json]);
+
+  // Get table names from metadata
+  const tableNames = useMemo(() => {
+    if (!parsedMetadata?.tables) return [];
+    return Object.keys(parsedMetadata.tables);
+  }, [parsedMetadata]);
+
+  // Set default active table when metadata loads
+  useMemo(() => {
+    if (tableNames.length > 0 && !activeTableTab) {
+      setActiveTableTab(tableNames[0]);
+    }
+  }, [tableNames, activeTableTab]);
+
+  // Parse README markdown
+  const renderedReadme = useMemo(() => {
+    if (!dataset?.readme_md) return null;
+    try {
+      return marked.parse(dataset.readme_md) as string;
+    } catch {
+      return null;
+    }
+  }, [dataset?.readme_md]);
+
+  // Get active table metadata
+  const activeTableMetadata = useMemo<TableMetadata | null>(() => {
+    if (!parsedMetadata?.tables || !activeTableTab) return null;
+    return parsedMetadata.tables[activeTableTab] || null;
+  }, [parsedMetadata, activeTableTab]);
+
+  // Build tabs dynamically based on available content
+  const tabs = useMemo(() => {
+    const result: { id: TabId; label: string; icon: string }[] = [
+      { id: 'about', label: 'About', icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
+    ];
+
+    if (parsedMetadata?.tables && Object.keys(parsedMetadata.tables).length > 0) {
+      result.push({ id: 'metadata', label: 'Metadata', icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4' });
+    }
+
+    if (dataset?.readme_md) {
+      result.push({ id: 'readme', label: 'README', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' });
+    }
+
+    result.push({ id: 'code', label: 'Code', icon: 'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4' });
+
+    return result;
+  }, [parsedMetadata, dataset?.readme_md]);
 
   const formatDateRange = (startDate?: string, endDate?: string) => {
     if (!startDate && !endDate) return '—';
@@ -53,6 +112,174 @@ export default function DatasetDetailPanel({
       default:
         return { bg: 'bg-gray-100', text: 'text-gray-600', label: 'Restricted' };
     }
+  };
+
+  // Convert JSON to YAML (simple implementation)
+  const jsonToYaml = (obj: unknown, indent = 0): string => {
+    const spaces = '  '.repeat(indent);
+
+    if (obj === null || obj === undefined) {
+      return 'null';
+    }
+
+    if (typeof obj === 'string') {
+      if (obj.includes('\n') || obj.includes(':') || obj.includes('#')) {
+        return `"${obj.replace(/"/g, '\\"')}"`;
+      }
+      return obj;
+    }
+
+    if (typeof obj === 'number' || typeof obj === 'boolean') {
+      return String(obj);
+    }
+
+    if (Array.isArray(obj)) {
+      if (obj.length === 0) return '[]';
+      return obj.map(item => `${spaces}- ${jsonToYaml(item, indent + 1).trimStart()}`).join('\n');
+    }
+
+    if (typeof obj === 'object') {
+      const entries = Object.entries(obj as Record<string, unknown>);
+      if (entries.length === 0) return '{}';
+      return entries.map(([key, value]) => {
+        const valueStr = jsonToYaml(value, indent + 1);
+        if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+          return `${spaces}${key}:\n${valueStr}`;
+        }
+        return `${spaces}${key}: ${valueStr}`;
+      }).join('\n');
+    }
+
+    return String(obj);
+  };
+
+  // Generate zip filename: {0080:last_four_dataset_id_digits}-{ds_name}.zip, all lower
+  const getZipFilename = () => {
+    if (!dataset) return 'dataset.zip';
+    const lastFour = dataset.ds_id.slice(-4).padStart(4, '0');
+    const safeName = dataset.title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .substring(0, 50);
+    return `${lastFour}-${safeName}.zip`;
+  };
+
+  // Download dataset as zip
+  const downloadDataset = async () => {
+    if (!dataset || !isAuthenticated) return;
+
+    setDownloading(true);
+    setDownloadError(null);
+
+    try {
+      // Get download URLs from API
+      const downloadData = await api.getDatasetDownloadUrls(dataset.ds_id);
+
+      const zip = new JSZip();
+
+      // Add README.md if available
+      if (downloadData.readme_md) {
+        zip.file('README.md', downloadData.readme_md);
+      }
+
+      // Add metadata file (json or yaml based on user preference)
+      if (downloadData.data_dictionary_json) {
+        if (metadataFormat === 'json') {
+          // Pretty print the JSON
+          try {
+            const parsed = JSON.parse(downloadData.data_dictionary_json);
+            zip.file('metadata.json', JSON.stringify(parsed, null, 2));
+          } catch {
+            zip.file('metadata.json', downloadData.data_dictionary_json);
+          }
+        } else {
+          try {
+            const parsed = JSON.parse(downloadData.data_dictionary_json);
+            zip.file('metadata.yaml', jsonToYaml(parsed));
+          } catch {
+            // Fall back to JSON if YAML conversion fails
+            zip.file('metadata.json', downloadData.data_dictionary_json);
+          }
+        }
+      }
+
+      // Download and add each table file
+      const tablePromises = downloadData.tables.map(async (table) => {
+        try {
+          const response = await fetch(table.download_url);
+          if (!response.ok) {
+            throw new Error(`Failed to download ${table.table_name}`);
+          }
+          const blob = await response.blob();
+          // Assume CSV format, adjust extension based on actual file type if needed
+          const filename = `${table.table_name}.csv`;
+          zip.file(filename, blob);
+        } catch (err) {
+          console.error(`Failed to download table ${table.table_name}:`, err);
+          // Continue with other tables even if one fails
+        }
+      });
+
+      await Promise.all(tablePromises);
+
+      // Generate and download the zip
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = getZipFilename();
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Download failed:', err);
+      setDownloadError(err instanceof Error ? err.message : 'Download failed');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  // Download metadata only
+  const downloadMetadataOnly = () => {
+    if (!dataset || !dataset.data_dictionary_json) return;
+
+    let content: string;
+    let filename: string;
+    let mimeType: string;
+
+    const safeTitle = dataset.title.replace(/[^a-zA-Z0-9-_]/g, '_').substring(0, 50);
+
+    if (metadataFormat === 'json') {
+      try {
+        const parsed = JSON.parse(dataset.data_dictionary_json);
+        content = JSON.stringify(parsed, null, 2);
+      } catch {
+        content = dataset.data_dictionary_json;
+      }
+      filename = `${dataset.ds_id}_${safeTitle}_metadata.json`;
+      mimeType = 'application/json';
+    } else {
+      try {
+        const parsed = JSON.parse(dataset.data_dictionary_json);
+        content = jsonToYaml(parsed);
+        filename = `${dataset.ds_id}_${safeTitle}_metadata.yaml`;
+        mimeType = 'text/yaml';
+      } catch {
+        return;
+      }
+    }
+
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   // Empty state
@@ -144,20 +371,10 @@ export default function DatasetDetailPanel({
 
       {/* Tab content */}
       <div class="flex-1 overflow-y-auto p-6">
-        {activeTab === 'info' && (
+        {activeTab === 'about' && (
           <div class="space-y-6">
-            {/* README (if available) */}
-            {dataset.readme_md && (
-              <div>
-                <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">About This Dataset</h3>
-                <div class="bg-slate-50 rounded-xl p-4 border border-gray-100">
-                  <pre class="text-sm text-gray-700 whitespace-pre-wrap font-sans leading-relaxed m-0">{dataset.readme_md}</pre>
-                </div>
-              </div>
-            )}
-
-            {/* Description (fallback if no README, or always show if different from README) */}
-            {dataset.description && !dataset.readme_md && (
+            {/* Description */}
+            {dataset.description && (
               <div>
                 <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Description</h3>
                 <p class="text-sm text-gray-700 leading-relaxed">{dataset.description}</p>
@@ -204,22 +421,22 @@ export default function DatasetDetailPanel({
               </dl>
             </div>
 
-            {/* Available Tables */}
-            {dataset.raw_datasets && dataset.raw_datasets.length > 0 && (
+            {/* Available Tables from metadata */}
+            {tableNames.length > 0 && (
               <div>
                 <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-                  Available Tables ({dataset.raw_datasets.length})
+                  Available Tables ({tableNames.length})
                 </h3>
                 <div class="flex flex-wrap gap-2">
-                  {dataset.raw_datasets.map((rd) => (
+                  {tableNames.map((tableName) => (
                     <span
-                      key={rd.id}
+                      key={tableName}
                       class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium"
                     >
                       <svg class="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                       </svg>
-                      {rd.title}
+                      {tableName}
                     </span>
                   ))}
                 </div>
@@ -262,32 +479,133 @@ export default function DatasetDetailPanel({
           </div>
         )}
 
-        {activeTab === 'schema' && (
-          <div class="space-y-6">
-            {/* Data Dictionary (if available) */}
-            {dataset.data_dictionary_json ? (
-              <div>
-                <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Data Dictionary</h3>
-                <div class="bg-slate-50 rounded-xl border border-gray-100 overflow-hidden">
-                  <div class="flex items-center justify-between px-4 py-2 bg-gray-100 border-b border-gray-200">
-                    <span class="text-xs text-gray-500 font-medium">metadata.json</span>
-                  </div>
-                  <pre class="p-4 text-sm text-gray-700 overflow-x-auto font-mono leading-relaxed m-0">{dataset.data_dictionary_json}</pre>
+        {activeTab === 'metadata' && parsedMetadata?.tables && (
+          <div class="space-y-4">
+            {/* Download button and format toggle */}
+            <div class="flex items-center justify-between">
+              <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Data Dictionary</h3>
+              <div class="flex items-center gap-2">
+                <div class="flex items-center bg-gray-100 rounded-lg p-1">
+                  <button
+                    onClick={() => setMetadataFormat('json')}
+                    class={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                      metadataFormat === 'json'
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    JSON
+                  </button>
+                  <button
+                    onClick={() => setMetadataFormat('yaml')}
+                    class={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                      metadataFormat === 'yaml'
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    YAML
+                  </button>
                 </div>
-              </div>
-            ) : (
-              <div class="text-center py-12">
-                <div class="w-14 h-14 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center">
-                  <svg class="w-7 h-7 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                <button
+                  onClick={downloadMetadataOnly}
+                  class="flex items-center gap-1.5 px-3 py-1.5 bg-primary-600 text-white rounded-lg text-xs font-medium hover:bg-primary-700 transition-colors"
+                >
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                   </svg>
-                </div>
-                <p class="text-sm text-gray-600 font-semibold">No schema information</p>
-                <p class="text-sm text-gray-500 mt-1">
-                  Schema details are not yet available for this dataset
-                </p>
+                  Download
+                </button>
+              </div>
+            </div>
+
+            {/* Table tabs */}
+            {tableNames.length > 1 && (
+              <div class="flex gap-1 p-1 bg-gray-100 rounded-lg overflow-x-auto">
+                {tableNames.map((tableName) => (
+                  <button
+                    key={tableName}
+                    onClick={() => setActiveTableTab(tableName)}
+                    class={`flex-shrink-0 px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                      activeTableTab === tableName
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                    }`}
+                  >
+                    {tableName}
+                  </button>
+                ))}
               </div>
             )}
+
+            {/* Active table metadata */}
+            {activeTableMetadata && (
+              <div class="space-y-4">
+                {/* Table info */}
+                <div class="bg-gray-50 rounded-xl p-4 space-y-2">
+                  <div class="flex items-center gap-2">
+                    <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                    <span class="font-semibold text-gray-900">{activeTableMetadata.table_name}</span>
+                  </div>
+                  {activeTableMetadata.description && (
+                    <p class="text-sm text-gray-600">{activeTableMetadata.description}</p>
+                  )}
+                  {activeTableMetadata.source && (
+                    <p class="text-xs text-gray-500">
+                      <span class="font-medium">Source:</span> {activeTableMetadata.source}
+                    </p>
+                  )}
+                </div>
+
+                {/* Data dictionary table */}
+                {activeTableMetadata.data_dictionary && Object.keys(activeTableMetadata.data_dictionary).length > 0 && (
+                  <div class="border border-gray-200 rounded-xl overflow-hidden">
+                    <div class="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                      <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Fields ({Object.keys(activeTableMetadata.data_dictionary).length})
+                      </span>
+                    </div>
+                    <div class="overflow-x-auto">
+                      <table class="w-full text-sm">
+                        <thead class="bg-gray-50 border-b border-gray-200">
+                          <tr>
+                            <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Field</th>
+                            <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Description</th>
+                            <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Comments</th>
+                          </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100">
+                          {Object.entries(activeTableMetadata.data_dictionary).map(([fieldName, fieldInfo]) => (
+                            <tr key={fieldName} class="hover:bg-gray-50">
+                              <td class="px-4 py-3">
+                                <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded font-mono text-gray-800">{fieldName}</code>
+                              </td>
+                              <td class="px-4 py-3 text-gray-700">
+                                {fieldInfo.description || <span class="text-gray-400 italic">—</span>}
+                              </td>
+                              <td class="px-4 py-3 text-gray-500 text-xs">
+                                {fieldInfo.comments || <span class="text-gray-400 italic">—</span>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'readme' && renderedReadme && (
+          <div class="prose prose-sm prose-gray max-w-none">
+            <div
+              class="readme-content"
+              dangerouslySetInnerHTML={{ __html: renderedReadme }}
+            />
           </div>
         )}
 
@@ -298,49 +616,73 @@ export default function DatasetDetailPanel({
         )}
       </div>
 
-      {/* Footer */}
+      {/* Footer with download button */}
       <div class="px-6 py-4 border-t border-gray-200 bg-gray-50/80">
-        <div class="flex gap-3">
+        {downloadError && (
+          <div class="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
+            {downloadError}
+          </div>
+        )}
+        <div class="flex items-center gap-3">
           {canDownload ? (
             <>
-              <a
-                href={`/datasets/detail?id=${dataset.ds_id}`}
-                class="flex-1 text-center py-3 px-4 border border-gray-300 text-gray-700 rounded-xl text-sm font-semibold hover:bg-gray-100 transition-colors"
+              {/* Unobtrusive format toggle */}
+              <div class="flex items-center gap-2 text-xs text-gray-500">
+                <span>Metadata:</span>
+                <button
+                  onClick={() => setMetadataFormat('json')}
+                  class={`px-2 py-0.5 rounded ${
+                    metadataFormat === 'json'
+                      ? 'bg-gray-200 text-gray-700'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  JSON
+                </button>
+                <span>/</span>
+                <button
+                  onClick={() => setMetadataFormat('yaml')}
+                  class={`px-2 py-0.5 rounded ${
+                    metadataFormat === 'yaml'
+                      ? 'bg-gray-200 text-gray-700'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  YAML
+                </button>
+              </div>
+              <div class="flex-1" />
+              <button
+                onClick={downloadDataset}
+                disabled={downloading}
+                class="flex items-center justify-center gap-2 py-3 px-6 bg-primary-600 text-white rounded-xl text-sm font-semibold hover:bg-primary-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                More Details
-              </a>
-              <a
-                href={`/datasets/detail?id=${dataset.ds_id}#download`}
-                class="flex-1 flex items-center justify-center gap-2 py-3 px-4 bg-primary-600 text-white rounded-xl text-sm font-semibold hover:bg-primary-700 transition-colors shadow-sm"
-              >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-                Download
-              </a>
+                {downloading ? (
+                  <>
+                    <div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Downloading...
+                  </>
+                ) : (
+                  <>
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    Download Dataset
+                  </>
+                )}
+              </button>
             </>
           ) : isAuthenticated ? (
-            <a
-              href={`/datasets/detail?id=${dataset.ds_id}`}
-              class="flex-1 text-center py-3 px-4 bg-primary-600 text-white rounded-xl text-sm font-semibold hover:bg-primary-700 transition-colors shadow-sm"
-            >
-              View Full Details
-            </a>
+            <div class="flex-1 text-center py-3 px-4 bg-gray-100 text-gray-500 rounded-xl text-sm">
+              Download not available for this dataset
+            </div>
           ) : (
-            <>
-              <a
-                href={`/datasets/detail?id=${dataset.ds_id}`}
-                class="flex-1 text-center py-3 px-4 border border-gray-300 text-gray-700 rounded-xl text-sm font-semibold hover:bg-gray-100 transition-colors"
-              >
-                More Details
-              </a>
-              <a
-                href="/login"
-                class="flex-1 flex items-center justify-center gap-2 py-3 px-4 bg-primary-600 text-white rounded-xl text-sm font-semibold hover:bg-primary-700 transition-colors shadow-sm"
-              >
-                Sign In to Download
-              </a>
-            </>
+            <a
+              href="/login"
+              class="flex-1 flex items-center justify-center gap-2 py-3 px-4 bg-primary-600 text-white rounded-xl text-sm font-semibold hover:bg-primary-700 transition-colors shadow-sm"
+            >
+              Sign In to Download
+            </a>
           )}
         </div>
       </div>

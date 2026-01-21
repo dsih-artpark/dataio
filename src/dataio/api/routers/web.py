@@ -478,6 +478,23 @@ async def get_dataset(
     return user_service.get_dataset(user, dataset_id)
 
 
+@web_router.get("/datasets/{dataset_id}/download-urls", tags=["datasets"])
+async def get_dataset_download_urls(
+    dataset_id: str,
+    user: User = Depends(get_current_web_user),
+    user_service: WebUserService = Depends(WebUserService),
+):
+    """
+    Get presigned download URLs for all tables in a dataset.
+
+    Returns URLs for tables and metadata files that can be used
+    to create a zip file client-side.
+
+    Requires authentication and download permission.
+    """
+    return user_service.get_dataset_download_urls(user, dataset_id)
+
+
 @web_router.get("/collections", tags=["datasets"])
 async def get_collections(
     user: User = Depends(get_current_web_user),

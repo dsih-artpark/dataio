@@ -7,6 +7,7 @@ import type {
   DatasetsResponse,
   CollectionsResponse,
   DataOwnersResponse,
+  DatasetDownloadUrls,
 } from './types';
 
 const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000/api/v1';
@@ -297,6 +298,10 @@ class ApiClient {
 
   async getDataset(datasetId: string): Promise<DatasetDetail> {
     return this.request<DatasetDetail>(`/datasets/${datasetId}`);
+  }
+
+  async getDatasetDownloadUrls(datasetId: string): Promise<DatasetDownloadUrls> {
+    return this.request<DatasetDownloadUrls>(`/datasets/${datasetId}/download-urls`);
   }
 
   async getCollections(): Promise<CollectionsResponse> {

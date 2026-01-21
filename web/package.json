@@ -18,6 +18,8 @@
     "@astrojs/preact": "^4.0.4",
     "@simplewebauthn/browser": "^13.0.0",
     "astro": "^5.16.11",
+    "jszip": "^3.10.1",
+    "marked": "^15.0.0",
     "preact": "^10.24.0"
   },
   "devDependencies": {

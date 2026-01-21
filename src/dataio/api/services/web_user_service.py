@@ -409,6 +409,77 @@ class WebUserService(BaseService):
         finally:
             session.close()
 
+    def get_dataset_download_urls(self, user: User, dataset_id: str) -> dict:
+        """
+        Get presigned download URLs for all tables in a dataset.
+
+        Args:
+            user: The authenticated user
+            dataset_id: The dataset ID
+
+        Returns:
+            dict: Download URLs for tables and metadata
+        """
+        from dataio.api.services.filestore_service import FilestoreService
+        from dataio.api.models import VersionType
+
+        session = DBSession()
+        try:
+            dataset = database.get_dataset(dataset_id)
+            if not dataset:
+                raise HTTPException(status_code=404, detail="Dataset not found")
+
+            # Check permissions - verify user can download this dataset
+            user_permissions = determine_user_permissions(user)
+            can_download = dataset.access_level and dataset.access_level.value == "DOWNLOAD"
+
+            if not can_download and not user.is_admin:
+                # Check if user has explicit download permission
+                for perm in user_permissions:
+                    if perm.resource_type in ("DATASET", "*") and perm.resource_id in (dataset_id, "*"):
+                        if perm.permission and perm.permission.value == "DOWNLOAD":
+                            can_download = True
+                            break
+
+            if not can_download:
+                raise HTTPException(status_code=403, detail="Download permission required")
+
+            # Get presigned URLs for all tables
+            filestore = FilestoreService()
+            tables = []
+
+            # Try STANDARDISED first, fall back to PREPROCESSED
+            for version_type in [VersionType.STANDARDISED, VersionType.PREPROCESSED]:
+                try:
+                    files = filestore.list_files_in_s3(dataset_id, version_type)
+                    if files:
+                        tables = [
+                            {
+                                "table_name": f["table_name"],
+                                "download_url": f["download_link"],
+                                "metadata": f.get("metadata", {}),
+                            }
+                            for f in files
+                        ]
+                        break
+                except Exception:
+                    continue
+
+            return {
+                "ds_id": dataset.ds_id,
+                "title": dataset.title,
+                "tables": tables,
+                "readme_md": dataset.readme_md if hasattr(dataset, 'readme_md') else None,
+                "data_dictionary_json": dataset.data_dictionary_json if hasattr(dataset, 'data_dictionary_json') else None,
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to get download URLs: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to get download URLs")
+        finally:
+            session.close()
+
     def get_collections(self) -> dict:
         """
         Get all collections for filtering.

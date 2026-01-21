@@ -42,7 +42,7 @@ jobs:
     # Wait for API deploy to finish (it re-clones the repo)
     needs: deploy_api
     environment:
-      name: ${{ github.ref_name }}_web
+      name: ${{ github.ref_name }}_api
 
     steps:
       - name: Checkout code

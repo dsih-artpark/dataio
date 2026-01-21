@@ -164,7 +164,9 @@ class WebUserService(BaseService):
             full_key = f"{API_KEY_PREFIX}{raw_key}"
 
             # Hash the key for storage
-            key_hash = bcrypt.hashpw(raw_key.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+            # bcrypt 4.0+ returns str, older versions return bytes
+            hash_result = bcrypt.hashpw(raw_key.encode("utf-8"), bcrypt.gensalt())
+            key_hash = hash_result if isinstance(hash_result, str) else hash_result.decode("utf-8")
 
             # Create API key record
             api_key = UserAPIKey(

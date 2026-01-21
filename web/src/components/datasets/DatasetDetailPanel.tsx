@@ -224,7 +224,7 @@ export default function DatasetDetailPanel({
 
       // Check if we have tables to download
       if (!downloadData.tables || downloadData.tables.length === 0) {
-        console.warn('No tables found in download data');
+        throw new Error('No data files available for download. Please try again later or contact support.');
       }
 
       // Download and add each table file
@@ -232,7 +232,7 @@ export default function DatasetDetailPanel({
         downloadData.tables.map(async (table) => {
           const response = await fetch(table.download_url);
           if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            throw new Error(`Failed to download ${table.table_name}: HTTP ${response.status}`);
           }
           const blob = await response.blob();
 
@@ -251,10 +251,16 @@ export default function DatasetDetailPanel({
         })
       );
 
-      // Log any failed downloads
-      const failures = tableResults.filter(r => r.status === 'rejected');
+      // Check for failed downloads and report to user
+      const failures = tableResults.filter(r => r.status === 'rejected') as PromiseRejectedResult[];
       if (failures.length > 0) {
-        console.error('Some table downloads failed:', failures);
+        const failureReasons = failures.map(f => f.reason?.message || 'Unknown error').join(', ');
+        console.error('Some table downloads failed:', failureReasons);
+        // If all downloads failed, throw an error
+        if (failures.length === downloadData.tables.length) {
+          throw new Error(`Failed to download data files: ${failureReasons}. This may be a CORS issue or expired links.`);
+        }
+        // If some succeeded, continue but log the warning
       }
 
       // Generate and download the zip

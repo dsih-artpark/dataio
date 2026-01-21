@@ -39,12 +39,17 @@ class FilestoreService(BaseService):
         try:
             obj = self.bucket.Object(f"{prefix}/metadata.json")
             return json.loads(obj.get()["Body"].read().decode("utf-8"))
-        except self.s3_client.exceptions.NoSuchKey:
-            self.bucket.put_object(
-                Body=json.dumps({"tables": {}}),
-                Key=f"{prefix}/metadata.json",
-            )
-            return {"tables": {}}
+        except ClientError as e:
+            # Handle NoSuchKey error - create empty metadata if file doesn't exist
+            if e.response.get("Error", {}).get("Code") == "NoSuchKey":
+                self.logger.info(f"No metadata.json found for {dataset_id}/{version_type.value}, creating empty one")
+                self.bucket.put_object(
+                    Body=json.dumps({"tables": {}}),
+                    Key=f"{prefix}/metadata.json",
+                )
+                return {"tables": {}}
+            # Re-raise other errors
+            raise
 
     def upload_file(
         self,

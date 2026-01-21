@@ -40,7 +40,7 @@ jobs:
     # Only deploy frontend on staging for now
     if: github.ref_name == 'staging'
     environment:
-      name: ${{ github.ref_name }}_web
+      name: ${{ github.ref_name }}_api
 
     steps:
       - name: Checkout code

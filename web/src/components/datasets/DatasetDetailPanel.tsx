@@ -72,14 +72,14 @@ export default function DatasetDetailPanel({
     ];
 
     if (parsedMetadata?.tables && Object.keys(parsedMetadata.tables).length > 0) {
-      result.push({ id: 'metadata', label: 'Metadata', icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4' });
+      result.push({ id: 'metadata', label: 'Data Dictionary', icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' });
     }
 
     if (dataset?.readme_md) {
       result.push({ id: 'readme', label: 'README', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' });
     }
 
-    result.push({ id: 'code', label: 'Code', icon: 'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4' });
+    result.push({ id: 'code', label: 'Code Snippets', icon: 'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4' });
 
     return result;
   }, [parsedMetadata, dataset?.readme_md]);
@@ -165,6 +165,18 @@ export default function DatasetDetailPanel({
     return `${lastFour}-${safeName}.zip`;
   };
 
+  // Get folder name for zip contents (same as zip filename without .zip)
+  const getFolderName = () => {
+    if (!dataset) return 'dataset';
+    const lastFour = dataset.ds_id.slice(-4).padStart(4, '0');
+    const safeName = dataset.title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .substring(0, 50);
+    return `${lastFour}-${safeName}`;
+  };
+
   // Download dataset as zip
   const downloadDataset = async () => {
     if (!dataset || !isAuthenticated) return;
@@ -177,10 +189,16 @@ export default function DatasetDetailPanel({
       const downloadData = await api.getDatasetDownloadUrls(dataset.ds_id);
 
       const zip = new JSZip();
+      const folderName = getFolderName();
+      const folder = zip.folder(folderName);
+
+      if (!folder) {
+        throw new Error('Failed to create zip folder');
+      }
 
       // Add README.md if available
       if (downloadData.readme_md) {
-        zip.file('README.md', downloadData.readme_md);
+        folder.file('README.md', downloadData.readme_md);
       }
 
       // Add metadata file (json or yaml based on user preference)
@@ -189,39 +207,55 @@ export default function DatasetDetailPanel({
           // Pretty print the JSON
           try {
             const parsed = JSON.parse(downloadData.data_dictionary_json);
-            zip.file('metadata.json', JSON.stringify(parsed, null, 2));
+            folder.file('metadata.json', JSON.stringify(parsed, null, 2));
           } catch {
-            zip.file('metadata.json', downloadData.data_dictionary_json);
+            folder.file('metadata.json', downloadData.data_dictionary_json);
           }
         } else {
           try {
             const parsed = JSON.parse(downloadData.data_dictionary_json);
-            zip.file('metadata.yaml', jsonToYaml(parsed));
+            folder.file('metadata.yaml', jsonToYaml(parsed));
           } catch {
             // Fall back to JSON if YAML conversion fails
-            zip.file('metadata.json', downloadData.data_dictionary_json);
+            folder.file('metadata.json', downloadData.data_dictionary_json);
           }
         }
       }
 
+      // Check if we have tables to download
+      if (!downloadData.tables || downloadData.tables.length === 0) {
+        console.warn('No tables found in download data');
+      }
+
       // Download and add each table file
-      const tablePromises = downloadData.tables.map(async (table) => {
-        try {
+      const tableResults = await Promise.allSettled(
+        downloadData.tables.map(async (table) => {
           const response = await fetch(table.download_url);
           if (!response.ok) {
-            throw new Error(`Failed to download ${table.table_name}`);
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
           }
           const blob = await response.blob();
-          // Assume CSV format, adjust extension based on actual file type if needed
-          const filename = `${table.table_name}.csv`;
-          zip.file(filename, blob);
-        } catch (err) {
-          console.error(`Failed to download table ${table.table_name}:`, err);
-          // Continue with other tables even if one fails
-        }
-      });
 
-      await Promise.all(tablePromises);
+          // Determine file extension from URL or content type
+          let extension = '.csv';
+          const contentType = response.headers.get('content-type');
+          if (contentType?.includes('parquet')) {
+            extension = '.parquet';
+          } else if (table.download_url.includes('.parquet')) {
+            extension = '.parquet';
+          }
+
+          const filename = `${table.table_name}${extension}`;
+          folder.file(filename, blob);
+          return { table: table.table_name, success: true };
+        })
+      );
+
+      // Log any failed downloads
+      const failures = tableResults.filter(r => r.status === 'rejected');
+      if (failures.length > 0) {
+        console.error('Some table downloads failed:', failures);
+      }
 
       // Generate and download the zip
       const zipBlob = await zip.generateAsync({ type: 'blob' });

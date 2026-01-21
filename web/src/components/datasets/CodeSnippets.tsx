@@ -138,6 +138,22 @@ curl -H "X-API-Key: $API_KEY" -O \\
 
   return (
     <div class="h-full flex flex-col">
+      {/* Header with title and docs link */}
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-sm font-semibold text-gray-700">Code Snippets</h3>
+        <a
+          href={docsLinks[activeTab].url}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-primary-600 transition-colors"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+          </svg>
+          {docsLinks[activeTab].label}
+        </a>
+      </div>
+
       {/* Tab header */}
       <div class="flex gap-1 p-1 bg-gray-100 rounded-lg mb-4">
         {tabs.map((tab) => (
@@ -206,21 +222,6 @@ curl -H "X-API-Key: $API_KEY" -O \\
             </div>
           );
         })}
-      </div>
-
-      {/* Help link - changes based on active tab */}
-      <div class="mt-4 pt-3 border-t border-gray-100 text-center">
-        <a
-          href={docsLinks[activeTab].url}
-          target="_blank"
-          rel="noopener noreferrer"
-          class="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-primary-600 transition-colors"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-          </svg>
-          View {docsLinks[activeTab].label}
-        </a>
       </div>
     </div>
   );

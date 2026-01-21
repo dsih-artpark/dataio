@@ -46,8 +46,10 @@ export default function APIKeyManager() {
       const response = await api.createApiKey(newKeyName.trim());
       setNewKey(response.key);
       setNewKeyName('');
+      setShowCreate(false);
       fetchApiKeys();
     } catch (err) {
+      console.error('API key creation error:', err);
       setError(err instanceof Error ? err.message : 'Failed to create API key');
     } finally {
       setCreating(false);

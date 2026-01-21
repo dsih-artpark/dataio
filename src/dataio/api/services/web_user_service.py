@@ -451,7 +451,9 @@ class WebUserService(BaseService):
             # Try STANDARDISED first, fall back to PREPROCESSED
             for version_type in [VersionType.STANDARDISED, VersionType.PREPROCESSED]:
                 try:
+                    self.logger.info(f"Trying to list files for {dataset_id} with version {version_type}")
                     files = filestore.list_files_in_s3(dataset_id, version_type)
+                    self.logger.info(f"Found {len(files) if files else 0} files for {dataset_id}")
                     if files:
                         tables = [
                             {
@@ -462,7 +464,8 @@ class WebUserService(BaseService):
                             for f in files
                         ]
                         break
-                except Exception:
+                except Exception as e:
+                    self.logger.warning(f"Failed to list files for {dataset_id} with {version_type}: {str(e)}")
                     continue
 
             return {

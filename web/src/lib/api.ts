@@ -264,7 +264,6 @@ class ApiClient {
       key_prefix: string;
       created_at: string;
       expires_at: string | null;
-      warning: string;
     }>('/api-keys', {
       method: 'POST',
       body: JSON.stringify({ name, expires_at: expiresAt }),

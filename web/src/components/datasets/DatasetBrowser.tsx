@@ -77,6 +77,10 @@ export default function DatasetBrowser() {
     fetchCollections();
   }, [authChecked, isAuthenticated]);
 
+  // Serialize filters for dependency comparison (arrays don't compare by value)
+  const collectionsKey = JSON.stringify(filters.collections);
+  const accessLevelsKey = JSON.stringify(filters.accessLevels);
+
   // Fetch datasets when filters or pagination change
   const fetchDatasets = useCallback(async () => {
     if (!authChecked) return;
@@ -99,9 +103,15 @@ export default function DatasetBrowser() {
         params.search = debouncedSearch;
       }
 
-      // API only supports single collection_id, so we use first selected
-      if (filters.collections.length === 1) {
-        params.collection_id = filters.collections[0];
+      // Parse collections from serialized key (for use in this callback)
+      const selectedCollections: number[] = JSON.parse(collectionsKey);
+      const selectedAccessLevels: AccessLevel[] = JSON.parse(accessLevelsKey);
+
+      // API only supports single collection_id
+      // If exactly one collection selected, use server-side filtering
+      // Otherwise, filter client-side (either 0 or multiple collections)
+      if (selectedCollections.length === 1) {
+        params.collection_id = selectedCollections[0];
       }
 
       const response = isAuthenticated
@@ -110,17 +120,18 @@ export default function DatasetBrowser() {
 
       let filteredDatasets = response.datasets as Dataset[];
 
-      // Client-side filtering for multiple collections (if more than one selected)
-      if (filters.collections.length > 1) {
+      // Client-side filtering for collections (when multiple are selected)
+      // Note: If 1 collection is selected, server already filtered it
+      if (selectedCollections.length > 1) {
         filteredDatasets = filteredDatasets.filter((d) =>
-          filters.collections.includes(d.collection_id)
+          d.collection_id && selectedCollections.includes(d.collection_id)
         );
       }
 
       // Client-side filtering for access levels
-      if (filters.accessLevels.length > 0) {
+      if (selectedAccessLevels.length > 0) {
         filteredDatasets = filteredDatasets.filter((d) =>
-          filters.accessLevels.includes(d.access_level)
+          d.access_level && selectedAccessLevels.includes(d.access_level)
         );
       }
 
@@ -136,7 +147,7 @@ export default function DatasetBrowser() {
     } finally {
       setLoading(false);
     }
-  }, [authChecked, isAuthenticated, debouncedSearch, filters.collections, filters.accessLevels, offset]);
+  }, [authChecked, isAuthenticated, debouncedSearch, collectionsKey, accessLevelsKey, offset]);
 
   useEffect(() => {
     fetchDatasets();

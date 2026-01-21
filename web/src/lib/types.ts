@@ -39,7 +39,10 @@ export interface DatasetDetail {
   can_download: boolean;
   raw_datasets?: RawDataset[];
   tags?: string[];
-  additional_metadata?: Record<string, unknown>;
+  // Documentation fields (cached from file server)
+  readme_md?: string | null;
+  data_dictionary_yaml?: string | null;
+  documentation_synced_at?: string | null;
 }
 
 export interface RawDataset {

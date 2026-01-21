@@ -21,13 +21,24 @@ export default function DatasetListItem({
     if (!dataset.temporal_coverage_start_date && !dataset.temporal_coverage_end_date) {
       return null;
     }
-    const start = dataset.temporal_coverage_start_date
+    const startYear = dataset.temporal_coverage_start_date
       ? new Date(dataset.temporal_coverage_start_date).getFullYear()
-      : '...';
-    const end = dataset.temporal_coverage_end_date
+      : null;
+    const endYear = dataset.temporal_coverage_end_date
       ? new Date(dataset.temporal_coverage_end_date).getFullYear()
-      : 'Present';
-    return `${start}–${end}`;
+      : null;
+
+    if (startYear && endYear) {
+      if (startYear === endYear) {
+        return String(startYear);
+      }
+      return `${startYear}–${endYear}`;
+    }
+
+    if (startYear) return `${startYear}–present`;
+    if (endYear) return `Until ${endYear}`;
+
+    return null;
   };
 
   const getAccessBadge = () => {

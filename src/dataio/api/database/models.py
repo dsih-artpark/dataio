@@ -86,6 +86,11 @@ class Dataset(Base):
     access_level = Column(SQLEnum(AccessLevel), nullable=False)
     additional_metadata = Column(JSONB)
 
+    # Documentation caching fields (synced from file server)
+    readme_md = Column(Text, nullable=True)
+    data_dictionary_yaml = Column(Text, nullable=True)
+    documentation_synced_at = Column(DateTime, nullable=True)
+
     # Relationships
     collection = relationship("Collection")
     data_owner = relationship("DataOwner")

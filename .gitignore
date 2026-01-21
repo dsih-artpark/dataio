@@ -153,4 +153,5 @@ data/
 *.nc
 *.geojson
 # AI Files
-CLAUDE.md
+
+web/.astro

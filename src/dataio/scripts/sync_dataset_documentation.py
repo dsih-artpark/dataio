@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Sync dataset documentation (README.md and metadata.yaml) from S3 file server to database.
+Sync dataset documentation (README.md and metadata.json) from S3 file server to database.
 
-This script fetches README.md and metadata.yaml files from the S3 filestore
+This script fetches README.md and metadata.json files from the S3 filestore
 and caches their contents in the datasets table for faster access.
 
 Usage:
@@ -111,11 +111,11 @@ def sync_dataset_documentation(
             result["readme_found"] = True
             logger.info(f"  Found README.md ({len(readme_content)} chars)")
 
-        # Fetch metadata.yaml (data dictionary)
-        data_dict_content = fetch_file_from_s3(bucket, dataset_id, "metadata.yaml")
+        # Fetch metadata.json (data dictionary)
+        data_dict_content = fetch_file_from_s3(bucket, dataset_id, "metadata.json")
         if data_dict_content:
             result["data_dictionary_found"] = True
-            logger.info(f"  Found metadata.yaml ({len(data_dict_content)} chars)")
+            logger.info(f"  Found metadata.json ({len(data_dict_content)} chars)")
 
         # Update database if any content found
         if readme_content or data_dict_content:
@@ -123,7 +123,7 @@ def sync_dataset_documentation(
                 update_query = text("""
                     UPDATE datasets
                     SET readme_md = :readme,
-                        data_dictionary_yaml = :data_dict,
+                        data_dictionary_json = :data_dict,
                         documentation_synced_at = :synced_at
                     WHERE ds_id = :ds_id
                 """)

@@ -398,7 +398,7 @@ class WebUserService(BaseService):
                 "tags": [tag.tag_name for tag in (dataset.tags or [])],
                 # Documentation fields (cached from file server)
                 "readme_md": dataset.readme_md if hasattr(dataset, 'readme_md') else None,
-                "data_dictionary_yaml": dataset.data_dictionary_yaml if hasattr(dataset, 'data_dictionary_yaml') else None,
+                "data_dictionary_json": dataset.data_dictionary_json if hasattr(dataset, 'data_dictionary_json') else None,
                 "documentation_synced_at": dataset.documentation_synced_at.isoformat() if hasattr(dataset, 'documentation_synced_at') and dataset.documentation_synced_at else None,
             }
         except HTTPException:
@@ -608,7 +608,7 @@ class WebUserService(BaseService):
                 "tags": [tag.tag_name for tag in (dataset.tags or [])],
                 # Documentation fields (cached from file server)
                 "readme_md": dataset.readme_md if hasattr(dataset, 'readme_md') else None,
-                "data_dictionary_yaml": dataset.data_dictionary_yaml if hasattr(dataset, 'data_dictionary_yaml') else None,
+                "data_dictionary_json": dataset.data_dictionary_json if hasattr(dataset, 'data_dictionary_json') else None,
                 "documentation_synced_at": dataset.documentation_synced_at.isoformat() if hasattr(dataset, 'documentation_synced_at') and dataset.documentation_synced_at else None,
             }
         except HTTPException:

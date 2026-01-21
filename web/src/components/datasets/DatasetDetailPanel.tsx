@@ -265,14 +265,14 @@ export default function DatasetDetailPanel({
         {activeTab === 'schema' && (
           <div class="space-y-6">
             {/* Data Dictionary (if available) */}
-            {dataset.data_dictionary_yaml ? (
+            {dataset.data_dictionary_json ? (
               <div>
                 <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Data Dictionary</h3>
                 <div class="bg-slate-50 rounded-xl border border-gray-100 overflow-hidden">
                   <div class="flex items-center justify-between px-4 py-2 bg-gray-100 border-b border-gray-200">
-                    <span class="text-xs text-gray-500 font-medium">metadata.yaml</span>
+                    <span class="text-xs text-gray-500 font-medium">metadata.json</span>
                   </div>
-                  <pre class="p-4 text-sm text-gray-700 overflow-x-auto font-mono leading-relaxed m-0">{dataset.data_dictionary_yaml}</pre>
+                  <pre class="p-4 text-sm text-gray-700 overflow-x-auto font-mono leading-relaxed m-0">{dataset.data_dictionary_json}</pre>
                 </div>
               </div>
             ) : (

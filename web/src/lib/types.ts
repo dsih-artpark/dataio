@@ -41,7 +41,7 @@ export interface DatasetDetail {
   tags?: string[];
   // Documentation fields (cached from file server)
   readme_md?: string | null;
-  data_dictionary_yaml?: string | null;
+  data_dictionary_json?: string | null;
   documentation_synced_at?: string | null;
 }
 

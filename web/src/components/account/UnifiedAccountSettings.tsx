@@ -418,44 +418,42 @@ export default function UnifiedAccountSettings() {
                   </button>
                 </div>
               ) : (
-                <ul class="divide-y divide-gray-200">
-                  {apiKeys.map((key) => (
-                    <li key={key.id} class="py-3">
-                      <div class="flex items-center justify-between">
-                        <div>
-                          <p class="font-medium text-gray-900 text-sm">{key.name}</p>
-                          <p class="text-xs text-gray-500 font-mono">{key.key_prefix}</p>
+                <>
+                  <ul class="divide-y divide-gray-200">
+                    {apiKeys.map((key) => (
+                      <li key={key.id} class="py-3">
+                        <div class="flex items-center justify-between">
+                          <div>
+                            <p class="font-medium text-gray-900 text-sm">{key.name}</p>
+                            <p class="text-xs text-gray-500 font-mono">{key.key_prefix}</p>
+                          </div>
+                          <button
+                            onClick={() => handleRevokeApiKey(key.id, key.name)}
+                            class="text-red-600 hover:text-red-700 text-sm"
+                          >
+                            Revoke
+                          </button>
                         </div>
-                        <button
-                          onClick={() => handleRevokeApiKey(key.id, key.name)}
-                          class="text-red-600 hover:text-red-700 text-sm"
-                        >
-                          Revoke
-                        </button>
-                      </div>
-                      <p class="text-xs text-gray-400 mt-1">
-                        Created {formatDate(key.created_at)} · Last used {formatDate(key.last_used_at)}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
+                        <p class="text-xs text-gray-400 mt-1">
+                          Created {formatDate(key.created_at)} · Last used {formatDate(key.last_used_at)}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
 
-          {/* API Usage */}
-          <div class="card">
-            <div class="card-header">
-              <h2 class="text-lg font-semibold text-gray-900">API Usage</h2>
-            </div>
-            <div class="card-body">
-              <p class="text-sm text-gray-600 mb-3">
-                Include your API key in the <code class="bg-gray-100 px-1.5 py-0.5 rounded text-xs">X-API-Key</code> header:
-              </p>
-              <pre class="bg-gray-900 text-gray-100 rounded-lg p-3 text-xs overflow-x-auto">
+                  {/* API Usage - embedded in the same card */}
+                  <div class="mt-4 pt-4 border-t border-gray-200">
+                    <p class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Usage</p>
+                    <p class="text-sm text-gray-600 mb-2">
+                      Include your API key in the <code class="bg-gray-100 px-1.5 py-0.5 rounded text-xs">X-API-Key</code> header:
+                    </p>
+                    <pre class="bg-gray-900 text-gray-100 rounded-lg p-3 text-xs overflow-x-auto">
 {`curl -H "X-API-Key: YOUR_KEY" \\
   https://data.artpark.ai/api/v1/datasets`}
-              </pre>
+                    </pre>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 

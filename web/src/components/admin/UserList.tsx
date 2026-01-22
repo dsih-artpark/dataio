@@ -65,6 +65,11 @@ export default function UserList() {
   const [loadingDatasets, setLoadingDatasets] = useState(false);
   const [settingPermission, setSettingPermission] = useState(false);
 
+  // Group management state
+  const [allGroups, setAllGroups] = useState<{ email: string; display_name: string | null }[]>([]);
+  const [loadingGroups, setLoadingGroups] = useState(false);
+  const [managingGroup, setManagingGroup] = useState(false);
+
   const fetchUsers = async () => {
     setLoading(true);
     setError('');
@@ -307,9 +312,55 @@ export default function UserList() {
     fetchDatasets(datasetSearch || undefined);
   };
 
+  const fetchAllGroups = async () => {
+    setLoadingGroups(true);
+    try {
+      const response = await api.adminListGroups({ limit: 100 });
+      setAllGroups(response.groups as { email: string; display_name: string | null }[]);
+    } catch (err) {
+      console.error('Failed to fetch groups:', err);
+    } finally {
+      setLoadingGroups(false);
+    }
+  };
+
+  const handleAddToGroup = async (groupEmail: string) => {
+    if (!selectedUser) return;
+
+    setManagingGroup(true);
+    try {
+      await api.adminAddGroupMember(groupEmail, selectedUser.email);
+      fetchUserDetail(selectedUser.email);
+      setSuccessMsg(`Added to group ${groupEmail}`);
+      setTimeout(() => setSuccessMsg(''), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add to group');
+    } finally {
+      setManagingGroup(false);
+    }
+  };
+
+  const handleRemoveFromGroup = async (groupEmail: string) => {
+    if (!selectedUser) return;
+    if (!confirm(`Remove ${selectedUser.email} from group ${groupEmail}?`)) return;
+
+    setManagingGroup(true);
+    try {
+      await api.adminRemoveGroupMember(groupEmail, selectedUser.email);
+      fetchUserDetail(selectedUser.email);
+      setSuccessMsg(`Removed from group ${groupEmail}`);
+      setTimeout(() => setSuccessMsg(''), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove from group');
+    } finally {
+      setManagingGroup(false);
+    }
+  };
+
   const openUserDetail = (user: User) => {
     fetchUserDetail(user.email);
     fetchDatasets();
+    fetchAllGroups();
   };
 
   const formatDate = (date: string | null) => {
@@ -591,8 +642,18 @@ export default function UserList() {
                       <div class="flex flex-wrap gap-1 mt-1">
                         {selectedUser.groups?.length > 0 ? (
                           selectedUser.groups.map((g) => (
-                            <span key={g} class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                            <span key={g} class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                               {g}
+                              <button
+                                onClick={() => handleRemoveFromGroup(g)}
+                                disabled={managingGroup}
+                                class="hover:text-blue-600"
+                                title="Remove from group"
+                              >
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
                             </span>
                           ))
                         ) : (
@@ -608,6 +669,41 @@ export default function UserList() {
                       <span class="text-gray-500">Created:</span>
                       <p class="text-gray-900">{formatDate(selectedUser.created_at)}</p>
                     </div>
+                  </div>
+
+                  {/* Group Membership */}
+                  <div>
+                    <h4 class="text-sm font-medium text-gray-500 uppercase tracking-wider mb-3">
+                      Add to Group
+                    </h4>
+                    {loadingGroups ? (
+                      <div class="text-center py-2">
+                        <div class="animate-spin w-5 h-5 border-2 border-primary-600 border-t-transparent rounded-full mx-auto" />
+                      </div>
+                    ) : allGroups.length === 0 ? (
+                      <p class="text-gray-400 text-sm">No groups available</p>
+                    ) : (
+                      <div class="flex flex-wrap gap-2">
+                        {allGroups
+                          .filter((g) => !selectedUser.groups?.includes(g.email))
+                          .map((g) => (
+                            <button
+                              key={g.email}
+                              onClick={() => handleAddToGroup(g.email)}
+                              disabled={managingGroup}
+                              class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
+                            >
+                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                              </svg>
+                              {g.display_name || g.email}
+                            </button>
+                          ))}
+                        {allGroups.filter((g) => !selectedUser.groups?.includes(g.email)).length === 0 && (
+                          <p class="text-gray-400 text-sm">User is in all available groups</p>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Current Permissions */}

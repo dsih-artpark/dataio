@@ -91,14 +91,6 @@ export default function Sidebar() {
             })}
           </div>
 
-          {/* Admin section divider */}
-          {isAdmin && (
-            <div class="px-3 mt-6">
-              <h3 class="px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                Administration
-              </h3>
-            </div>
-          )}
         </nav>
       </div>
     </aside>

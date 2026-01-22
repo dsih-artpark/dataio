@@ -14,7 +14,8 @@ interface User {
 
 // Reactive state for auth
 export const currentUser = signal<User | null>(null);
-export const isLoading = signal(true);
+// Start as true only if there might be tokens to check
+export const isLoading = signal(typeof window !== 'undefined' && !!localStorage.getItem('access_token'));
 
 // Promise to track in-flight auth initialization (prevents race conditions)
 let initAuthPromise: Promise<void> | null = null;
@@ -122,13 +123,24 @@ export function requireAuth(): boolean {
 /**
  * Redirect to datasets if already authenticated.
  * Returns true if not authenticated, false if redirecting.
+ * Waits for auth initialization to complete before checking.
  */
-export function redirectIfAuthenticated(): boolean {
+export async function redirectIfAuthenticated(): Promise<boolean> {
   if (typeof window === 'undefined') return true;
 
+  // If there are tokens, wait for auth to complete before deciding
   if (api.isAuthenticated()) {
-    window.location.replace('/datasets');
-    return false;
+    try {
+      await initAuth();
+      // If user is now set, redirect
+      if (currentUser.value) {
+        window.location.replace('/datasets');
+        return false;
+      }
+    } catch {
+      // Auth failed, stay on page
+      return true;
+    }
   }
   return true;
 }

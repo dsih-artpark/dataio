@@ -173,8 +173,16 @@ def get_current_web_user(
             if user.is_group:
                 raise AuthenticationError("Groups cannot authenticate")
 
+            # Force load all attributes before expunging from session
+            # This ensures is_admin and other fields are accessible after session closes
+            is_admin_val = user.is_admin
+            is_group_val = user.is_group
+            email_verified_val = user.email_verified
+            display_name_val = user.display_name
+
+            logger.info(f"User {user.email} loaded: is_admin={is_admin_val}, is_group={is_group_val}")
+
             # Expunge user from session so it can be used after session closes
-            # and ensure all needed attributes are loaded
             session.expunge(user)
             return user
         finally:

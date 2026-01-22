@@ -1,6 +1,6 @@
-from typing import List
-from dataio.api.models import User
+from typing import List, Any
 from dataio.api.database.models import (
+    User,
     UserPermission,
     AccessLevel,
     UserGroup,
@@ -11,12 +11,12 @@ from dataio.api.database.config import Session
 from dataio.api.auth.exceptions import AuthorizationError
 
 
-def is_admin(user: User) -> bool:
+def is_admin(user: Any) -> bool:
     """
     Check if user has admin privileges.
 
     Args:
-        user: User object to check
+        user: User object to check (SQLAlchemy User model)
 
     Returns:
         bool: True if user is admin, False otherwise
@@ -26,7 +26,9 @@ def is_admin(user: User) -> bool:
     """
     if user.is_group:
         raise AuthorizationError("Groups cannot have admin privileges")
-    return user.is_admin is True
+    # Use getattr to safely handle both SQLAlchemy models and any edge cases
+    is_admin_val = getattr(user, 'is_admin', False)
+    return is_admin_val is True
 
 
 def determine_highest_permission(permissions: List[AccessLevel]) -> AccessLevel:

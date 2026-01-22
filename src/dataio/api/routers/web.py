@@ -655,7 +655,8 @@ async def admin_list_pending_users(
 
     Requires admin privileges.
     """
-    if not user.is_admin:
+    # Use getattr to safely access is_admin in case of session issues
+    if not getattr(user, 'is_admin', False):
         raise HTTPException(status_code=403, detail="Admin access required")
     return auth_service.get_pending_users(limit=limit, offset=offset)
 
@@ -811,7 +812,7 @@ async def admin_verify_user(
 
     Requires admin privileges.
     """
-    if not user.is_admin:
+    if not getattr(user, 'is_admin', False):
         raise HTTPException(status_code=403, detail="Admin access required")
     return auth_service.verify_user(email, user.email)
 
@@ -827,7 +828,7 @@ async def admin_reject_user(
 
     Requires admin privileges.
     """
-    if not user.is_admin:
+    if not getattr(user, 'is_admin', False):
         raise HTTPException(status_code=403, detail="Admin access required")
     return auth_service.reject_user(email, user.email)
 

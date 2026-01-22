@@ -135,7 +135,7 @@ export default function LoginForm() {
   return (
     <div class="space-y-6">
       <div class="text-center">
-        <h2 class="text-2xl font-bold text-gray-900">Sign in to DataIO</h2>
+        <h2 class="text-2xl font-bold text-gray-900">Sign in</h2>
         <p class="mt-2 text-gray-600">
           Enter your email to receive a login code
         </p>
@@ -147,7 +147,7 @@ export default function LoginForm() {
         </div>
       )}
 
-      <form onSubmit={handleEmailSubmit} class="space-y-4">
+      <div class="space-y-4">
         <div>
           <label for="email" class="label">
             Email address
@@ -164,26 +164,16 @@ export default function LoginForm() {
           />
         </div>
 
+        {/* Show both options after email is entered - NO auto-submit */}
         <button
-          type="submit"
-          disabled={loading}
+          onClick={handleEmailSubmit}
+          disabled={loading || !email}
           class="btn-primary w-full"
         >
-          {loading ? 'Sending...' : 'Continue with Email'}
+          {loading ? 'Sending...' : 'Continue with Email Code'}
         </button>
-      </form>
 
-      {isWebAuthnSupported() && (
-        <>
-          <div class="relative">
-            <div class="absolute inset-0 flex items-center">
-              <div class="w-full border-t border-gray-200" />
-            </div>
-            <div class="relative flex justify-center text-sm">
-              <span class="px-2 bg-white text-gray-500">or</span>
-            </div>
-          </div>
-
+        {isWebAuthnSupported() && (
           <button
             onClick={() => {
               if (email) {
@@ -200,8 +190,17 @@ export default function LoginForm() {
             </svg>
             Sign in with Passkey
           </button>
-        </>
-      )}
+        )}
+      </div>
+
+      <div class="text-center pt-4 border-t border-gray-200">
+        <p class="text-sm text-gray-600">
+          Don't have an account?{' '}
+          <a href="/register" class="text-primary-600 hover:text-primary-700 font-medium">
+            Register
+          </a>
+        </p>
+      </div>
     </div>
   );
 }

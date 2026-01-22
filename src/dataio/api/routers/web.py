@@ -88,6 +88,20 @@ class AddGroupMemberRequest(BaseModel):
     user_email: EmailStr
 
 
+class RegisterInitiateRequest(BaseModel):
+    email: EmailStr
+
+
+class RegisterVerifyRequest(BaseModel):
+    email: EmailStr
+    code: Optional[str] = None
+    magic_token: Optional[str] = None
+
+
+class AccountDeleteVerifyRequest(BaseModel):
+    code: str
+
+
 # =============================================================================
 # Helper Functions
 # =============================================================================
@@ -180,6 +194,85 @@ async def logout_all(
     Requires authentication.
     """
     return auth_service.logout_all_sessions(user.email)
+
+
+# =============================================================================
+# Registration Endpoints
+# =============================================================================
+
+
+@web_router.post("/auth/register/initiate", tags=["auth"])
+async def initiate_registration(
+    body: RegisterInitiateRequest,
+    auth_service: WebAuthService = Depends(WebAuthService),
+):
+    """
+    Initiate registration by sending a verification email.
+
+    Validates email domain against allowed institutional patterns.
+    Sends both OTP code and magic link for verification.
+
+    No authentication required.
+    """
+    return auth_service.initiate_registration(body.email)
+
+
+@web_router.post("/auth/register/verify", tags=["auth"])
+async def verify_registration(
+    body: RegisterVerifyRequest,
+    request: Request,
+    auth_service: WebAuthService = Depends(WebAuthService),
+):
+    """
+    Complete registration by verifying OTP code or magic link token.
+
+    Creates user account and returns session tokens.
+
+    No authentication required.
+    """
+    user_agent, ip_address = get_client_info(request)
+    return auth_service.verify_registration(
+        email=body.email,
+        code=body.code,
+        magic_token=body.magic_token,
+        user_agent=user_agent,
+        ip_address=ip_address,
+    )
+
+
+# =============================================================================
+# Account Deletion Endpoints
+# =============================================================================
+
+
+@web_router.post("/account/delete/initiate", tags=["account"])
+async def initiate_account_deletion(
+    user: User = Depends(get_current_web_user),
+    auth_service: WebAuthService = Depends(WebAuthService),
+):
+    """
+    Initiate account deletion by sending a verification code.
+
+    Requires authentication.
+    """
+    return auth_service.initiate_account_deletion(user.email)
+
+
+@web_router.post("/account/delete/verify", tags=["account"])
+async def verify_account_deletion(
+    body: AccountDeleteVerifyRequest,
+    user: User = Depends(get_current_web_user),
+    auth_service: WebAuthService = Depends(WebAuthService),
+):
+    """
+    Complete account deletion after OTP verification.
+
+    This action is permanent and cannot be undone.
+    Deletes user account, API keys, passkeys, and all sessions.
+
+    Requires authentication.
+    """
+    return auth_service.verify_account_deletion(user.email, body.code)
 
 
 # =============================================================================
@@ -526,7 +619,7 @@ async def get_data_owners(
 # =============================================================================
 
 
-@web_router.get("/admin/users", tags=["admin/users"])
+@web_router.get("/admin/users", tags=["web-admin/users"])
 async def admin_list_users(
     search: Optional[str] = None,
     include_groups: bool = False,
@@ -549,7 +642,25 @@ async def admin_list_users(
     )
 
 
-@web_router.get("/admin/users/{email}", tags=["admin/users"])
+# IMPORTANT: This route must come BEFORE /admin/users/{email} to avoid being matched as email="pending"
+@web_router.get("/admin/users/pending", tags=["web-admin/users"])
+async def admin_list_pending_users(
+    limit: int = 50,
+    offset: int = 0,
+    user: User = Depends(get_current_web_user),
+    auth_service: WebAuthService = Depends(WebAuthService),
+):
+    """
+    List users pending verification.
+
+    Requires admin privileges.
+    """
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return auth_service.get_pending_users(limit=limit, offset=offset)
+
+
+@web_router.get("/admin/users/{email}", tags=["web-admin/users"])
 async def admin_get_user(
     email: str,
     user: User = Depends(get_current_web_user),
@@ -563,7 +674,7 @@ async def admin_get_user(
     return admin_service.get_user(user, email)
 
 
-@web_router.post("/admin/users", tags=["admin/users"])
+@web_router.post("/admin/users", tags=["web-admin/users"])
 async def admin_invite_user(
     body: InviteUserRequest,
     user: User = Depends(get_current_web_user),
@@ -583,7 +694,7 @@ async def admin_invite_user(
     )
 
 
-@web_router.put("/admin/users/{email}", tags=["admin/users"])
+@web_router.put("/admin/users/{email}", tags=["web-admin/users"])
 async def admin_update_user(
     email: str,
     body: UpdateUserRequest,
@@ -608,7 +719,7 @@ async def admin_update_user(
 # =============================================================================
 
 
-@web_router.get("/admin/groups", tags=["admin/groups"])
+@web_router.get("/admin/groups", tags=["web-admin/groups"])
 async def admin_list_groups(
     search: Optional[str] = None,
     limit: int = 100,
@@ -624,7 +735,7 @@ async def admin_list_groups(
     return admin_service.list_groups(user, search=search, limit=limit, offset=offset)
 
 
-@web_router.get("/admin/groups/{group_email}", tags=["admin/groups"])
+@web_router.get("/admin/groups/{group_email}", tags=["web-admin/groups"])
 async def admin_get_group(
     group_email: str,
     user: User = Depends(get_current_web_user),
@@ -638,7 +749,7 @@ async def admin_get_group(
     return admin_service.get_group(user, group_email)
 
 
-@web_router.post("/admin/groups", tags=["admin/groups"])
+@web_router.post("/admin/groups", tags=["web-admin/groups"])
 async def admin_create_group(
     body: CreateGroupRequest,
     user: User = Depends(get_current_web_user),
@@ -654,7 +765,7 @@ async def admin_create_group(
     )
 
 
-@web_router.post("/admin/groups/{group_email}/members", tags=["admin/groups"])
+@web_router.post("/admin/groups/{group_email}/members", tags=["web-admin/groups"])
 async def admin_add_group_member(
     group_email: str,
     body: AddGroupMemberRequest,
@@ -669,7 +780,7 @@ async def admin_add_group_member(
     return admin_service.add_user_to_group(user, group_email, body.user_email)
 
 
-@web_router.delete("/admin/groups/{group_email}/members/{user_email}", tags=["admin/groups"])
+@web_router.delete("/admin/groups/{group_email}/members/{user_email}", tags=["web-admin/groups"])
 async def admin_remove_group_member(
     group_email: str,
     user_email: str,
@@ -682,3 +793,40 @@ async def admin_remove_group_member(
     Requires admin privileges.
     """
     return admin_service.remove_user_from_group(user, group_email, user_email)
+
+
+# =============================================================================
+# Admin User Verification Endpoints
+# =============================================================================
+
+
+@web_router.post("/admin/users/{email}/verify", tags=["web-admin/users"])
+async def admin_verify_user(
+    email: str,
+    user: User = Depends(get_current_web_user),
+    auth_service: WebAuthService = Depends(WebAuthService),
+):
+    """
+    Verify (approve) a pending user.
+
+    Requires admin privileges.
+    """
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return auth_service.verify_user(email, user.email)
+
+
+@web_router.post("/admin/users/{email}/reject", tags=["web-admin/users"])
+async def admin_reject_user(
+    email: str,
+    user: User = Depends(get_current_web_user),
+    auth_service: WebAuthService = Depends(WebAuthService),
+):
+    """
+    Reject a pending user.
+
+    Requires admin privileges.
+    """
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return auth_service.reject_user(email, user.email)

@@ -16,24 +16,62 @@ interface User {
 export const currentUser = signal<User | null>(null);
 export const isLoading = signal(true);
 
+// Promise to track in-flight auth initialization (prevents race conditions)
+let initAuthPromise: Promise<void> | null = null;
+let initAuthCompleted = false;
+
 /**
  * Initialize auth state from stored tokens.
+ * This function is idempotent - multiple calls will share the same promise.
  */
 export async function initAuth(): Promise<void> {
+  // If already completed and we have a user, return immediately
+  if (initAuthCompleted && currentUser.value) {
+    return;
+  }
+
+  // If already in progress, return the existing promise
+  if (initAuthPromise) {
+    return initAuthPromise;
+  }
+
+  initAuthPromise = _doInitAuth();
+  try {
+    await initAuthPromise;
+  } finally {
+    initAuthPromise = null;
+  }
+}
+
+async function _doInitAuth(): Promise<void> {
   isLoading.value = true;
 
   if (api.isAuthenticated()) {
     try {
       const user = await api.getCurrentUser();
       currentUser.value = user;
+      initAuthCompleted = true;
     } catch {
       // Token invalid, clear it
       api.clearTokens();
       currentUser.value = null;
+      initAuthCompleted = false;
     }
+  } else {
+    currentUser.value = null;
+    initAuthCompleted = false;
   }
 
   isLoading.value = false;
+}
+
+/**
+ * Reset auth state (used after logout or token clear).
+ */
+export function resetAuthState(): void {
+  initAuthCompleted = false;
+  initAuthPromise = null;
+  currentUser.value = null;
 }
 
 /**
@@ -56,7 +94,7 @@ export async function loginWithOTP(email: string, code: string): Promise<{
  */
 export async function logout(): Promise<void> {
   await api.logout();
-  currentUser.value = null;
+  resetAuthState();
 }
 
 /**

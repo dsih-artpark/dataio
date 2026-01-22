@@ -1,6 +1,6 @@
 ---
 import DashboardLayout from '../../layouts/DashboardLayout.astro';
-import UserList from '../../components/admin/UserList';
+import AdminUsersTabs from '../../components/admin/AdminUsersTabs';
 ---
 
 <DashboardLayout title="Users">
@@ -12,7 +12,7 @@ import UserList from '../../components/admin/UserList';
       </p>
     </div>
 
-    <UserList client:load />
+    <AdminUsersTabs client:load />
   </div>
 </DashboardLayout>
 

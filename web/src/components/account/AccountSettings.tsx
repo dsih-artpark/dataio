@@ -3,6 +3,7 @@ import { api } from '../../lib/api';
 import { currentUser } from '../../lib/auth';
 import PasskeyPrompt from '../auth/PasskeyPrompt';
 import { isWebAuthnSupported } from '../../lib/webauthn';
+import DeleteAccountModal from './DeleteAccountModal';
 
 interface Passkey {
   id: string;
@@ -19,6 +20,7 @@ export default function AccountSettings() {
   const [passkeys, setPasskeys] = useState<Passkey[]>([]);
   const [passkeysError, setPasskeysError] = useState('');
   const [showPasskeySetup, setShowPasskeySetup] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   const user = currentUser.value;
 
@@ -250,6 +252,34 @@ export default function AccountSettings() {
           </dl>
         </div>
       </div>
+
+      {/* Danger Zone */}
+      <div class="card border-red-200">
+        <div class="card-header bg-red-50 border-b border-red-200">
+          <h2 class="text-lg font-semibold text-red-800">Danger Zone</h2>
+        </div>
+        <div class="card-body">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="font-medium text-gray-900">Delete Account</p>
+              <p class="text-sm text-gray-500">
+                Permanently delete your account and all associated data.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowDeleteModal(true)}
+              class="inline-flex items-center px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700"
+            >
+              Delete Account
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Delete Account Modal */}
+      {showDeleteModal && (
+        <DeleteAccountModal onClose={() => setShowDeleteModal(false)} />
+      )}
     </div>
   );
 }

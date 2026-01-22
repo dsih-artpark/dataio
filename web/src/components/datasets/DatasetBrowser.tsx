@@ -42,7 +42,7 @@ export default function DatasetBrowser() {
     return () => clearTimeout(timer);
   }, [filters.search]);
 
-  // Check auth status on mount
+  // Check auth status on mount - gracefully handle failures since this page supports anonymous access
   useEffect(() => {
     const checkAuth = async () => {
       if (api.isAuthenticated()) {
@@ -50,6 +50,8 @@ export default function DatasetBrowser() {
           await initAuth();
           setIsAuthenticated(true);
         } catch {
+          // Don't redirect on failure - this page supports anonymous access
+          // Just fall back to unauthenticated mode
           setIsAuthenticated(false);
         }
       } else {

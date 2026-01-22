@@ -455,3 +455,262 @@ If you did not create this API key, please revoke it immediately from your accou
 """
 
         return self.send_email(to_email, subject, html_body, text_body)
+
+    def send_registration_email(
+        self,
+        to_email: str,
+        otp_code: str,
+        magic_link: str,
+    ) -> bool:
+        """
+        Send a registration verification email with OTP and magic link.
+
+        Args:
+            to_email: Recipient email address
+            otp_code: The OTP code
+            magic_link: The magic link URL
+
+        Returns:
+            bool: True if sent successfully
+        """
+        subject = "Verify your DataIO registration"
+
+        html_body = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 10px 10px 0 0;">
+        <h1 style="color: white; margin: 0; font-size: 24px;">DataIO</h1>
+    </div>
+    <div style="background: #ffffff; padding: 30px; border: 1px solid #e0e0e0; border-top: none; border-radius: 0 0 10px 10px;">
+        <h2 style="color: #333; margin-top: 0;">Verify your email</h2>
+        <p>Thanks for registering! Please verify your email to complete your registration.</p>
+
+        <p><strong>Option 1:</strong> Click the button below:</p>
+        <div style="text-align: center; margin: 25px 0;">
+            <a href="{magic_link}" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Verify Email</a>
+        </div>
+
+        <p><strong>Option 2:</strong> Enter this code:</p>
+        <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
+            <span style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #667eea;">{otp_code}</span>
+        </div>
+
+        <p style="color: #666; font-size: 14px;">
+            This verification will expire in 30 minutes. If you didn't register for DataIO,
+            you can safely ignore this email.
+        </p>
+        <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
+        <p style="color: #999; font-size: 12px; margin-bottom: 0;">
+            This email was sent by DataIO. Please do not reply to this email.
+        </p>
+    </div>
+</body>
+</html>
+"""
+
+        text_body = f"""
+Verify your DataIO registration
+
+Thanks for registering! Please verify your email to complete your registration.
+
+Option 1: Click this link:
+{magic_link}
+
+Option 2: Enter this code: {otp_code}
+
+This verification will expire in 30 minutes.
+
+If you didn't register for DataIO, you can safely ignore this email.
+"""
+
+        return self.send_email(to_email, subject, html_body, text_body)
+
+    def send_account_deletion_email(
+        self,
+        to_email: str,
+        otp_code: str,
+    ) -> bool:
+        """
+        Send account deletion confirmation email.
+
+        Args:
+            to_email: Recipient email address
+            otp_code: The OTP code for confirmation
+
+        Returns:
+            bool: True if sent successfully
+        """
+        subject = "Confirm account deletion - DataIO"
+
+        html_body = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%); padding: 30px; border-radius: 10px 10px 0 0;">
+        <h1 style="color: white; margin: 0; font-size: 24px;">DataIO</h1>
+    </div>
+    <div style="background: #ffffff; padding: 30px; border: 1px solid #e0e0e0; border-top: none; border-radius: 0 0 10px 10px;">
+        <h2 style="color: #dc2626; margin-top: 0;">Account Deletion Request</h2>
+        <p>You've requested to delete your DataIO account. This action is <strong>permanent</strong> and cannot be undone.</p>
+
+        <div style="background: #fef2f2; border: 1px solid #fecaca; padding: 15px; border-radius: 8px; margin: 20px 0;">
+            <p style="color: #dc2626; margin: 0; font-weight: bold;">Warning: This will permanently delete:</p>
+            <ul style="color: #991b1b; margin: 10px 0 0 0; padding-left: 20px;">
+                <li>Your account and profile</li>
+                <li>All your API keys</li>
+                <li>All your passkeys</li>
+                <li>Your access to all datasets</li>
+            </ul>
+        </div>
+
+        <p>To confirm deletion, enter this code:</p>
+        <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
+            <span style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #dc2626;">{otp_code}</span>
+        </div>
+
+        <p style="color: #666; font-size: 14px;">
+            This code will expire in 10 minutes. If you did not request account deletion,
+            please ignore this email and your account will remain safe.
+        </p>
+        <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
+        <p style="color: #999; font-size: 12px; margin-bottom: 0;">
+            This email was sent by DataIO. Please do not reply to this email.
+        </p>
+    </div>
+</body>
+</html>
+"""
+
+        text_body = f"""
+Account Deletion Request - DataIO
+
+You've requested to delete your DataIO account. This action is PERMANENT and cannot be undone.
+
+WARNING: This will permanently delete:
+- Your account and profile
+- All your API keys
+- All your passkeys
+- Your access to all datasets
+
+To confirm deletion, enter this code: {otp_code}
+
+This code will expire in 10 minutes.
+
+If you did not request account deletion, please ignore this email and your account will remain safe.
+"""
+
+        return self.send_email(to_email, subject, html_body, text_body)
+
+    def send_verification_approved_email(self, to_email: str) -> bool:
+        """
+        Send notification that user verification was approved.
+
+        Args:
+            to_email: Recipient email address
+
+        Returns:
+            bool: True if sent successfully
+        """
+        subject = "Your DataIO account has been verified"
+
+        html_body = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background: linear-gradient(135deg, #059669 0%, #047857 100%); padding: 30px; border-radius: 10px 10px 0 0;">
+        <h1 style="color: white; margin: 0; font-size: 24px;">DataIO</h1>
+    </div>
+    <div style="background: #ffffff; padding: 30px; border: 1px solid #e0e0e0; border-top: none; border-radius: 0 0 10px 10px;">
+        <h2 style="color: #059669; margin-top: 0;">Account Verified!</h2>
+        <p>Great news! Your DataIO account has been verified by an administrator.</p>
+        <p>You now have full access to the platform, including:</p>
+        <ul style="color: #333;">
+            <li>Browse and download datasets</li>
+            <li>Create API keys for programmatic access</li>
+            <li>Set up passkeys for secure login</li>
+        </ul>
+        <div style="text-align: center; margin: 25px 0;">
+            <a href="https://dataio.artpark.ai/datasets" style="background: linear-gradient(135deg, #059669 0%, #047857 100%); color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Explore Datasets</a>
+        </div>
+        <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
+        <p style="color: #999; font-size: 12px; margin-bottom: 0;">
+            This email was sent by DataIO. Please do not reply to this email.
+        </p>
+    </div>
+</body>
+</html>
+"""
+
+        text_body = """
+Account Verified - DataIO
+
+Great news! Your DataIO account has been verified by an administrator.
+
+You now have full access to the platform, including:
+- Browse and download datasets
+- Create API keys for programmatic access
+- Set up passkeys for secure login
+
+Visit https://dataio.artpark.ai/datasets to explore datasets.
+"""
+
+        return self.send_email(to_email, subject, html_body, text_body)
+
+    def send_verification_rejected_email(self, to_email: str) -> bool:
+        """
+        Send notification that user verification was rejected.
+
+        Args:
+            to_email: Recipient email address
+
+        Returns:
+            bool: True if sent successfully
+        """
+        subject = "DataIO account verification update"
+
+        html_body = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 10px 10px 0 0;">
+        <h1 style="color: white; margin: 0; font-size: 24px;">DataIO</h1>
+    </div>
+    <div style="background: #ffffff; padding: 30px; border: 1px solid #e0e0e0; border-top: none; border-radius: 0 0 10px 10px;">
+        <h2 style="color: #333; margin-top: 0;">Account Verification Update</h2>
+        <p>We were unable to verify your DataIO account at this time.</p>
+        <p>DataIO is currently in beta and limited to users from academic and research institutions. If you believe this is an error or would like to request access, please contact us.</p>
+        <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
+        <p style="color: #999; font-size: 12px; margin-bottom: 0;">
+            This email was sent by DataIO. Please do not reply to this email.
+        </p>
+    </div>
+</body>
+</html>
+"""
+
+        text_body = """
+Account Verification Update - DataIO
+
+We were unable to verify your DataIO account at this time.
+
+DataIO is currently in beta and limited to users from academic and research institutions. If you believe this is an error or would like to request access, please contact us.
+"""
+
+        return self.send_email(to_email, subject, html_body, text_body)

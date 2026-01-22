@@ -7,29 +7,47 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="ARTPARK Data Platform - Discover, access, and manage geospatial and research datasets. Built at ARTPARK, IISc Bangalore." />
+    <meta
+      name="description"
+      content="ARTPARK Data Platform - Discover, access, and manage epidemiological, administrative, weather, geospatial datasets. Built at ARTPARK, IISc Bangalore."
+    />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>ARTPARK Data Platform</title>
   </head>
   <body class="min-h-screen bg-white">
     <!-- Navigation -->
-    <header class="fixed top-0 left-0 right-0 bg-white/80 backdrop-blur-md border-b border-gray-100 z-50">
+    <header
+      class="fixed top-0 left-0 right-0 bg-white/80 backdrop-blur-md border-b border-gray-100 z-50"
+    >
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="flex justify-between items-center h-16">
           <div class="flex items-center space-x-2">
-            <div class="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
+            <div
+              class="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center"
+            >
               <span class="text-white font-bold text-sm">AP</span>
             </div>
-            <span class="text-lg sm:text-xl font-bold text-gray-900">ARTPARK Data Platform</span>
+            <span class="text-lg sm:text-xl font-bold text-gray-900"
+              >ARTPARK Data Platform</span
+            >
           </div>
           <nav class="flex items-center gap-3 sm:gap-6">
-            <a href="#researchers" class="text-gray-600 hover:text-gray-900 text-sm font-medium hidden md:block">
+            <a
+              href="#researchers"
+              class="text-gray-600 hover:text-gray-900 text-sm font-medium hidden md:block"
+            >
               For Researchers
             </a>
-            <a href="#developers" class="text-gray-600 hover:text-gray-900 text-sm font-medium hidden md:block">
+            <a
+              href="#developers"
+              class="text-gray-600 hover:text-gray-900 text-sm font-medium hidden md:block"
+            >
               For Developers
             </a>
-            <a href="/datasets" class="text-gray-600 hover:text-gray-900 text-sm font-medium hidden sm:block">
+            <a
+              href="/datasets"
+              class="text-gray-600 hover:text-gray-900 text-sm font-medium hidden sm:block"
+            >
               Datasets
             </a>
             <!-- Resources Dropdown -->
@@ -38,32 +56,93 @@
                 class="text-gray-600 hover:text-gray-900 text-sm font-medium flex items-center gap-1"
               >
                 Resources
-                <svg class="w-4 h-4 transition-transform group-hover:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                <svg
+                  class="w-4 h-4 transition-transform group-hover:rotate-180"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M19 9l-7 7-7-7"></path>
                 </svg>
               </button>
-              <div class="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50">
-                <a href="https://dataio.artpark.ai/docs" target="_blank" rel="noopener noreferrer" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                  <svg class="w-4 h-4 mr-2.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+              <div
+                class="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50"
+              >
+                <a
+                  href="https://dataio.artpark.ai/docs"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  <svg
+                    class="w-4 h-4 mr-2.5 text-gray-500"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+                    ></path>
                   </svg>
                   dataio docs
                 </a>
-                <a href="https://dataio.artpark.ai/api/v1/" target="_blank" rel="noopener noreferrer" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                  <svg class="w-4 h-4 mr-2.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                <a
+                  href="https://dataio.artpark.ai/api/v1/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  <svg
+                    class="w-4 h-4 mr-2.5 text-gray-500"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path>
                   </svg>
                   API Docs
                 </a>
                 <hr class="my-1 border-gray-100" />
-                <a href="https://github.com/dsih-artpark/dataio" target="_blank" rel="noopener noreferrer" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                  <svg class="w-4 h-4 mr-2.5 text-gray-500" fill="currentColor" viewBox="0 0 24 24">
-                    <path fill-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clip-rule="evenodd" />
+                <a
+                  href="https://github.com/dsih-artpark/dataio"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  <svg
+                    class="w-4 h-4 mr-2.5 text-gray-500"
+                    fill="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      fill-rule="evenodd"
+                      d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
+                      clip-rule="evenodd"></path>
                   </svg>
                   GitHub
                 </a>
-                <a href="https://pypi.org/project/dataio-artpark/" target="_blank" rel="noopener noreferrer" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                  <img src="/pypi_logo.svg.png" alt="PyPI" class="w-4 h-4 mr-2.5" />
+                <a
+                  href="https://pypi.org/project/dataio-artpark/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  <img
+                    src="/pypi_logo.svg.png"
+                    alt="PyPI"
+                    class="w-4 h-4 mr-2.5"
+                  />
                   PyPI
                 </a>
               </div>
@@ -81,53 +160,95 @@
 
     <main>
       <!-- Hero Section -->
-      <section class="pt-24 sm:pt-32 pb-16 sm:pb-24 px-4 sm:px-6 lg:px-8 bg-gradient-to-b from-primary-50 to-white">
+      <section
+        class="pt-24 sm:pt-32 pb-16 sm:pb-24 px-4 sm:px-6 lg:px-8 bg-gradient-to-b from-primary-50 to-white"
+      >
         <div class="max-w-6xl mx-auto">
           <!-- Hero Content -->
           <div class="text-center relative z-10 mb-12 sm:mb-16">
-            <h1 class="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold text-gray-900 leading-tight opacity-0">
-              Four years of curated<br class="hidden sm:block" />
-              <span class="text-primary-600">geospatial datasets</span><br class="hidden sm:block" />
-              at your fingertips
+            <h1
+              class="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold text-gray-900 leading-tight opacity-0"
+            >
+              <span class="text-primary-600">Research Grade Datasets</span><br
+                class="hidden sm:block"
+              />
+              Analysis Ready. Curated over 4 years. <br /> Now available at your fingertips.
             </h1>
-            <p class="hero-subtitle mt-6 text-base sm:text-lg md:text-xl text-gray-600 max-w-3xl mx-auto px-4 opacity-0">
-              Research-grade datasets assembled and standardised at ARTPARK.
-              Tabular data, weather records, and shapefiles — all following common standards.
+            <p
+              class="hero-subtitle mt-6 text-base sm:text-lg md:text-xl text-gray-600 max-w-3xl mx-auto px-4 opacity-0"
+            >
+              Assembled and Standardised at ARTPARK. <br /> Epi data, weather records,
+              administrative censuses and surveys, shapefiles, and more — all following
+              common standards.
             </p>
-            <div class="hero-cta mt-8 sm:mt-10 flex flex-col sm:flex-row gap-4 justify-center px-4 opacity-0">
-              <a href="/datasets" class="btn-primary px-6 sm:px-8 py-3 text-base justify-center">
+            <div
+              class="hero-cta mt-8 sm:mt-10 flex flex-col sm:flex-row gap-4 justify-center px-4 opacity-0"
+            >
+              <a
+                href="/datasets"
+                class="btn-primary px-6 sm:px-8 py-3 text-base justify-center"
+              >
                 Explore Datasets
-                <svg class="w-5 h-5 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                <svg
+                  class="w-5 h-5 ml-2"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
                 </svg>
               </a>
-              <a href="#developers" class="btn-secondary px-6 sm:px-8 py-3 text-base justify-center">
-                View API & SDKs
+              <a
+                href="#developers"
+                class="btn-secondary px-6 sm:px-8 py-3 text-base justify-center"
+              >
+                Developer Quick Start
               </a>
             </div>
           </div>
 
           <!-- Floating Data Type Bubbles -->
-          <div class="flex flex-wrap justify-center gap-2 sm:gap-3" aria-label="Available data types">
-            <div class="bubble bubble-1 px-3 py-1.5 bg-red-100 text-red-700 rounded-full text-xs sm:text-sm font-medium shadow-sm border border-red-200">
+          <div
+            class="flex flex-wrap justify-center gap-2 sm:gap-3"
+            aria-label="Available data types"
+          >
+            <div
+              class="bubble bubble-1 px-3 py-1.5 bg-red-100 text-red-700 rounded-full text-xs sm:text-sm font-medium shadow-sm border border-red-200"
+            >
               Dengue
             </div>
-            <div class="bubble bubble-2 px-3 py-1.5 bg-orange-100 text-orange-700 rounded-full text-xs sm:text-sm font-medium shadow-sm border border-orange-200">
+            <div
+              class="bubble bubble-2 px-3 py-1.5 bg-orange-100 text-orange-700 rounded-full text-xs sm:text-sm font-medium shadow-sm border border-orange-200"
+            >
               Foot-and-mouth Disease
             </div>
-            <div class="bubble bubble-3 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-full text-xs sm:text-sm font-medium shadow-sm border border-blue-200">
+            <div
+              class="bubble bubble-3 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-full text-xs sm:text-sm font-medium shadow-sm border border-blue-200"
+            >
               Human Census
             </div>
-            <div class="bubble bubble-4 px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-full text-xs sm:text-sm font-medium shadow-sm border border-indigo-200">
+            <div
+              class="bubble bubble-4 px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-full text-xs sm:text-sm font-medium shadow-sm border border-indigo-200"
+            >
               Livestock Census
             </div>
-            <div class="bubble bubble-5 px-3 py-1.5 bg-purple-100 text-purple-700 rounded-full text-xs sm:text-sm font-medium shadow-sm border border-purple-200">
+            <div
+              class="bubble bubble-5 px-3 py-1.5 bg-purple-100 text-purple-700 rounded-full text-xs sm:text-sm font-medium shadow-sm border border-purple-200"
+            >
               Population Surveys
             </div>
-            <div class="bubble bubble-6 px-3 py-1.5 bg-cyan-100 text-cyan-700 rounded-full text-xs sm:text-sm font-medium shadow-sm border border-cyan-200">
+            <div
+              class="bubble bubble-6 px-3 py-1.5 bg-cyan-100 text-cyan-700 rounded-full text-xs sm:text-sm font-medium shadow-sm border border-cyan-200"
+            >
               ERA5 Reanalysis
             </div>
-            <div class="bubble bubble-7 px-3 py-1.5 bg-green-100 text-green-700 rounded-full text-xs sm:text-sm font-medium shadow-sm border border-green-200">
+            <div
+              class="bubble bubble-7 px-3 py-1.5 bg-green-100 text-green-700 rounded-full text-xs sm:text-sm font-medium shadow-sm border border-green-200"
+            >
               State • District • City • Ward Shapefiles
             </div>
           </div>
@@ -135,81 +256,173 @@
       </section>
 
       <!-- For Researchers Section -->
-      <section id="researchers" class="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 bg-white">
+      <section
+        id="researchers"
+        class="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 bg-white"
+      >
         <div class="max-w-7xl mx-auto">
           <div class="grid lg:grid-cols-2 gap-8 lg:gap-12 items-center">
             <div>
-              <h2 class="text-xl sm:text-2xl font-semibold text-primary-600 mb-3">
+              <h2
+                class="text-xl sm:text-2xl font-semibold text-primary-600 mb-3"
+              >
                 For Researchers & Scientists
               </h2>
-              <h3 class="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900 mb-6">
+              <h3
+                class="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900 mb-6"
+              >
                 Find the data you need,<br class="hidden sm:block" />
                 without the hassle
               </h3>
               <p class="text-base sm:text-lg text-gray-600 mb-8">
-                Browse through datasets curated over four years at ARTPARK. Each dataset comes with
-                comprehensive data dictionaries, standardised formats, and clear documentation.
+                Browse through datasets curated over four years at ARTPARK. Each
+                dataset comes with comprehensive data dictionaries, standardised
+                formats, and clear documentation.
               </p>
               <ul class="space-y-4">
                 <li class="flex items-start">
-                  <div class="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
-                    <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                  <div
+                    class="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0"
+                  >
+                    <svg
+                      class="w-4 h-4 text-green-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M5 13l4 4L19 7"></path>
                     </svg>
                   </div>
                   <div>
                     <p class="font-medium text-gray-900">Data Dictionaries</p>
-                    <p class="text-gray-600 text-sm">Every dataset includes detailed field descriptions, units, and methodology documentation</p>
+                    <p class="text-gray-600 text-sm">
+                      Every dataset includes detailed field descriptions, units,
+                      and methodology documentation
+                    </p>
                   </div>
                 </li>
                 <li class="flex items-start">
-                  <div class="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
-                    <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                  <div
+                    class="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0"
+                  >
+                    <svg
+                      class="w-4 h-4 text-green-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M5 13l4 4L19 7"></path>
                     </svg>
                   </div>
                   <div>
                     <p class="font-medium text-gray-900">Multiple Data Types</p>
-                    <p class="text-gray-600 text-sm">Tabular datasets, weather station records, and geospatial shapefiles in standard formats</p>
+                    <p class="text-gray-600 text-sm">
+                      Tabular datasets, weather station records, and geospatial
+                      shapefiles in standard formats
+                    </p>
                   </div>
                 </li>
                 <li class="flex items-start">
-                  <div class="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
-                    <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                  <div
+                    class="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0"
+                  >
+                    <svg
+                      class="w-4 h-4 text-green-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M5 13l4 4L19 7"></path>
                     </svg>
                   </div>
                   <div>
-                    <p class="font-medium text-gray-900">Consistent Structure</p>
-                    <p class="text-gray-600 text-sm">All datasets follow the same schema conventions — easy to read and compare across sources</p>
+                    <p class="font-medium text-gray-900">
+                      Consistent Structure
+                    </p>
+                    <p class="text-gray-600 text-sm">
+                      All datasets follow the same schema conventions — easy to
+                      read and compare across sources
+                    </p>
                   </div>
                 </li>
                 <li class="flex items-start">
-                  <div class="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
-                    <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                  <div
+                    class="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0"
+                  >
+                    <svg
+                      class="w-4 h-4 text-green-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M5 13l4 4L19 7"></path>
                     </svg>
                   </div>
                   <div>
                     <p class="font-medium text-gray-900">Versioned Datasets</p>
-                    <p class="text-gray-600 text-sm">Track changes and access historical versions for reproducible research</p>
+                    <p class="text-gray-600 text-sm">
+                      Track changes and access historical versions for
+                      reproducible research
+                    </p>
                   </div>
                 </li>
               </ul>
               <div class="mt-8">
-                <a href="/datasets" class="btn-primary px-6 py-2.5 text-sm font-medium inline-flex items-center">
-                  <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+                <a
+                  href="/datasets"
+                  class="btn-primary px-6 py-2.5 text-sm font-medium inline-flex items-center"
+                >
+                  <svg
+                    class="w-4 h-4 mr-2"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"
+                    ></path>
                   </svg>
                   Browse Datasets
-                  <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                  <svg
+                    class="w-4 h-4 ml-2"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
                   </svg>
                 </a>
               </div>
             </div>
-            <div class="bg-gray-50 rounded-2xl p-4 sm:p-8 border border-gray-200">
-              <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+            <div
+              class="bg-gray-50 rounded-2xl p-4 sm:p-8 border border-gray-200"
+            >
+              <div
+                class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden"
+              >
                 <div class="px-4 py-3 border-b border-gray-200 bg-gray-50">
                   <div class="flex items-center space-x-2">
                     <div class="w-3 h-3 rounded-full bg-red-400"></div>
@@ -222,34 +435,68 @@
                     <div class="h-8 bg-gray-100 rounded flex-1"></div>
                     <div class="h-8 w-20 sm:w-24 bg-primary-100 rounded"></div>
                   </div>
-                  <div class="border border-gray-200 rounded-lg overflow-x-auto">
+                  <div
+                    class="border border-gray-200 rounded-lg overflow-x-auto"
+                  >
                     <table class="w-full text-xs">
                       <thead class="bg-gray-50 text-gray-600 font-medium">
                         <tr>
                           <th class="px-3 py-2 text-left">Dataset</th>
-                          <th class="px-3 py-2 text-left hidden sm:table-cell">Type</th>
+                          <th class="px-3 py-2 text-left hidden sm:table-cell"
+                            >Type</th
+                          >
                           <th class="px-3 py-2 text-left">Coverage</th>
                           <th class="px-3 py-2 text-left">Access</th>
                         </tr>
                       </thead>
                       <tbody class="divide-y divide-gray-200">
                         <tr>
-                          <td class="px-3 py-2 text-gray-900">IMD Weather Stations</td>
-                          <td class="px-3 py-2 text-gray-600 hidden sm:table-cell">Tabular</td>
+                          <td class="px-3 py-2 text-gray-900"
+                            >IMD Weather Stations</td
+                          >
+                          <td
+                            class="px-3 py-2 text-gray-600 hidden sm:table-cell"
+                            >Tabular</td
+                          >
                           <td class="px-3 py-2 text-gray-600">2020-2024</td>
-                          <td class="px-3 py-2"><span class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">Open</span></td>
+                          <td class="px-3 py-2"
+                            ><span
+                              class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs"
+                              >Open</span
+                            ></td
+                          >
                         </tr>
                         <tr>
-                          <td class="px-3 py-2 text-gray-900">Karnataka Districts</td>
-                          <td class="px-3 py-2 text-gray-600 hidden sm:table-cell">Shapefile</td>
+                          <td class="px-3 py-2 text-gray-900"
+                            >Karnataka Districts</td
+                          >
+                          <td
+                            class="px-3 py-2 text-gray-600 hidden sm:table-cell"
+                            >Shapefile</td
+                          >
                           <td class="px-3 py-2 text-gray-600">2023</td>
-                          <td class="px-3 py-2"><span class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">Open</span></td>
+                          <td class="px-3 py-2"
+                            ><span
+                              class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs"
+                              >Open</span
+                            ></td
+                          >
                         </tr>
                         <tr>
-                          <td class="px-3 py-2 text-gray-900">Crop Yield Records</td>
-                          <td class="px-3 py-2 text-gray-600 hidden sm:table-cell">Tabular</td>
+                          <td class="px-3 py-2 text-gray-900"
+                            >Crop Yield Records</td
+                          >
+                          <td
+                            class="px-3 py-2 text-gray-600 hidden sm:table-cell"
+                            >Tabular</td
+                          >
                           <td class="px-3 py-2 text-gray-600">2015-2023</td>
-                          <td class="px-3 py-2"><span class="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">Request</span></td>
+                          <td class="px-3 py-2"
+                            ><span
+                              class="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs"
+                              >Request</span
+                            ></td
+                          >
                         </tr>
                       </tbody>
                     </table>
@@ -262,20 +509,39 @@
       </section>
 
       <!-- For Developers Section -->
-      <section id="developers" class="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 bg-gray-900">
+      <section
+        id="developers"
+        class="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 bg-gray-900"
+      >
         <div class="max-w-7xl mx-auto">
           <div class="grid lg:grid-cols-2 gap-8 lg:gap-12 items-start">
             <div class="order-2 lg:order-1">
+              <!-- Quick Start heading -->
+              <h4 class="text-lg font-semibold text-primary-400 mb-4 lg:hidden">Quick Start</h4>
               <!-- Code Example Tabs -->
-              <div class="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden">
+              <div
+                class="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden"
+              >
                 <div class="flex border-b border-gray-700">
-                  <button id="tab-cli" class="code-tab active flex-1 px-3 sm:px-4 py-3 text-xs sm:text-sm font-medium text-white bg-gray-700 border-b-2 border-primary-500" onclick="switchTab('cli')">
+                  <button
+                    id="tab-cli"
+                    class="code-tab active flex-1 px-3 sm:px-4 py-3 text-xs sm:text-sm font-medium text-white bg-gray-700 border-b-2 border-primary-500"
+                    onclick="switchTab('cli')"
+                  >
                     CLI
                   </button>
-                  <button id="tab-python" class="code-tab flex-1 px-3 sm:px-4 py-3 text-xs sm:text-sm font-medium text-gray-400 hover:text-white" onclick="switchTab('python')">
+                  <button
+                    id="tab-python"
+                    class="code-tab flex-1 px-3 sm:px-4 py-3 text-xs sm:text-sm font-medium text-gray-400 hover:text-white"
+                    onclick="switchTab('python')"
+                  >
                     Python SDK
                   </button>
-                  <button id="tab-api" class="code-tab flex-1 px-3 sm:px-4 py-3 text-xs sm:text-sm font-medium text-gray-400 hover:text-white" onclick="switchTab('api')">
+                  <button
+                    id="tab-api"
+                    class="code-tab flex-1 px-3 sm:px-4 py-3 text-xs sm:text-sm font-medium text-gray-400 hover:text-white"
+                    onclick="switchTab('api')"
+                  >
                     REST API
                   </button>
                 </div>
@@ -283,12 +549,13 @@
                   <!-- CLI Example -->
                   <div id="code-cli" class="code-content">
                     <div class="flex items-center space-x-2 mb-4">
-                      <span class="text-gray-400 text-sm">terminal</span>
+                      <span class="text-gray-400 text-sm">bash</span>
                     </div>
-                    <pre class="text-xs sm:text-sm text-gray-300 overflow-x-auto whitespace-pre-wrap"><code><span class="text-gray-500"># Install with uv (recommended)</span>
+                    <pre
+                      class="text-xs sm:text-sm text-gray-300 overflow-x-auto whitespace-pre-wrap"><code><span class="text-gray-500"># Install with uv (recommended)</span>
 <span class="text-green-400">$</span> uv init && uv add dataio-artpark
 
-<span class="text-gray-500"># Initialize and configure credentials</span>
+<span class="text-gray-500"># Register and Obtain your API Keys, then run:</span>
 <span class="text-green-400">$</span> uv run dataio init
 
 <span class="text-gray-500"># List datasets by collection</span>
@@ -300,9 +567,10 @@
                   <!-- Python SDK Example -->
                   <div id="code-python" class="code-content hidden">
                     <div class="flex items-center space-x-2 mb-4">
-                      <span class="text-gray-400 text-sm">example.py</span>
+                      <span class="text-gray-400 text-sm">python3</span>
                     </div>
-                    <pre class="text-xs sm:text-sm text-gray-300 overflow-x-auto whitespace-pre-wrap"><code><span class="text-purple-400">from</span> dataio <span class="text-purple-400">import</span> DataIOAPI
+                    <pre
+                      class="text-xs sm:text-sm text-gray-300 overflow-x-auto whitespace-pre-wrap"><code><span class="text-purple-400">from</span> dataio <span class="text-purple-400">import</span> DataIOAPI
 
 <span class="text-gray-500"># Initialize client (reads from .env)</span>
 client = DataIOAPI()
@@ -320,12 +588,16 @@ path = client.download_dataset(
 )</code></pre>
                   </div>
                   <!-- REST API Example -->
-                  <div id="code-api" class="code-content hidden overflow-hidden">
+                  <div
+                    id="code-api"
+                    class="code-content hidden overflow-hidden"
+                  >
                     <div class="flex items-center space-x-2 mb-4">
-                      <span class="text-gray-400 text-sm">curl</span>
+                      <span class="text-gray-400 text-sm">cURL</span>
                     </div>
                     <div class="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
-                      <pre class="text-xs sm:text-sm text-gray-300 min-w-max"><code><span class="text-gray-500"># List datasets</span>
+                      <pre
+                        class="text-xs sm:text-sm text-gray-300 min-w-max"><code><span class="text-gray-500"># List datasets</span>
 <span class="text-green-400">$</span> curl -H <span class="text-green-400">"X-API-Key: $API_KEY"</span> \
   <span class="text-green-400">"https://dataio.artpark.ai/api/v1/datasets"</span>
 
@@ -340,102 +612,283 @@ path = client.download_dataset(
                   </div>
                 </div>
               </div>
-              <div class="mt-4 flex flex-col sm:flex-row items-center justify-center gap-3 text-sm">
-                <a href="https://github.com/dsih-artpark/dataio" target="_blank" rel="noopener noreferrer" class="inline-flex items-center text-gray-400 hover:text-white">
-                  <svg class="w-4 h-4 mr-1.5" fill="currentColor" viewBox="0 0 24 24">
-                    <path fill-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clip-rule="evenodd" />
+              <div
+                class="mt-4 flex flex-col sm:flex-row items-center justify-center gap-3 text-sm"
+              >
+                <a
+                  href="https://github.com/dsih-artpark/dataio"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="inline-flex items-center text-gray-400 hover:text-white"
+                >
+                  <svg
+                    class="w-4 h-4 mr-1.5"
+                    fill="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      fill-rule="evenodd"
+                      d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
+                      clip-rule="evenodd"></path>
                   </svg>
                   GitHub
                 </a>
                 <span class="text-gray-600 hidden sm:inline">•</span>
-                <a href="https://pypi.org/project/dataio-artpark/" target="_blank" rel="noopener noreferrer" class="inline-flex items-center text-gray-400 hover:text-white">
-                  <img src="/pypi_logo.svg.png" alt="PyPI" class="w-4 h-4 mr-1.5" />
+                <a
+                  href="https://pypi.org/project/dataio-artpark/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="inline-flex items-center text-gray-400 hover:text-white"
+                >
+                  <img
+                    src="/pypi_logo.svg.png"
+                    alt="PyPI"
+                    class="w-4 h-4 mr-1.5"
+                  />
                   PyPI
                 </a>
                 <span class="text-gray-600 hidden sm:inline">•</span>
-                <a href="https://dataio.artpark.ai/docs" target="_blank" rel="noopener noreferrer" class="text-primary-400 hover:text-primary-300">
+                <a
+                  href="https://dataio.artpark.ai/docs"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="text-primary-400 hover:text-primary-300"
+                >
                   View full documentation →
                 </a>
               </div>
             </div>
             <div class="order-1 lg:order-2">
-              <h2 class="text-xl sm:text-2xl font-semibold text-primary-400 mb-3">
+              <h2
+                class="text-xl sm:text-2xl font-semibold text-primary-400 mb-3"
+              >
                 For Developers
               </h2>
-              <h3 class="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-4">
-                Powered by a <span class="text-primary-400">first class API</span>
+              <h3
+                class="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-2"
+              >
+                Powered by a <span class="text-primary-400"
+                  >first class API</span
+                >
               </h3>
+              <p class="text-lg font-semibold text-gray-300 mb-4 hidden lg:block">Quick Start</p>
               <p class="text-base sm:text-lg text-gray-400 mb-6">
-                We built <a href="https://dataio.artpark.ai" target="_blank" rel="noopener noreferrer" class="text-primary-400 hover:text-primary-300 font-semibold">dataio</a> to power our own research workflows — and now it powers this platform too!
-                It's open-source on <a href="https://github.com/dsih-artpark/dataio" target="_blank" rel="noopener noreferrer" class="text-primary-400 hover:text-primary-300 font-semibold">GitHub</a> and available on <a href="https://pypi.org/project/dataio-artpark/" target="_blank" rel="noopener noreferrer" class="text-primary-400 hover:text-primary-300 font-semibold">PyPI</a>, with a <a href="https://dataio.artpark.ai/docs/cli/" target="_blank" rel="noopener noreferrer" class="text-primary-400 hover:text-primary-300 font-semibold">CLI</a> for quick access, a <a href="https://dataio.artpark.ai/docs/sdk" target="_blank" rel="noopener noreferrer" class="text-primary-400 hover:text-primary-300 font-semibold">Python SDK</a> for scripting, and a <a href="https://dataio.artpark.ai/api/v1" target="_blank" rel="noopener noreferrer" class="text-primary-400 hover:text-primary-300 font-semibold">REST API</a>
+                We built <a
+                  href="https://dataio.artpark.ai"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="text-primary-400 hover:text-primary-300 font-semibold"
+                  >dataio</a
+                > to power our own research workflows — and now it powers this platform
+                too! It's open-source on <a
+                  href="https://github.com/dsih-artpark/dataio"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="text-primary-400 hover:text-primary-300 font-semibold"
+                  >GitHub</a
+                > and available on <a
+                  href="https://pypi.org/project/dataio-artpark/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="text-primary-400 hover:text-primary-300 font-semibold"
+                  >PyPI</a
+                >, with a <a
+                  href="https://dataio.artpark.ai/docs/cli/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="text-primary-400 hover:text-primary-300 font-semibold"
+                  >CLI</a
+                > for quick access, a <a
+                  href="https://dataio.artpark.ai/docs/sdk"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="text-primary-400 hover:text-primary-300 font-semibold"
+                  >Python SDK</a
+                > for scripting, and a <a
+                  href="https://dataio.artpark.ai/api/v1"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="text-primary-400 hover:text-primary-300 font-semibold"
+                  >REST API</a
+                >
                 for full programmatic control.
               </p>
               <ul class="space-y-4">
                 <li class="flex items-start">
-                  <div class="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
-                    <svg class="w-4 h-4 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                  <div
+                    class="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0"
+                  >
+                    <svg
+                      class="w-4 h-4 text-primary-400"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M5 13l4 4L19 7"></path>
                     </svg>
                   </div>
                   <div>
                     <p class="font-medium text-white">CLI Tool & Python SDK</p>
-                    <p class="text-gray-400 text-sm">Quick dataset discovery and download from your terminal or Python scripts</p>
+                    <p class="text-gray-400 text-sm">
+                      Quick dataset discovery and download from your terminal or
+                      Python scripts
+                    </p>
                   </div>
                 </li>
                 <li class="flex items-start">
-                  <div class="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
-                    <svg class="w-4 h-4 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                  <div
+                    class="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0"
+                  >
+                    <svg
+                      class="w-4 h-4 text-primary-400"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M5 13l4 4L19 7"></path>
                     </svg>
                   </div>
                   <div>
                     <p class="font-medium text-white">REST API</p>
-                    <p class="text-gray-400 text-sm">Full programmatic access to datasets, tables, weather data, and shapefiles at state, district, or city level</p>
+                    <p class="text-gray-400 text-sm">
+                      Full programmatic access to datasets, tables, weather
+                      data, and shapefiles at state, district, or city level
+                    </p>
                   </div>
                 </li>
                 <li class="flex items-start">
-                  <div class="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
-                    <svg class="w-4 h-4 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                  <div
+                    class="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0"
+                  >
+                    <svg
+                      class="w-4 h-4 text-primary-400"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M5 13l4 4L19 7"></path>
                     </svg>
                   </div>
                   <div>
                     <p class="font-medium text-white">Reusable Code</p>
-                    <p class="text-gray-400 text-sm">Consistent dataset structure means code written for one dataset works for others</p>
+                    <p class="text-gray-400 text-sm">
+                      Consistent dataset structure means code written for one
+                      dataset works for others
+                    </p>
                   </div>
                 </li>
                 <li class="flex items-start">
-                  <div class="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
-                    <svg class="w-4 h-4 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                  <div
+                    class="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0"
+                  >
+                    <svg
+                      class="w-4 h-4 text-primary-400"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M5 13l4 4L19 7"></path>
                     </svg>
                   </div>
                   <div>
                     <p class="font-medium text-white">Pipeline Ready</p>
-                    <p class="text-gray-400 text-sm">Integrate with CI/CD workflows and automation — we follow <a href="https://semver.org" target="_blank" rel="noopener noreferrer" class="text-primary-400 hover:text-primary-300">semver</a> for reproducible systems</p>
+                    <p class="text-gray-400 text-sm">
+                      Integrate with CI/CD workflows and automation — we follow <a
+                        href="https://semver.org"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="text-primary-400 hover:text-primary-300"
+                        >semver</a
+                      > for reproducible systems
+                    </p>
                   </div>
                 </li>
               </ul>
               <div class="mt-8 flex flex-wrap gap-3">
-                <a href="https://dataio.artpark.ai/docs" target="_blank" rel="noopener noreferrer" class="btn border border-gray-600 text-gray-300 hover:bg-gray-800 focus:ring-gray-500 px-4 py-2 text-sm font-medium justify-center">
-                  <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                <a
+                  href="https://dataio.artpark.ai/docs"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="btn border border-gray-600 text-gray-300 hover:bg-gray-800 focus:ring-gray-500 px-4 py-2 text-sm font-medium justify-center"
+                >
+                  <svg
+                    class="w-4 h-4 mr-1.5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                    ></path>
                   </svg>
                   Docs
                 </a>
-                <a href="https://github.com/dsih-artpark/dataio" target="_blank" rel="noopener noreferrer" class="btn border border-gray-600 text-gray-300 hover:bg-gray-800 focus:ring-gray-500 px-4 py-2 text-sm font-medium justify-center">
-                  <svg class="w-4 h-4 mr-1.5" fill="currentColor" viewBox="0 0 24 24">
-                    <path fill-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clip-rule="evenodd" />
+                <a
+                  href="https://github.com/dsih-artpark/dataio"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="btn border border-gray-600 text-gray-300 hover:bg-gray-800 focus:ring-gray-500 px-4 py-2 text-sm font-medium justify-center"
+                >
+                  <svg
+                    class="w-4 h-4 mr-1.5"
+                    fill="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      fill-rule="evenodd"
+                      d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
+                      clip-rule="evenodd"></path>
                   </svg>
                   GitHub
                 </a>
-                <a href="/login" class="btn bg-white text-gray-900 hover:bg-gray-100 focus:ring-white px-4 py-2 text-sm font-medium justify-center">
-                  <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                <a
+                  href="/login"
+                  class="btn bg-white text-gray-900 hover:bg-gray-100 focus:ring-white px-4 py-2 text-sm font-medium justify-center"
+                >
+                  <svg
+                    class="w-4 h-4 mr-1.5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
+                    ></path>
                   </svg>
                   Get API Key
-                  <svg class="w-4 h-4 ml-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                  <svg
+                    class="w-4 h-4 ml-1.5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
                   </svg>
                 </a>
               </div>
@@ -445,57 +898,126 @@ path = client.download_dataset(
       </section>
 
       <!-- Coming Soon Section -->
-      <section id="coming-soon" class="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 bg-gradient-to-b from-white to-amber-50">
+      <section
+        id="coming-soon"
+        class="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 bg-gradient-to-b from-white to-amber-50"
+      >
         <div class="max-w-7xl mx-auto">
           <div class="text-center mb-8 sm:mb-12">
-            <div class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-amber-100 text-amber-700 mb-4">
-              <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <div
+              class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-amber-100 text-amber-700 mb-4"
+            >
+              <svg
+                class="w-4 h-4 mr-1.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
               </svg>
               Coming Soon
             </div>
-            <h2 class="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900">
+            <h2
+              class="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900"
+            >
               More features on the way
             </h2>
-            <p class="mt-4 text-base sm:text-lg text-gray-600 max-w-2xl mx-auto">
-              We're actively building new capabilities to make the platform even more powerful.
+            <p
+              class="mt-4 text-base sm:text-lg text-gray-600 max-w-2xl mx-auto"
+            >
+              We're actively building new capabilities to make the platform even
+              more powerful.
             </p>
           </div>
 
           <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
             <!-- Analytics Card -->
             <div class="card p-6">
-              <div class="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center mb-4">
-                <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              <div
+                class="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center mb-4"
+              >
+                <svg
+                  class="w-6 h-6 text-purple-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                  ></path>
                 </svg>
               </div>
-              <h3 class="text-lg font-semibold text-gray-900 mb-2">Advanced Analytics</h3>
+              <h3 class="text-lg font-semibold text-gray-900 mb-2">
+                Advanced Analytics
+              </h3>
               <p class="text-gray-600 text-sm mb-4">
                 Automated insights for every dataset you access.
               </p>
               <ul class="space-y-2 text-sm text-gray-600">
                 <li class="flex items-start">
-                  <svg class="w-4 h-4 text-purple-500 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  <svg
+                    class="w-4 h-4 text-purple-500 mr-2 mt-0.5 flex-shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 5l7 7-7 7"></path>
                   </svg>
                   <span>Statistical summaries & distributions</span>
                 </li>
                 <li class="flex items-start">
-                  <svg class="w-4 h-4 text-purple-500 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  <svg
+                    class="w-4 h-4 text-purple-500 mr-2 mt-0.5 flex-shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 5l7 7-7 7"></path>
                   </svg>
                   <span>Temporal trend visualisation</span>
                 </li>
                 <li class="flex items-start">
-                  <svg class="w-4 h-4 text-purple-500 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  <svg
+                    class="w-4 h-4 text-purple-500 mr-2 mt-0.5 flex-shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 5l7 7-7 7"></path>
                   </svg>
                   <span>Data quality scoring & anomaly detection</span>
                 </li>
                 <li class="flex items-start">
-                  <svg class="w-4 h-4 text-purple-500 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  <svg
+                    class="w-4 h-4 text-purple-500 mr-2 mt-0.5 flex-shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 5l7 7-7 7"></path>
                   </svg>
                   <span>Spatial coverage heatmaps</span>
                 </li>
@@ -504,38 +1026,92 @@ path = client.download_dataset(
 
             <!-- Playground Card -->
             <div class="card p-6">
-              <div class="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center mb-4">
-                <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <div
+                class="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center mb-4"
+              >
+                <svg
+                  class="w-6 h-6 text-blue-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
+                  ></path>
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                 </svg>
               </div>
-              <h3 class="text-lg font-semibold text-gray-900 mb-2">Data Playground</h3>
+              <h3 class="text-lg font-semibold text-gray-900 mb-2">
+                Data Playground
+              </h3>
               <p class="text-gray-600 text-sm mb-4">
                 Interactive environment to explore and experiment with datasets.
               </p>
               <ul class="space-y-2 text-sm text-gray-600">
                 <li class="flex items-start">
-                  <svg class="w-4 h-4 text-blue-500 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  <svg
+                    class="w-4 h-4 text-blue-500 mr-2 mt-0.5 flex-shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 5l7 7-7 7"></path>
                   </svg>
                   <span>Jupyter-style notebook interface</span>
                 </li>
                 <li class="flex items-start">
-                  <svg class="w-4 h-4 text-blue-500 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  <svg
+                    class="w-4 h-4 text-blue-500 mr-2 mt-0.5 flex-shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 5l7 7-7 7"></path>
                   </svg>
                   <span>LLM integrations for natural language queries</span>
                 </li>
                 <li class="flex items-start">
-                  <svg class="w-4 h-4 text-blue-500 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  <svg
+                    class="w-4 h-4 text-blue-500 mr-2 mt-0.5 flex-shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 5l7 7-7 7"></path>
                   </svg>
                   <span>Auto-generated visualisations</span>
                 </li>
                 <li class="flex items-start">
-                  <svg class="w-4 h-4 text-blue-500 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  <svg
+                    class="w-4 h-4 text-blue-500 mr-2 mt-0.5 flex-shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 5l7 7-7 7"></path>
                   </svg>
                   <span>Share and collaborate on analyses</span>
                 </li>
@@ -544,37 +1120,86 @@ path = client.download_dataset(
 
             <!-- Validation Card -->
             <div class="card p-6 sm:col-span-2 lg:col-span-1">
-              <div class="w-12 h-12 rounded-xl bg-green-100 flex items-center justify-center mb-4">
-                <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <div
+                class="w-12 h-12 rounded-xl bg-green-100 flex items-center justify-center mb-4"
+              >
+                <svg
+                  class="w-6 h-6 text-green-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                 </svg>
               </div>
-              <h3 class="text-lg font-semibold text-gray-900 mb-2">Auto Validation</h3>
+              <h3 class="text-lg font-semibold text-gray-900 mb-2">
+                Auto Validation
+              </h3>
               <p class="text-gray-600 text-sm mb-4">
                 Automated data quality checks during upload.
               </p>
               <ul class="space-y-2 text-sm text-gray-600">
                 <li class="flex items-start">
-                  <svg class="w-4 h-4 text-green-500 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  <svg
+                    class="w-4 h-4 text-green-500 mr-2 mt-0.5 flex-shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 5l7 7-7 7"></path>
                   </svg>
                   <span>Schema validation against templates</span>
                 </li>
                 <li class="flex items-start">
-                  <svg class="w-4 h-4 text-green-500 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  <svg
+                    class="w-4 h-4 text-green-500 mr-2 mt-0.5 flex-shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 5l7 7-7 7"></path>
                   </svg>
                   <span>Geospatial integrity checks</span>
                 </li>
                 <li class="flex items-start">
-                  <svg class="w-4 h-4 text-green-500 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  <svg
+                    class="w-4 h-4 text-green-500 mr-2 mt-0.5 flex-shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 5l7 7-7 7"></path>
                   </svg>
                   <span>Duplicate detection & deduplication</span>
                 </li>
                 <li class="flex items-start">
-                  <svg class="w-4 h-4 text-green-500 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  <svg
+                    class="w-4 h-4 text-green-500 mr-2 mt-0.5 flex-shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 5l7 7-7 7"></path>
                   </svg>
                   <span>Customisable validation rules</span>
                 </li>
@@ -585,71 +1210,145 @@ path = client.download_dataset(
       </section>
 
       <!-- Open Standards Section -->
-      <section id="open-source" class="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 bg-white">
+      <section
+        id="open-source"
+        class="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 bg-white"
+      >
         <div class="max-w-7xl mx-auto">
           <div class="text-center mb-8 sm:mb-12">
-            <h2 class="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900">
+            <h2
+              class="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900"
+            >
               Open Standards, Transparent Design
             </h2>
-            <p class="mt-4 text-base sm:text-lg text-gray-600 max-w-2xl mx-auto">
+            <p
+              class="mt-4 text-base sm:text-lg text-gray-600 max-w-2xl mx-auto"
+            >
               Available for self-hosting, with full control over your data.
             </p>
           </div>
 
           <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8">
             <div class="text-center">
-              <div class="w-14 h-14 rounded-2xl bg-primary-100 flex items-center justify-center mx-auto mb-4">
-                <svg class="w-7 h-7 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+              <div
+                class="w-14 h-14 rounded-2xl bg-primary-100 flex items-center justify-center mx-auto mb-4"
+              >
+                <svg
+                  class="w-7 h-7 text-primary-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path>
                 </svg>
               </div>
-              <h3 class="text-lg font-semibold text-gray-900 mb-2">Open Source</h3>
+              <h3 class="text-lg font-semibold text-gray-900 mb-2">
+                Open Source
+              </h3>
               <p class="text-gray-600 text-sm">
-                Licensed under AGPL-3.0. Inspect the code, contribute improvements, or fork for your needs.
+                Licensed under AGPL-3.0. Inspect the code, contribute
+                improvements, or fork for your needs.
               </p>
             </div>
 
             <div class="text-center">
-              <div class="w-14 h-14 rounded-2xl bg-primary-100 flex items-center justify-center mx-auto mb-4">
-                <svg class="w-7 h-7 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+              <div
+                class="w-14 h-14 rounded-2xl bg-primary-100 flex items-center justify-center mx-auto mb-4"
+              >
+                <svg
+                  class="w-7 h-7 text-primary-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"
+                  ></path>
                 </svg>
               </div>
-              <h3 class="text-lg font-semibold text-gray-900 mb-2">Self-Hostable</h3>
+              <h3 class="text-lg font-semibold text-gray-900 mb-2">
+                Self-Hostable
+              </h3>
               <p class="text-gray-600 text-sm">
-                Deploy the entire platform on your own infrastructure. Full control over your data.
+                Deploy the entire platform on your own infrastructure. Full
+                control over your data.
               </p>
             </div>
 
             <div class="text-center">
-              <div class="w-14 h-14 rounded-2xl bg-primary-100 flex items-center justify-center mx-auto mb-4">
-                <svg class="w-7 h-7 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              <div
+                class="w-14 h-14 rounded-2xl bg-primary-100 flex items-center justify-center mx-auto mb-4"
+              >
+                <svg
+                  class="w-7 h-7 text-primary-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                  ></path>
                 </svg>
               </div>
-              <h3 class="text-lg font-semibold text-gray-900 mb-2">Open Standards</h3>
+              <h3 class="text-lg font-semibold text-gray-900 mb-2">
+                Open Standards
+              </h3>
               <p class="text-gray-600 text-sm">
-                Standard data formats and APIs. No vendor lock-in, easy integration with existing tools.
+                Standard data formats and APIs. No vendor lock-in, easy
+                integration with existing tools.
               </p>
             </div>
 
             <div class="text-center">
-              <div class="w-14 h-14 rounded-2xl bg-primary-100 flex items-center justify-center mx-auto mb-4">
-                <svg class="w-7 h-7 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+              <div
+                class="w-14 h-14 rounded-2xl bg-primary-100 flex items-center justify-center mx-auto mb-4"
+              >
+                <svg
+                  class="w-7 h-7 text-primary-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+                  ></path>
                 </svg>
               </div>
-              <h3 class="text-lg font-semibold text-gray-900 mb-2">Open Methodology</h3>
+              <h3 class="text-lg font-semibold text-gray-900 mb-2">
+                Open Methodology
+              </h3>
               <p class="text-gray-600 text-sm">
-                We're open-sourcing our data standardisation methodology so you can apply it to your own datasets.
+                We're open-sourcing our data standardisation methodology so you
+                can apply it to your own datasets.
               </p>
             </div>
           </div>
 
           <div class="mt-10 sm:mt-12 text-center">
-            <a href="https://github.com/dsih-artpark/dataio" target="_blank" rel="noopener noreferrer" class="inline-flex items-center text-primary-600 hover:text-primary-700 font-medium">
+            <a
+              href="https://github.com/dsih-artpark/dataio"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex items-center text-primary-600 hover:text-primary-700 font-medium"
+            >
               <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 24 24">
-                <path fill-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clip-rule="evenodd" />
+                <path
+                  fill-rule="evenodd"
+                  d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
+                  clip-rule="evenodd"></path>
               </svg>
               View on GitHub
             </a>
@@ -660,21 +1359,40 @@ path = client.download_dataset(
       <!-- CTA Section -->
       <section class="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 bg-primary-600">
         <div class="max-w-4xl mx-auto text-center">
-          <h2 class="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-6">
+          <h2
+            class="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-6"
+          >
             Ready to explore?
           </h2>
-          <p class="text-base sm:text-lg text-primary-100 mb-8 max-w-2xl mx-auto">
-            Sign in to access the full catalog, download datasets, and generate API keys.
-            No account yet? Sign in with your email to get started.
+          <p
+            class="text-base sm:text-lg text-primary-100 mb-8 max-w-2xl mx-auto"
+          >
+            Sign in to access the full catalog, download datasets, and generate
+            API keys. No account yet? Sign in with your email to get started.
           </p>
           <div class="flex flex-col sm:flex-row gap-4 justify-center">
-            <a href="/login" class="btn bg-white text-primary-700 hover:bg-primary-50 focus:ring-white px-8 py-3 text-base font-medium justify-center">
+            <a
+              href="/login"
+              class="btn bg-white text-primary-700 hover:bg-primary-50 focus:ring-white px-8 py-3 text-base font-medium justify-center"
+            >
               Sign In
-              <svg class="w-5 h-5 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+              <svg
+                class="w-5 h-5 ml-2"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
               </svg>
             </a>
-            <a href="/datasets" class="btn border-2 border-white text-white hover:bg-primary-700 focus:ring-white px-8 py-3 text-base font-medium justify-center">
+            <a
+              href="/datasets"
+              class="btn border-2 border-white text-white hover:bg-primary-700 focus:ring-white px-8 py-3 text-base font-medium justify-center"
+            >
               Browse as Guest
             </a>
           </div>
@@ -685,23 +1403,55 @@ path = client.download_dataset(
     <!-- Footer -->
     <footer class="bg-gray-900 text-gray-400 py-8 px-4 sm:px-6 lg:px-8">
       <div class="max-w-7xl mx-auto">
-        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
+        <div
+          class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6"
+        >
           <div class="flex items-center space-x-2">
-            <div class="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
+            <div
+              class="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center"
+            >
               <span class="text-white font-bold text-sm">AP</span>
             </div>
-            <span class="text-lg font-bold text-white">ARTPARK Data Platform</span>
+            <span class="text-lg font-bold text-white"
+              >ARTPARK Data Platform</span
+            >
           </div>
           <nav class="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-            <a href="/datasets" class="hover:text-white transition-colors">Datasets</a>
-            <a href="https://dataio.artpark.ai/docs" target="_blank" rel="noopener noreferrer" class="hover:text-white transition-colors">dataio docs</a>
-            <a href="https://pypi.org/project/dataio-artpark/" target="_blank" rel="noopener noreferrer" class="hover:text-white transition-colors">PyPI</a>
-            <a href="https://github.com/dsih-artpark/dataio" target="_blank" rel="noopener noreferrer" class="hover:text-white transition-colors">GitHub</a>
-            <a href="https://artpark.in" target="_blank" rel="noopener noreferrer" class="hover:text-white transition-colors">ARTPARK</a>
+            <a href="/datasets" class="hover:text-white transition-colors"
+              >Datasets</a
+            >
+            <a
+              href="https://dataio.artpark.ai/docs"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="hover:text-white transition-colors">dataio docs</a
+            >
+            <a
+              href="https://pypi.org/project/dataio-artpark/"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="hover:text-white transition-colors">PyPI</a
+            >
+            <a
+              href="https://github.com/dsih-artpark/dataio"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="hover:text-white transition-colors">GitHub</a
+            >
+            <a
+              href="https://artpark.in"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="hover:text-white transition-colors">ARTPARK</a
+            >
           </nav>
         </div>
-        <div class="border-t border-gray-800 mt-6 pt-6 text-sm text-center sm:text-left">
-          <p>&copy; {new Date().getFullYear()} ARTPARK. Licensed under AGPL-3.0.</p>
+        <div
+          class="border-t border-gray-800 mt-6 pt-6 text-sm text-center sm:text-left"
+        >
+          <p>
+            &copy; {new Date().getFullYear()} ARTPARK. Licensed under AGPL-3.0.
+          </p>
         </div>
       </div>
     </footer>
@@ -711,38 +1461,50 @@ path = client.download_dataset(
       // Tab switching for code examples
       function switchTab(tab: string) {
         // Hide all code content
-        document.querySelectorAll('.code-content').forEach(el => {
-          el.classList.add('hidden');
+        document.querySelectorAll(".code-content").forEach((el) => {
+          el.classList.add("hidden");
         });
         // Show selected content
-        const content = document.getElementById('code-' + tab);
+        const content = document.getElementById("code-" + tab);
         if (content) {
-          content.classList.remove('hidden');
+          content.classList.remove("hidden");
         }
         // Update tab styles
-        document.querySelectorAll('.code-tab').forEach(el => {
-          el.classList.remove('active', 'text-white', 'bg-gray-700', 'border-b-2', 'border-primary-500');
-          el.classList.add('text-gray-400');
+        document.querySelectorAll(".code-tab").forEach((el) => {
+          el.classList.remove(
+            "active",
+            "text-white",
+            "bg-gray-700",
+            "border-b-2",
+            "border-primary-500",
+          );
+          el.classList.add("text-gray-400");
         });
-        const activeTab = document.getElementById('tab-' + tab);
+        const activeTab = document.getElementById("tab-" + tab);
         if (activeTab) {
-          activeTab.classList.add('active', 'text-white', 'bg-gray-700', 'border-b-2', 'border-primary-500');
-          activeTab.classList.remove('text-gray-400');
+          activeTab.classList.add(
+            "active",
+            "text-white",
+            "bg-gray-700",
+            "border-b-2",
+            "border-primary-500",
+          );
+          activeTab.classList.remove("text-gray-400");
         }
       }
       // Make switchTab available globally
       (window as any).switchTab = switchTab;
 
       // Update nav for authenticated users
-      const token = localStorage.getItem('access_token');
+      const token = localStorage.getItem("access_token");
       if (token) {
         try {
-          const payload = JSON.parse(atob(token.split('.')[1]));
+          const payload = JSON.parse(atob(token.split(".")[1]));
           if (payload.exp && payload.exp * 1000 > Date.now()) {
-            const authContainer = document.getElementById('auth-container');
+            const authContainer = document.getElementById("auth-container");
             if (authContainer) {
               // Get user email from token payload
-              const userEmail = payload.sub || payload.email || 'User';
+              const userEmail = payload.sub || payload.email || "User";
               const userInitial = userEmail.charAt(0).toUpperCase();
 
               // Replace sign-in button with user menu dropdown
@@ -790,11 +1552,13 @@ path = client.download_dataset(
               `;
 
               // Add logout handler
-              document.getElementById('logout-btn')?.addEventListener('click', () => {
-                localStorage.removeItem('access_token');
-                localStorage.removeItem('refresh_token');
-                window.location.reload();
-              });
+              document
+                .getElementById("logout-btn")
+                ?.addEventListener("click", () => {
+                  localStorage.removeItem("access_token");
+                  localStorage.removeItem("refresh_token");
+                  window.location.reload();
+                });
             }
           }
         } catch {
@@ -803,38 +1567,42 @@ path = client.download_dataset(
       }
 
       // Hero scroll-triggered animations
-      const heroElements = document.querySelectorAll('.hero-title, .hero-subtitle, .hero-cta');
+      const heroElements = document.querySelectorAll(
+        ".hero-title, .hero-subtitle, .hero-cta",
+      );
 
       // Use Intersection Observer for scroll-triggered reveal
-      const heroObserver = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-          if (entry.isIntersecting) {
-            entry.target.classList.add('visible');
-          }
-        });
-      }, {
-        threshold: 0.1,
-        rootMargin: '0px 0px -50px 0px'
-      });
+      const heroObserver = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting) {
+              entry.target.classList.add("visible");
+            }
+          });
+        },
+        {
+          threshold: 0.1,
+          rootMargin: "0px 0px -50px 0px",
+        },
+      );
 
-      heroElements.forEach(el => heroObserver.observe(el));
+      heroElements.forEach((el) => heroObserver.observe(el));
 
       // Trigger immediately if already visible (for page load)
       setTimeout(() => {
-        heroElements.forEach(el => {
+        heroElements.forEach((el) => {
           const rect = el.getBoundingClientRect();
           if (rect.top < window.innerHeight && rect.bottom > 0) {
-            el.classList.add('visible');
+            el.classList.add("visible");
           }
         });
       }, 100);
-
     </script>
   </body>
 </html>
 
 <style is:global>
-  @import '../styles/global.css';
+  @import "../styles/global.css";
 
   html {
     scroll-behavior: smooth;
@@ -854,7 +1622,9 @@ path = client.download_dataset(
   .hero-title,
   .hero-subtitle,
   .hero-cta {
-    transition: opacity 0.8s ease-out, transform 0.8s ease-out;
+    transition:
+      opacity 0.8s ease-out,
+      transform 0.8s ease-out;
     transform: translateY(20px);
   }
 
@@ -879,13 +1649,27 @@ path = client.download_dataset(
     animation: bubbleFadeIn 0.5s ease-out forwards;
   }
 
-  .bubble-1 { animation-delay: 0.1s; }
-  .bubble-2 { animation-delay: 0.15s; }
-  .bubble-3 { animation-delay: 0.2s; }
-  .bubble-4 { animation-delay: 0.25s; }
-  .bubble-5 { animation-delay: 0.3s; }
-  .bubble-6 { animation-delay: 0.35s; }
-  .bubble-7 { animation-delay: 0.4s; }
+  .bubble-1 {
+    animation-delay: 0.1s;
+  }
+  .bubble-2 {
+    animation-delay: 0.15s;
+  }
+  .bubble-3 {
+    animation-delay: 0.2s;
+  }
+  .bubble-4 {
+    animation-delay: 0.25s;
+  }
+  .bubble-5 {
+    animation-delay: 0.3s;
+  }
+  .bubble-6 {
+    animation-delay: 0.35s;
+  }
+  .bubble-7 {
+    animation-delay: 0.4s;
+  }
 
   @keyframes bubbleFadeIn {
     from {

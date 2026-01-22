@@ -19,6 +19,7 @@ interface ApiError {
 class ApiClient {
   private accessToken: string | null = null;
   private refreshToken: string | null = null;
+  private refreshPromise: Promise<boolean> | null = null;
 
   constructor() {
     // Load tokens from localStorage on init
@@ -111,6 +112,20 @@ class ApiClient {
   }
 
   private async refreshAccessToken(): Promise<boolean> {
+    // If already refreshing, return the existing promise to prevent race conditions
+    if (this.refreshPromise) {
+      return this.refreshPromise;
+    }
+
+    this.refreshPromise = this._doRefreshToken();
+    try {
+      return await this.refreshPromise;
+    } finally {
+      this.refreshPromise = null;
+    }
+  }
+
+  private async _doRefreshToken(): Promise<boolean> {
     if (!this.refreshToken) return false;
 
     try {
@@ -153,6 +168,37 @@ class ApiClient {
     }>(
       '/auth/login/verify',
       { method: 'POST', body: JSON.stringify({ email, code }) },
+      false
+    );
+    this.setTokens(data.access_token, data.refresh_token);
+    return data;
+  }
+
+  // Registration endpoints
+  async initiateRegistration(email: string) {
+    return this.request<{ sent: boolean; message: string; verification_status: string }>(
+      '/auth/register/initiate',
+      { method: 'POST', body: JSON.stringify({ email }) },
+      false
+    );
+  }
+
+  async verifyRegistration(email: string, code?: string, magicToken?: string) {
+    const data = await this.request<{
+      access_token: string;
+      refresh_token: string;
+      user: {
+        email: string;
+        display_name: string | null;
+        is_admin: boolean;
+        email_verified: boolean;
+        verification_status: string;
+      };
+      verification_status: string;
+      verification_message: string | null;
+    }>(
+      '/auth/register/verify',
+      { method: 'POST', body: JSON.stringify({ email, code, magic_token: magicToken }) },
       false
     );
     this.setTokens(data.access_token, data.refresh_token);
@@ -273,6 +319,20 @@ class ApiClient {
   async revokeApiKey(keyId: string) {
     return this.request<{ revoked: boolean }>(`/api-keys/${keyId}`, {
       method: 'DELETE',
+    });
+  }
+
+  // Account deletion endpoints
+  async initiateAccountDeletion() {
+    return this.request<{ sent: boolean; message: string }>('/account/delete/initiate', {
+      method: 'POST',
+    });
+  }
+
+  async verifyAccountDeletion(code: string) {
+    return this.request<{ deleted: boolean; message: string }>('/account/delete/verify', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
     });
   }
 
@@ -419,6 +479,40 @@ class ApiClient {
     return this.request<{ removed: boolean }>(
       `/admin/groups/${encodeURIComponent(groupEmail)}/members/${encodeURIComponent(userEmail)}`,
       { method: 'DELETE' }
+    );
+  }
+
+  // Admin user verification endpoints
+  async adminListPendingUsers(params?: { limit?: number; offset?: number }) {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    if (params?.offset) searchParams.set('offset', String(params.offset));
+
+    const query = searchParams.toString();
+    return this.request<{
+      users: {
+        email: string;
+        display_name: string | null;
+        registered_at: string | null;
+        verification_status: string;
+      }[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(`/admin/users/pending${query ? `?${query}` : ''}`);
+  }
+
+  async adminVerifyUser(email: string) {
+    return this.request<{ verified: boolean; email: string }>(
+      `/admin/users/${encodeURIComponent(email)}/verify`,
+      { method: 'POST' }
+    );
+  }
+
+  async adminRejectUser(email: string) {
+    return this.request<{ rejected: boolean; email: string }>(
+      `/admin/users/${encodeURIComponent(email)}/reject`,
+      { method: 'POST' }
     );
   }
 }

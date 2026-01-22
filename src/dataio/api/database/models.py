@@ -124,6 +124,11 @@ class User(Base):
     last_login = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     display_name = Column(Text, nullable=True)
+    # Registration and verification fields
+    verification_status = Column(Text, nullable=False, default="verified")  # 'verified', 'pending', 'rejected'
+    registered_at = Column(DateTime, nullable=True)
+    verified_at = Column(DateTime, nullable=True)
+    verified_by = Column(Text, nullable=True)  # Admin email who verified
 
 
 class UserGroup(Base):
@@ -258,3 +263,17 @@ class UserAPIKey(Base):
 
     # Relationship
     user = relationship("User", backref="api_keys")
+
+
+class MagicLinkToken(Base):
+    """Magic link tokens for registration and account deletion verification."""
+
+    __tablename__ = "magic_link_tokens"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(Text, nullable=False)
+    token = Column(Text, nullable=False, unique=True)
+    purpose = Column(Text, nullable=False)  # 'registration', 'account_deletion'
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)

@@ -29,7 +29,11 @@ class WebAdminService(BaseService):
 
     def _require_admin(self, user: User) -> None:
         """Verify user has admin privileges."""
-        if not is_admin(user):
+        logger.info(f"_require_admin called for user: {getattr(user, 'email', 'N/A')}")
+        is_admin_result = is_admin(user)
+        logger.info(f"_require_admin - is_admin returned: {is_admin_result}")
+        if not is_admin_result:
+            logger.warning(f"_require_admin - denying access for user: {getattr(user, 'email', 'N/A')}")
             raise HTTPException(status_code=403, detail="Admin privileges required")
 
     # User Management

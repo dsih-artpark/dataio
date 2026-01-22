@@ -1,3 +1,4 @@
+import logging
 from typing import List, Any
 from dataio.api.database.models import (
     User,
@@ -9,6 +10,8 @@ from dataio.api.database.models import (
 )
 from dataio.api.database.config import Session
 from dataio.api.auth.exceptions import AuthorizationError
+
+logger = logging.getLogger(__name__)
 
 
 def is_admin(user: Any) -> bool:
@@ -24,11 +27,23 @@ def is_admin(user: Any) -> bool:
     Raises:
         AuthorizationError: If user is a group (groups cannot be admin)
     """
-    if user.is_group:
+    logger.info(f"is_admin check - user type: {type(user)}, email: {getattr(user, 'email', 'N/A')}")
+    logger.info(f"is_admin check - user.__dict__: {getattr(user, '__dict__', {})}")
+
+    is_group_val = getattr(user, 'is_group', None)
+    logger.info(f"is_admin check - is_group: {is_group_val}")
+
+    if is_group_val:
         raise AuthorizationError("Groups cannot have admin privileges")
+
     # Use getattr to safely handle both SQLAlchemy models and any edge cases
     is_admin_val = getattr(user, 'is_admin', False)
-    return is_admin_val is True
+    logger.info(f"is_admin check - is_admin value: {is_admin_val}, type: {type(is_admin_val)}, repr: {repr(is_admin_val)}")
+
+    # Use bool() instead of 'is True' to handle SQLAlchemy boolean types
+    result = bool(is_admin_val)
+    logger.info(f"is_admin check - returning: {result}")
+    return result
 
 
 def determine_highest_permission(permissions: List[AccessLevel]) -> AccessLevel:
@@ -70,7 +85,7 @@ def determine_user_permissions(user: User) -> List[UserPermission]:
         user_permissions = []
 
         # Admin users get all permissions
-        if user.is_admin is True:
+        if bool(user.is_admin):
             user_permissions.append(
                 UserPermission(
                     user_email=user.email,

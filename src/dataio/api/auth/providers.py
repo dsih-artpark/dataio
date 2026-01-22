@@ -77,13 +77,20 @@ def check_api_key(api_key: str) -> User:
             return None
 
         # Legacy key check (no prefix) - check users.key column
+        # DEPRECATED: Legacy keys will be removed in a future version
         users = session.query(DBUser).all()
         for user in users:
             if user.key:
                 try:
                     if bcrypt.checkpw(api_key.encode("utf-8"), user.key):
-                        logger.info(f"Legacy API key verified for user: {user.email}")
+                        logger.warning(
+                            f"DEPRECATION: Legacy API key used for user: {user.email}. "
+                            "Legacy API keys are deprecated and will be removed in a future version. "
+                            "Please generate a new API key at https://data.artpark.ai/account"
+                        )
                         session.expunge(user)
+                        # Mark this as a legacy key authentication for response header
+                        user._legacy_key_used = True
                         return user
                 except Exception:
                     continue

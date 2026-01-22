@@ -18,15 +18,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="Dataset Management System API",
+    title="DataIO API",
     docs_url="/api/v1",
     openapi_url="/api/v1/openapi.json",
     redoc_url=None,
-    servers=[
-        {"url": "https://data.artpark.ai", "description": "Production"},
-        {"url": "https://staging.data.artpark.ai", "description": "Staging"},
-        {"url": "http://localhost:8000", "description": "Local development"},
-    ],
 )
 
 # CORS configuration for web frontend
@@ -63,6 +58,7 @@ app.mount("/docs", StaticFiles(directory="docs/build/", html=True), name="docs")
 
 
 @app.get("/api")
+@app.get("/api/")
 async def redirect_api_to_v1():
     return RedirectResponse(url="/api/v1", status_code=301)
 

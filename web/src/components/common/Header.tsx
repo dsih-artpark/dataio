@@ -16,7 +16,7 @@ export default function Header() {
         <div class="flex justify-between h-16">
           {/* Logo */}
           <div class="flex items-center">
-            <a href="/dashboard" class="flex items-center space-x-2">
+            <a href="/datasets" class="flex items-center space-x-2">
               <div class="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
                 <span class="text-white font-bold">D</span>
               </div>
@@ -61,12 +61,6 @@ export default function Header() {
                     class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                   >
                     Account Settings
-                  </a>
-                  <a
-                    href="/account/api-keys"
-                    class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                  >
-                    API Keys
                   </a>
                   <hr class="my-1 border-gray-200" />
                   <button

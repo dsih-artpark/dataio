@@ -172,6 +172,10 @@ def get_current_web_user(
                 raise AuthenticationError("User not found")
             if user.is_group:
                 raise AuthenticationError("Groups cannot authenticate")
+
+            # Expunge user from session so it can be used after session closes
+            # and ensure all needed attributes are loaded
+            session.expunge(user)
             return user
         finally:
             session.close()

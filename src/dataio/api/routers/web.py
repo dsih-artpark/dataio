@@ -23,7 +23,7 @@ from dataio.api.services.web_admin_service import WebAdminService
 
 logger = logging.getLogger(__name__)
 
-web_router = APIRouter(prefix="/api/v1/web", tags=["web"])
+web_router = APIRouter(prefix="/api/v1/web")
 
 
 # =============================================================================

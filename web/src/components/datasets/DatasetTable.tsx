@@ -137,7 +137,7 @@ export default function DatasetTable() {
                   <tr key={dataset.ds_id} class="hover:bg-gray-50">
                     <td class="px-6 py-4">
                       <a
-                        href={`/dashboard/datasets/${dataset.ds_id}`}
+                        href={`/datasets/${dataset.ds_id}`}
                         class="text-primary-600 hover:text-primary-700 font-medium"
                       >
                         {dataset.title}

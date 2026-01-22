@@ -9,8 +9,7 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { name: 'Datasets', href: '/dashboard', icon: 'database' },
-  { name: 'API Keys', href: '/account/api-keys', icon: 'key' },
+  { name: 'Datasets', href: '/datasets', icon: 'database' },
   { name: 'Account', href: '/account', icon: 'user' },
   { name: 'Users', href: '/admin/users', icon: 'users', adminOnly: true },
   { name: 'Groups', href: '/admin/groups', icon: 'users-cog', adminOnly: true },
@@ -24,16 +23,6 @@ const icons: Record<string, JSX.Element> = {
         stroke-linejoin="round"
         stroke-width="2"
         d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"
-      />
-    </svg>
-  ),
-  key: (
-    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        stroke-width="2"
-        d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
       />
     </svg>
   ),

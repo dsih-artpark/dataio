@@ -36,7 +36,7 @@ export default function LoginForm() {
       if (needsPasskey && isWebAuthnSupported()) {
         setStep('passkey-prompt');
       } else {
-        window.location.href = '/dashboard';
+        window.location.href = '/datasets';
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid code');
@@ -50,7 +50,7 @@ export default function LoginForm() {
 
     try {
       await authenticateWithPasskey(email);
-      window.location.href = '/dashboard';
+      window.location.href = '/datasets';
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Passkey login failed');
       setLoading(false);
@@ -58,7 +58,7 @@ export default function LoginForm() {
   };
 
   const handleSkipPasskey = () => {
-    window.location.href = '/dashboard';
+    window.location.href = '/datasets';
   };
 
   const handleSetupPasskey = () => {

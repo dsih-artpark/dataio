@@ -26,7 +26,7 @@ import AdminUsersTabs from '../../components/admin/AdminUsersTabs';
     // Initialize auth and check admin status
     initAuth().then(() => {
       if (!isAdmin()) {
-        window.location.replace('/dashboard');
+        window.location.replace('/datasets');
       }
     });
   }

@@ -145,68 +145,36 @@ export default function CodeSnippets({ datasetId }: CodeSnippetsProps) {
   const codeBlocks: Record<TabId, CodeBlock[]> = {
     cli: [
       {
-        label: 'Setup',
-        description: 'Install and configure (one-time)',
-        code: `# Install dataio
-$ uv init && uv add dataio-artpark
-
-# Configure your API key
-$ uv run dataio init`,
-      },
-      {
-        label: 'Usage',
-        description: 'Download this dataset',
-        code: `# Download the dataset
+        label: 'Install & Download',
+        code: `$ uv init && uv add dataio-artpark
 $ uv run dataio download-dataset ${datasetId}`,
       },
     ],
     python: [
       {
-        label: 'Setup',
-        description: 'Install and initialize',
-        code: `# pip install dataio-artpark
-import os
-from dotenv import load_dotenv
-load_dotenv()  # Load DATAIO_API_KEY from .env
+        label: 'Quick Start',
+        code: `from dataio import DataIOAPI
+client = DataIOAPI()  # Uses DATAIO_API_KEY env var
 
-from dataio import DataIOAPI
-client = DataIOAPI()`,
-      },
-      {
-        label: 'Usage',
-        description: 'Download this dataset',
-        code: `# Get dataset metadata
+# Get dataset info
 details = client.get_dataset_details("${datasetId}")
-print(f"Dataset: {details['title']}")
 
-# Download to local directory
-path = client.download_dataset(
-    "${datasetId}",
-    root_dir="./data"
-)
-print(f"Downloaded to: {path}")`,
+# Download dataset
+client.download_dataset("${datasetId}", root_dir="./data")`,
       },
     ],
     api: [
       {
-        label: 'Setup',
-        description: 'Set your API key',
-        code: `$ export API_KEY="your-api-key-here"`,
-      },
-      {
-        label: 'Usage',
-        description: 'API requests',
-        code: `# Get dataset details
-$ curl -H "X-API-Key: $API_KEY" \\
-  "https://dataio.artpark.ai/api/v1/datasets/${datasetId}"
+        label: 'REST API',
+        code: `$ export API_KEY="your-api-key"
 
-# List available tables
+# Get dataset details
 $ curl -H "X-API-Key: $API_KEY" \\
-  "https://dataio.artpark.ai/api/v1/datasets/${datasetId}/STANDARDISED/tables"
+  "https://data.artpark.ai/api/v1/datasets/${datasetId}"
 
-# Download a specific table
+# Download a table
 $ curl -H "X-API-Key: $API_KEY" -O \\
-  "https://dataio.artpark.ai/api/v1/datasets/${datasetId}/STANDARDISED/tables/{table_name}"`,
+  "https://data.artpark.ai/api/v1/datasets/${datasetId}/STANDARDISED/tables/{table}"`,
       },
     ],
   };
@@ -300,21 +268,9 @@ $ curl -H "X-API-Key: $API_KEY" -O \\
           {currentBlocks.map((block, index) => {
             const blockId = `${activeTab}-${index}`;
             return (
-              <div key={blockId} class="rounded-lg overflow-hidden bg-gray-800 border border-gray-700">
-                {/* Block header */}
-                <div class="flex items-center justify-between px-4 py-2 bg-gray-800/80 border-b border-gray-700">
-                  <div class="flex items-center gap-3">
-                    <span class={`px-2 py-0.5 text-xs font-semibold rounded-full ${
-                      block.label === 'Setup'
-                        ? 'bg-blue-900/50 text-blue-300 border border-blue-700'
-                        : 'bg-green-900/50 text-green-300 border border-green-700'
-                    }`}>
-                      {block.label}
-                    </span>
-                    {block.description && (
-                      <span class="text-xs text-gray-400">{block.description}</span>
-                    )}
-                  </div>
+              <div key={blockId} class="rounded-lg overflow-hidden bg-gray-800/50">
+                {/* Code header with copy button */}
+                <div class="flex items-center justify-end px-3 py-1.5 bg-gray-800/80">
                   <button
                     onClick={() => copyToClipboard(block.code, blockId)}
                     class="flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded transition-colors text-gray-400 hover:text-white hover:bg-gray-700"
@@ -337,7 +293,7 @@ $ curl -H "X-API-Key: $API_KEY" -O \\
                   </button>
                 </div>
                 {/* Code content with syntax highlighting */}
-                <div class="p-4 overflow-x-auto">
+                <div class="px-4 pb-4 overflow-x-auto">
                   <pre class="text-sm text-gray-300 leading-relaxed font-mono">
                     <code>{highlightCode(block.code, activeTab)}</code>
                   </pre>

@@ -1,25 +1,29 @@
 ---
-import DashboardLayout from '../../layouts/DashboardLayout.astro';
-import AccountSettings from '../../components/account/AccountSettings';
+import SettingsLayout from '../../layouts/SettingsLayout.astro';
+import UnifiedAccountSettings from '../../components/account/UnifiedAccountSettings';
 ---
 
-<DashboardLayout title="Account Settings">
+<SettingsLayout title="Account Settings">
   <div class="space-y-6">
-    <div>
-      <h1 class="text-2xl font-bold text-gray-900">Account Settings</h1>
-      <p class="mt-1 text-gray-600">
-        Manage your profile and security settings.
-      </p>
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-bold text-gray-900">Account Settings</h1>
+        <p class="mt-1 text-gray-600">
+          Manage your profile, security, and API access.
+        </p>
+      </div>
+      <a href="/datasets" class="btn-secondary text-sm">
+        Back to Datasets
+      </a>
     </div>
 
-    <AccountSettings client:load />
+    <UnifiedAccountSettings client:load />
   </div>
-</DashboardLayout>
+</SettingsLayout>
 
 <script>
   import { initAuth, requireAuth } from '../../lib/auth';
 
-  // Check auth immediately before doing anything else
   if (!requireAuth()) {
     // Not authenticated, redirecting
   } else {

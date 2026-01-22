@@ -515,6 +515,80 @@ class ApiClient {
       { method: 'POST' }
     );
   }
+
+  async adminSuspendUser(email: string) {
+    return this.request<{ suspended: boolean; email: string }>(
+      `/admin/users/${encodeURIComponent(email)}/suspend`,
+      { method: 'POST' }
+    );
+  }
+
+  async adminUnsuspendUser(email: string) {
+    return this.request<{ unsuspended: boolean; email: string }>(
+      `/admin/users/${encodeURIComponent(email)}/unsuspend`,
+      { method: 'POST' }
+    );
+  }
+
+  async adminDeleteUser(email: string) {
+    return this.request<{ deleted: boolean; email: string }>(
+      `/admin/users/${encodeURIComponent(email)}`,
+      { method: 'DELETE' }
+    );
+  }
+
+  async adminBulkInviteUsers(users: { email: string; display_name?: string; is_admin?: boolean; groups?: string[] }[]) {
+    return this.request<{
+      success: string[];
+      failed: { email: string; error: string }[];
+      total: number;
+    }>('/admin/users/bulk-invite', {
+      method: 'POST',
+      body: JSON.stringify({ users }),
+    });
+  }
+
+  async adminSetUserPermission(email: string, datasetId: string, permission: string) {
+    return this.request<{ set: boolean; email: string; dataset_id: string; permission: string | null }>(
+      `/admin/users/${encodeURIComponent(email)}/permissions`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ dataset_id: datasetId, permission }),
+      }
+    );
+  }
+
+  async adminDeleteGroup(groupEmail: string) {
+    return this.request<{ deleted: boolean; group_email: string }>(
+      `/admin/groups/${encodeURIComponent(groupEmail)}`,
+      { method: 'DELETE' }
+    );
+  }
+
+  async adminSetGroupPermission(groupEmail: string, datasetId: string, permission: string) {
+    return this.request<{ set: boolean; group_email: string; dataset_id: string; permission: string | null }>(
+      `/admin/groups/${encodeURIComponent(groupEmail)}/permissions`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ dataset_id: datasetId, permission }),
+      }
+    );
+  }
+
+  async adminListDatasets(params?: { search?: string; limit?: number; offset?: number }) {
+    const searchParams = new URLSearchParams();
+    if (params?.search) searchParams.set('search', params.search);
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    if (params?.offset) searchParams.set('offset', String(params.offset));
+
+    const query = searchParams.toString();
+    return this.request<{
+      datasets: { ds_id: string; title: string; access_level: string | null }[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(`/admin/datasets${query ? `?${query}` : ''}`);
+  }
 }
 
 export const api = new ApiClient();

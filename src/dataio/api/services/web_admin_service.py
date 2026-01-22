@@ -84,6 +84,7 @@ class WebAdminService(BaseService):
                         "email_verified": u.email_verified,
                         "last_login": u.last_login.isoformat() if u.last_login else None,
                         "created_at": u.created_at.isoformat() if u.created_at else None,
+                        "suspended_at": u.suspended_at.isoformat() if u.suspended_at else None,
                     }
                     for u in users
                 ],
@@ -135,6 +136,8 @@ class WebAdminService(BaseService):
                 "email_verified": user.email_verified,
                 "last_login": user.last_login.isoformat() if user.last_login else None,
                 "created_at": user.created_at.isoformat() if user.created_at else None,
+                "suspended_at": user.suspended_at.isoformat() if user.suspended_at else None,
+                "suspended_by": user.suspended_by,
                 "groups": [g.group_email for g in groups],
                 "permissions": [
                     {
@@ -282,6 +285,453 @@ class WebAdminService(BaseService):
             session.rollback()
             self.logger.error(f"Failed to update user: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to update user")
+        finally:
+            session.close()
+
+    def suspend_user(
+        self,
+        admin_user: User,
+        email: str,
+    ) -> dict:
+        """
+        Suspend a user, preventing them from accessing the platform.
+
+        Args:
+            admin_user: The authenticated admin user
+            email: The user's email address
+
+        Returns:
+            dict: Updated user info
+        """
+        from datetime import datetime, timezone
+
+        self._require_admin(admin_user)
+
+        if admin_user.email == email:
+            raise HTTPException(status_code=400, detail="Cannot suspend yourself")
+
+        session = DBSession()
+        try:
+            user = session.query(User).filter(User.email == email).first()
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            if user.is_group:
+                raise HTTPException(status_code=400, detail="Cannot suspend groups")
+
+            if user.suspended_at:
+                raise HTTPException(status_code=400, detail="User already suspended")
+
+            user.suspended_at = datetime.now(timezone.utc)
+            user.suspended_by = admin_user.email
+            session.commit()
+
+            self.logger.info(f"User suspended: {email} by {admin_user.email}")
+            return {"suspended": True, "email": email}
+        except HTTPException:
+            raise
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Failed to suspend user: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to suspend user")
+        finally:
+            session.close()
+
+    def unsuspend_user(
+        self,
+        admin_user: User,
+        email: str,
+    ) -> dict:
+        """
+        Unsuspend a user, restoring their access to the platform.
+
+        Args:
+            admin_user: The authenticated admin user
+            email: The user's email address
+
+        Returns:
+            dict: Updated user info
+        """
+        self._require_admin(admin_user)
+
+        session = DBSession()
+        try:
+            user = session.query(User).filter(User.email == email).first()
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            if not user.suspended_at:
+                raise HTTPException(status_code=400, detail="User is not suspended")
+
+            user.suspended_at = None
+            user.suspended_by = None
+            session.commit()
+
+            self.logger.info(f"User unsuspended: {email} by {admin_user.email}")
+            return {"unsuspended": True, "email": email}
+        except HTTPException:
+            raise
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Failed to unsuspend user: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to unsuspend user")
+        finally:
+            session.close()
+
+    def delete_user(
+        self,
+        admin_user: User,
+        email: str,
+    ) -> dict:
+        """
+        Delete a user from the platform.
+
+        Args:
+            admin_user: The authenticated admin user
+            email: The user's email address
+
+        Returns:
+            dict: Deletion confirmation
+        """
+        self._require_admin(admin_user)
+
+        if admin_user.email == email:
+            raise HTTPException(status_code=400, detail="Cannot delete yourself")
+
+        session = DBSession()
+        try:
+            user = session.query(User).filter(User.email == email).first()
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            if user.is_group:
+                raise HTTPException(status_code=400, detail="Use delete_group for groups")
+
+            # Delete related data
+            session.query(UserGroup).filter(UserGroup.user_email == email).delete()
+            session.query(UserPermission).filter(UserPermission.user_email == email).delete()
+
+            # Delete user
+            session.delete(user)
+            session.commit()
+
+            self.logger.info(f"User deleted: {email} by {admin_user.email}")
+            return {"deleted": True, "email": email}
+        except HTTPException:
+            raise
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Failed to delete user: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to delete user")
+        finally:
+            session.close()
+
+    def bulk_invite_users(
+        self,
+        admin_user: User,
+        users_data: List[dict],
+    ) -> dict:
+        """
+        Bulk invite users from a list (e.g., CSV upload).
+
+        Args:
+            admin_user: The authenticated admin user
+            users_data: List of user data dicts with 'email', optional 'display_name', 'is_admin', 'groups'
+
+        Returns:
+            dict: Results summary
+        """
+        self._require_admin(admin_user)
+
+        results = {
+            "success": [],
+            "failed": [],
+            "total": len(users_data),
+        }
+
+        for user_data in users_data:
+            email = user_data.get("email", "").strip().lower()
+            if not email:
+                results["failed"].append({"email": "", "error": "Missing email"})
+                continue
+
+            try:
+                self.invite_user(
+                    admin_user=admin_user,
+                    email=email,
+                    display_name=user_data.get("display_name"),
+                    is_admin=user_data.get("is_admin", False),
+                    groups=user_data.get("groups"),
+                )
+                results["success"].append(email)
+            except HTTPException as e:
+                results["failed"].append({"email": email, "error": e.detail})
+            except Exception as e:
+                results["failed"].append({"email": email, "error": str(e)})
+
+        return results
+
+    def set_user_dataset_permission(
+        self,
+        admin_user: User,
+        email: str,
+        dataset_id: str,
+        permission: str,
+    ) -> dict:
+        """
+        Set a user's permission for a specific dataset.
+
+        Args:
+            admin_user: The authenticated admin user
+            email: The user's email address
+            dataset_id: The dataset ID
+            permission: Permission level ('VIEW', 'DOWNLOAD', or 'NONE' to remove)
+
+        Returns:
+            dict: Updated permission info
+        """
+        from dataio.api.database.enums import AccessLevel, ResourceType
+
+        self._require_admin(admin_user)
+
+        session = DBSession()
+        try:
+            # Verify user exists
+            user = session.query(User).filter(User.email == email).first()
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            # Verify dataset exists
+            from dataio.api.database.models import Dataset
+            dataset = session.query(Dataset).filter(Dataset.ds_id == dataset_id).first()
+            if not dataset:
+                raise HTTPException(status_code=404, detail="Dataset not found")
+
+            # Handle removal
+            if permission == "NONE":
+                session.query(UserPermission).filter(
+                    UserPermission.user_email == email,
+                    UserPermission.resource_type == ResourceType.DATASET,
+                    UserPermission.resource_id == dataset_id,
+                ).delete()
+                session.commit()
+                return {"set": True, "email": email, "dataset_id": dataset_id, "permission": None}
+
+            # Validate permission level
+            try:
+                perm_level = AccessLevel[permission]
+            except KeyError:
+                raise HTTPException(status_code=400, detail=f"Invalid permission: {permission}")
+
+            # Check if permission exists
+            existing = session.query(UserPermission).filter(
+                UserPermission.user_email == email,
+                UserPermission.resource_type == ResourceType.DATASET,
+                UserPermission.resource_id == dataset_id,
+            ).first()
+
+            if existing:
+                existing.permission = perm_level
+            else:
+                new_perm = UserPermission(
+                    user_email=email,
+                    resource_type=ResourceType.DATASET,
+                    resource_id=dataset_id,
+                    permission=perm_level,
+                )
+                session.add(new_perm)
+
+            session.commit()
+            self.logger.info(f"Permission set: {email} -> {dataset_id} = {permission} by {admin_user.email}")
+            return {"set": True, "email": email, "dataset_id": dataset_id, "permission": permission}
+        except HTTPException:
+            raise
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Failed to set permission: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to set permission")
+        finally:
+            session.close()
+
+    def delete_group(
+        self,
+        admin_user: User,
+        group_email: str,
+    ) -> dict:
+        """
+        Delete a group from the platform.
+
+        Args:
+            admin_user: The authenticated admin user
+            group_email: The group's email address
+
+        Returns:
+            dict: Deletion confirmation
+        """
+        self._require_admin(admin_user)
+
+        session = DBSession()
+        try:
+            group = session.query(User).filter(
+                User.email == group_email,
+                User.is_group == True
+            ).first()
+            if not group:
+                raise HTTPException(status_code=404, detail="Group not found")
+
+            # Delete memberships
+            session.query(UserGroup).filter(UserGroup.group_email == group_email).delete()
+            # Delete permissions
+            session.query(UserPermission).filter(UserPermission.user_email == group_email).delete()
+            # Delete group
+            session.delete(group)
+            session.commit()
+
+            self.logger.info(f"Group deleted: {group_email} by {admin_user.email}")
+            return {"deleted": True, "group_email": group_email}
+        except HTTPException:
+            raise
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Failed to delete group: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to delete group")
+        finally:
+            session.close()
+
+    def set_group_dataset_permission(
+        self,
+        admin_user: User,
+        group_email: str,
+        dataset_id: str,
+        permission: str,
+    ) -> dict:
+        """
+        Set a group's permission for a specific dataset.
+
+        Args:
+            admin_user: The authenticated admin user
+            group_email: The group's email address
+            dataset_id: The dataset ID
+            permission: Permission level ('VIEW', 'DOWNLOAD', or 'NONE' to remove)
+
+        Returns:
+            dict: Updated permission info
+        """
+        from dataio.api.database.enums import AccessLevel, ResourceType
+
+        self._require_admin(admin_user)
+
+        session = DBSession()
+        try:
+            # Verify group exists
+            group = session.query(User).filter(
+                User.email == group_email,
+                User.is_group == True
+            ).first()
+            if not group:
+                raise HTTPException(status_code=404, detail="Group not found")
+
+            # Verify dataset exists
+            from dataio.api.database.models import Dataset
+            dataset = session.query(Dataset).filter(Dataset.ds_id == dataset_id).first()
+            if not dataset:
+                raise HTTPException(status_code=404, detail="Dataset not found")
+
+            # Handle removal
+            if permission == "NONE":
+                session.query(UserPermission).filter(
+                    UserPermission.user_email == group_email,
+                    UserPermission.resource_type == ResourceType.DATASET,
+                    UserPermission.resource_id == dataset_id,
+                ).delete()
+                session.commit()
+                return {"set": True, "group_email": group_email, "dataset_id": dataset_id, "permission": None}
+
+            # Validate permission level
+            try:
+                perm_level = AccessLevel[permission]
+            except KeyError:
+                raise HTTPException(status_code=400, detail=f"Invalid permission: {permission}")
+
+            # Check if permission exists
+            existing = session.query(UserPermission).filter(
+                UserPermission.user_email == group_email,
+                UserPermission.resource_type == ResourceType.DATASET,
+                UserPermission.resource_id == dataset_id,
+            ).first()
+
+            if existing:
+                existing.permission = perm_level
+            else:
+                new_perm = UserPermission(
+                    user_email=group_email,
+                    resource_type=ResourceType.DATASET,
+                    resource_id=dataset_id,
+                    permission=perm_level,
+                )
+                session.add(new_perm)
+
+            session.commit()
+            self.logger.info(f"Group permission set: {group_email} -> {dataset_id} = {permission} by {admin_user.email}")
+            return {"set": True, "group_email": group_email, "dataset_id": dataset_id, "permission": permission}
+        except HTTPException:
+            raise
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Failed to set group permission: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to set group permission")
+        finally:
+            session.close()
+
+    def list_datasets_for_permissions(
+        self,
+        admin_user: User,
+        search: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        """
+        List datasets available for permission assignment.
+
+        Args:
+            admin_user: The authenticated admin user
+            search: Optional search term
+            limit: Maximum number of results
+            offset: Pagination offset
+
+        Returns:
+            dict: List of datasets
+        """
+        from dataio.api.database.models import Dataset
+
+        self._require_admin(admin_user)
+
+        session = DBSession()
+        try:
+            query = session.query(Dataset)
+
+            if search:
+                query = query.filter(
+                    (Dataset.ds_id.ilike(f"%{search}%")) |
+                    (Dataset.title.ilike(f"%{search}%"))
+                )
+
+            total = query.count()
+            datasets = query.order_by(Dataset.title).offset(offset).limit(limit).all()
+
+            return {
+                "datasets": [
+                    {
+                        "ds_id": d.ds_id,
+                        "title": d.title,
+                        "access_level": d.access_level.value if d.access_level else None,
+                    }
+                    for d in datasets
+                ],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
         finally:
             session.close()
 

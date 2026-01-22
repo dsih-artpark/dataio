@@ -26,7 +26,7 @@ def is_admin(user: User) -> bool:
     """
     if user.is_group:
         raise AuthorizationError("Groups cannot have admin privileges")
-    return user.email == "admin@artpark.in"
+    return user.is_admin is True
 
 
 def determine_highest_permission(permissions: List[AccessLevel]) -> AccessLevel:

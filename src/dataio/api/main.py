@@ -1,8 +1,8 @@
 import os
 import logging
 
-from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -48,6 +48,16 @@ app.add_middleware(
 app.include_router(user_router)
 app.include_router(admin_router)
 app.include_router(web_router)
+
+
+# Global exception handler to ensure all errors return JSON
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An unexpected error occurred. Please try again."},
+    )
 
 app.mount("/docs", StaticFiles(directory="docs/build/", html=True), name="docs")
 

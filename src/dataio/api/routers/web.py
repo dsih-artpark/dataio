@@ -830,3 +830,134 @@ async def admin_reject_user(
     if not user.is_admin:
         raise HTTPException(status_code=403, detail="Admin access required")
     return auth_service.reject_user(email, user.email)
+
+
+@web_router.post("/admin/users/{email}/suspend", tags=["web-admin/users"])
+async def admin_suspend_user(
+    email: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """
+    Suspend a user.
+
+    Requires admin privileges.
+    """
+    return admin_service.suspend_user(user, email)
+
+
+@web_router.post("/admin/users/{email}/unsuspend", tags=["web-admin/users"])
+async def admin_unsuspend_user(
+    email: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """
+    Unsuspend a user.
+
+    Requires admin privileges.
+    """
+    return admin_service.unsuspend_user(user, email)
+
+
+@web_router.delete("/admin/users/{email}", tags=["web-admin/users"])
+async def admin_delete_user(
+    email: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """
+    Delete a user.
+
+    Requires admin privileges.
+    """
+    return admin_service.delete_user(user, email)
+
+
+class BulkInviteRequest(BaseModel):
+    users: List[dict]
+
+
+@web_router.post("/admin/users/bulk-invite", tags=["web-admin/users"])
+async def admin_bulk_invite_users(
+    body: BulkInviteRequest,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """
+    Bulk invite users from a list.
+
+    Requires admin privileges.
+    """
+    return admin_service.bulk_invite_users(user, body.users)
+
+
+class SetPermissionRequest(BaseModel):
+    dataset_id: str
+    permission: str  # 'VIEW', 'DOWNLOAD', or 'NONE'
+
+
+@web_router.post("/admin/users/{email}/permissions", tags=["web-admin/users"])
+async def admin_set_user_permission(
+    email: str,
+    body: SetPermissionRequest,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """
+    Set a user's permission for a dataset.
+
+    Requires admin privileges.
+    """
+    return admin_service.set_user_dataset_permission(
+        user, email, body.dataset_id, body.permission
+    )
+
+
+@web_router.delete("/admin/groups/{group_email}", tags=["web-admin/groups"])
+async def admin_delete_group(
+    group_email: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """
+    Delete a group.
+
+    Requires admin privileges.
+    """
+    return admin_service.delete_group(user, group_email)
+
+
+@web_router.post("/admin/groups/{group_email}/permissions", tags=["web-admin/groups"])
+async def admin_set_group_permission(
+    group_email: str,
+    body: SetPermissionRequest,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """
+    Set a group's permission for a dataset.
+
+    Requires admin privileges.
+    """
+    return admin_service.set_group_dataset_permission(
+        user, group_email, body.dataset_id, body.permission
+    )
+
+
+@web_router.get("/admin/datasets", tags=["web-admin/datasets"])
+async def admin_list_datasets(
+    search: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """
+    List datasets for permission management.
+
+    Requires admin privileges.
+    """
+    return admin_service.list_datasets_for_permissions(
+        user, search=search, limit=limit, offset=offset
+    )

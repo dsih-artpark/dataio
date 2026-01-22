@@ -533,6 +533,11 @@ class WebAuthService(BaseService):
                 "verification_status": verification_status,
             }
 
+        except HTTPException:
+            raise
+        except Exception as e:
+            self.logger.error(f"Registration initiation failed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Registration failed. Please try again.")
         finally:
             session.close()
 

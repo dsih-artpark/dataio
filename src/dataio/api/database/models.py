@@ -129,6 +129,8 @@ class User(Base):
     registered_at = Column(DateTime, nullable=True)
     verified_at = Column(DateTime, nullable=True)
     verified_by = Column(Text, nullable=True)  # Admin email who verified
+    suspended_at = Column(DateTime, nullable=True)  # User suspended timestamp
+    suspended_by = Column(Text, nullable=True)  # Admin email who suspended
 
 
 class UserGroup(Base):

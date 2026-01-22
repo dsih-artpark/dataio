@@ -9,8 +9,6 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { name: 'Datasets', href: '/datasets', icon: 'database' },
-  { name: 'Account', href: '/account', icon: 'user' },
   { name: 'Users', href: '/admin/users', icon: 'users', adminOnly: true },
   { name: 'Groups', href: '/admin/groups', icon: 'users-cog', adminOnly: true },
 ];

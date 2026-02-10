@@ -713,11 +713,11 @@ class WebAuthService(BaseService):
             if not user:
                 raise HTTPException(status_code=404, detail="User not found")
 
-            # Revoke all sessions
-            revoke_all_user_sessions(user_email)
+            # Delete all sessions (must delete, not just revoke, to avoid FK issues)
+            from dataio.api.database.models import UserGroup, UserPermission, Session as SessionModel
+            session.query(SessionModel).filter(SessionModel.user_email == user_email).delete()
 
             # Delete group memberships (no CASCADE on FK)
-            from dataio.api.database.models import UserGroup, UserPermission
             session.query(UserGroup).filter(UserGroup.user_email == user_email).delete()
 
             # Delete permissions (no CASCADE on FK)
@@ -731,6 +731,10 @@ class WebAuthService(BaseService):
 
             # Delete magic link tokens
             session.query(MagicLinkToken).filter(MagicLinkToken.email == user_email).delete()
+
+            # Delete OTP tokens
+            from dataio.api.database.models import OTPToken
+            session.query(OTPToken).filter(OTPToken.email == user_email).delete()
 
             # Delete the user
             session.delete(user)

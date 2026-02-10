@@ -249,6 +249,37 @@ export default function UserList() {
     }
   };
 
+  const handleRevokeInvitation = async (email: string) => {
+    if (!confirm(`Are you sure you want to revoke the invitation for ${email}? This will delete the pending user.`)) {
+      return;
+    }
+
+    setActionLoading(email);
+    try {
+      await api.adminRevokeInvitation(email);
+      setSuccessMsg(`Invitation for ${email} has been revoked`);
+      setTimeout(() => setSuccessMsg(''), 3000);
+      fetchUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to revoke invitation');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleResendInvitation = async (email: string) => {
+    setActionLoading(email);
+    try {
+      await api.adminResendInvitation(email);
+      setSuccessMsg(`Invitation resent to ${email}`);
+      setTimeout(() => setSuccessMsg(''), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to resend invitation');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const fetchUserDetail = async (email: string) => {
     setLoadingDetail(true);
     try {
@@ -906,6 +937,24 @@ export default function UserList() {
                             >
                               {user.is_admin ? 'Remove Admin' : 'Make Admin'}
                             </button>
+                            {!user.email_verified && (
+                              <>
+                                <button
+                                  onClick={() => handleResendInvitation(user.email)}
+                                  class="text-xs px-2 py-1 rounded text-blue-600 hover:bg-blue-50"
+                                  title="Resend invitation email"
+                                >
+                                  Resend
+                                </button>
+                                <button
+                                  onClick={() => handleRevokeInvitation(user.email)}
+                                  class="text-xs px-2 py-1 rounded text-orange-600 hover:bg-orange-50"
+                                  title="Revoke invitation and delete pending user"
+                                >
+                                  Revoke
+                                </button>
+                              </>
+                            )}
                             {user.suspended_at ? (
                               <button
                                 onClick={() => handleUnsuspend(user.email)}

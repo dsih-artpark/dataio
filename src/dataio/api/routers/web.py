@@ -102,6 +102,10 @@ class AccountDeleteVerifyRequest(BaseModel):
     code: str
 
 
+class AcceptInvitationRequest(BaseModel):
+    token: str
+
+
 # =============================================================================
 # Helper Functions
 # =============================================================================
@@ -235,6 +239,33 @@ async def verify_registration(
         email=body.email,
         code=body.code,
         magic_token=body.magic_token,
+        user_agent=user_agent,
+        ip_address=ip_address,
+    )
+
+
+# =============================================================================
+# Invitation Endpoints
+# =============================================================================
+
+
+@web_router.post("/auth/accept-invite", tags=["auth"])
+async def accept_invitation(
+    body: AcceptInvitationRequest,
+    request: Request,
+    auth_service: WebAuthService = Depends(WebAuthService),
+):
+    """
+    Accept an invitation by verifying the magic link token.
+
+    Creates a session and returns tokens for the invited user.
+    Invitation links expire after 48 hours.
+
+    No authentication required.
+    """
+    user_agent, ip_address = get_client_info(request)
+    return auth_service.accept_invitation(
+        token=body.token,
         user_agent=user_agent,
         ip_address=ip_address,
     )
@@ -831,6 +862,42 @@ async def admin_reject_user(
     if not getattr(user, 'is_admin', False):
         raise HTTPException(status_code=403, detail="Admin access required")
     return auth_service.reject_user(email, user.email)
+
+
+@web_router.delete("/admin/users/{email}/invitation", tags=["web-admin/users"])
+async def admin_revoke_invitation(
+    email: str,
+    user: User = Depends(get_current_web_user),
+    auth_service: WebAuthService = Depends(WebAuthService),
+):
+    """
+    Revoke a pending invitation.
+
+    Invalidates the invitation token and deletes the unverified user.
+    Can only be used for users who have not yet accepted their invitation.
+
+    Requires admin privileges.
+    """
+    if not getattr(user, 'is_admin', False):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return auth_service.revoke_invitation(email, user.email)
+
+
+@web_router.post("/admin/users/{email}/resend-invitation", tags=["web-admin/users"])
+async def admin_resend_invitation(
+    email: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """
+    Resend an invitation to a pending user.
+
+    Generates a new invitation link (48-hour expiry) and sends a new email.
+    Can only be used for users who have not yet accepted their invitation.
+
+    Requires admin privileges.
+    """
+    return admin_service.resend_invitation(user, email)
 
 
 @web_router.post("/admin/users/{email}/suspend", tags=["web-admin/users"])

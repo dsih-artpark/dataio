@@ -274,15 +274,15 @@ If you didn't request this code, you can safely ignore this email.
     def send_invite_email(
         self,
         to_email: str,
-        otp_code: str,
+        invitation_link: str,
         inviter_name: Optional[str] = None,
     ) -> bool:
         """
-        Send an invitation email to a new user.
+        Send an invitation email to a new user with a magic link.
 
         Args:
             to_email: Recipient email address
-            otp_code: The OTP code for first login
+            invitation_link: The magic link URL for accepting the invitation
             inviter_name: Optional name of the person who invited them
 
         Returns:
@@ -305,13 +305,17 @@ If you didn't request this code, you can safely ignore this email.
     <div style="background: #ffffff; padding: 30px; border: 1px solid #e0e0e0; border-top: none; border-radius: 0 0 10px 10px;">
         <h2 style="color: #333; margin-top: 0;">Welcome to DataIO!</h2>
         <p>You've been invited{inviter_text} to join DataIO, a dataset management platform.</p>
-        <p>Use the following code to complete your registration:</p>
-        <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
-            <span style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #667eea;">{otp_code}</span>
+        <p>Click the button below to accept your invitation and set up your account:</p>
+        <div style="text-align: center; margin: 25px 0;">
+            <a href="{invitation_link}" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Accept Invitation</a>
         </div>
         <p style="color: #666; font-size: 14px;">
-            This code will expire in 10 minutes. After logging in, you'll be prompted
+            This invitation will expire in 48 hours. After accepting, you'll be prompted
             to set up a passkey for secure, passwordless access.
+        </p>
+        <p style="color: #999; font-size: 12px;">
+            If the button doesn't work, copy and paste this link into your browser:<br>
+            <a href="{invitation_link}" style="color: #667eea; word-break: break-all;">{invitation_link}</a>
         </p>
         <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
         <p style="color: #999; font-size: 12px; margin-bottom: 0;">
@@ -327,13 +331,13 @@ Welcome to DataIO!
 
 You've been invited{inviter_text} to join DataIO, a dataset management platform.
 
-Use the following code to complete your registration:
+Click the link below to accept your invitation and set up your account:
 
-{otp_code}
+{invitation_link}
 
-This code will expire in 10 minutes.
+This invitation will expire in 48 hours.
 
-After logging in, you'll be prompted to set up a passkey for secure, passwordless access.
+After accepting, you'll be prompted to set up a passkey for secure, passwordless access.
 """
 
         return self.send_email(to_email, subject, html_body, text_body)

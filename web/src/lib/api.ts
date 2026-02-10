@@ -205,6 +205,26 @@ class ApiClient {
     return data;
   }
 
+  async acceptInvitation(token: string) {
+    const data = await this.request<{
+      access_token: string;
+      refresh_token: string;
+      user: {
+        email: string;
+        display_name: string | null;
+        is_admin: boolean;
+        email_verified: boolean;
+      };
+      needs_passkey: boolean;
+    }>(
+      '/auth/accept-invite',
+      { method: 'POST', body: JSON.stringify({ token }) },
+      false
+    );
+    this.setTokens(data.access_token, data.refresh_token);
+    return data;
+  }
+
   async logout() {
     if (this.refreshToken) {
       try {
@@ -433,6 +453,20 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  }
+
+  async adminRevokeInvitation(email: string) {
+    return this.request<{ revoked: boolean; email: string; tokens_invalidated: number }>(
+      `/admin/users/${encodeURIComponent(email)}/invitation`,
+      { method: 'DELETE' }
+    );
+  }
+
+  async adminResendInvitation(email: string) {
+    return this.request<{ resent: boolean; email: string }>(
+      `/admin/users/${encodeURIComponent(email)}/resend-invitation`,
+      { method: 'POST' }
+    );
   }
 
   async adminUpdateUser(email: string, data: { display_name?: string; is_admin?: boolean }) {

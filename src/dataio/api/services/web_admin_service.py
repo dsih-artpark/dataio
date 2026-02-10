@@ -14,7 +14,6 @@ from dataio.api.database.config import Session as DBSession
 from dataio.api.database.models import User, UserGroup, UserPermission
 from dataio.api.services.base_service import BaseService
 from dataio.api.services.email_service import EmailService
-from dataio.api.auth.otp import create_otp
 from dataio.api.auth.permissions import is_admin
 
 logger = logging.getLogger(__name__)
@@ -164,7 +163,7 @@ class WebAdminService(BaseService):
         groups: Optional[List[str]] = None,
     ) -> dict:
         """
-        Invite a new user by sending them an OTP email.
+        Invite a new user by sending them a magic link email (expires in 48 hours).
 
         Args:
             admin_user: The authenticated admin user
@@ -176,6 +175,8 @@ class WebAdminService(BaseService):
         Returns:
             dict: Response with status
         """
+        from dataio.api.services.web_auth_service import WebAuthService
+
         self._require_admin(admin_user)
 
         session = DBSession()
@@ -211,18 +212,20 @@ class WebAdminService(BaseService):
                     user_group = UserGroup(group_email=group_email, user_email=email)
                     session.add(user_group)
 
-            # Generate OTP for invitation before final commit
-            try:
-                otp_code, _ = create_otp(email, purpose="invite")
-            except ValueError as e:
-                session.rollback()
-                raise HTTPException(status_code=429, detail=str(e))
-
             session.commit()
 
-            # Send invitation email
+            # Generate invitation magic link (48-hour expiry)
+            auth_service = WebAuthService()
+            invitation_link = auth_service.get_invitation_link(
+                email=email,
+                invited_by=admin_user.email,
+            )
+
+            # Send invitation email with magic link
             if not self.email_service.send_invite_email(
-                email, otp_code, admin_user.display_name or admin_user.email
+                to_email=email,
+                invitation_link=invitation_link,
+                inviter_name=admin_user.display_name or admin_user.email,
             ):
                 self.logger.error(f"Failed to send invitation email to: {email}")
                 raise HTTPException(
@@ -240,6 +243,69 @@ class WebAdminService(BaseService):
             session.rollback()
             self.logger.error(f"Failed to invite user: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to invite user")
+        finally:
+            session.close()
+
+    def resend_invitation(
+        self,
+        admin_user: User,
+        email: str,
+    ) -> dict:
+        """
+        Resend an invitation email to a pending user.
+
+        Args:
+            admin_user: The authenticated admin user
+            email: The user's email address
+
+        Returns:
+            dict: Response with status
+        """
+        from dataio.api.services.web_auth_service import WebAuthService
+
+        self._require_admin(admin_user)
+
+        session = DBSession()
+        try:
+            # Check if user exists
+            user = session.query(User).filter(User.email == email).first()
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            # Check if user has already accepted the invitation
+            if user.email_verified:
+                raise HTTPException(
+                    status_code=400,
+                    detail="User has already accepted their invitation"
+                )
+
+            # Generate new invitation magic link (48-hour expiry)
+            auth_service = WebAuthService()
+            invitation_link = auth_service.get_invitation_link(
+                email=email,
+                invited_by=admin_user.email,
+            )
+
+            # Send invitation email with magic link
+            if not self.email_service.send_invite_email(
+                to_email=email,
+                invitation_link=invitation_link,
+                inviter_name=admin_user.display_name or admin_user.email,
+            ):
+                self.logger.error(f"Failed to resend invitation email to: {email}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to send invitation email"
+                )
+
+            self.logger.info(f"Invitation resent: {email} by {admin_user.email}")
+            return {"resent": True, "email": email}
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to resend invitation: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to resend invitation")
         finally:
             session.close()
 

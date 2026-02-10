@@ -37,6 +37,7 @@ from dataio.api.auth.passkey import (
 
 # Magic link configuration
 MAGIC_LINK_EXPIRY_MINUTES = int(os.getenv("MAGIC_LINK_EXPIRY_MINUTES", "30"))
+INVITATION_LINK_EXPIRY_HOURS = int(os.getenv("INVITATION_LINK_EXPIRY_HOURS", "48"))
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 logger = logging.getLogger(__name__)
@@ -858,5 +859,255 @@ class WebAuthService(BaseService):
             session.rollback()
             self.logger.error(f"User rejection failed: {str(e)}")
             raise HTTPException(status_code=500, detail="Rejection failed")
+        finally:
+            session.close()
+
+    # =============================================================================
+    # Invitation Methods
+    # =============================================================================
+
+    def create_invitation_token(self, email: str, invited_by: str) -> str:
+        """
+        Create an invitation magic link token with 48-hour expiry.
+
+        Args:
+            email: The invited user's email
+            invited_by: Email of admin who sent the invitation
+
+        Returns:
+            str: The invitation token
+        """
+        token = secrets.token_urlsafe(32)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=INVITATION_LINK_EXPIRY_HOURS)
+
+        session = DBSession()
+        try:
+            # Invalidate any existing unused invitation tokens for this email
+            session.query(MagicLinkToken).filter(
+                MagicLinkToken.email == email,
+                MagicLinkToken.purpose == "invitation",
+                MagicLinkToken.used_at.is_(None),
+            ).update({"used_at": datetime.now(timezone.utc)})
+
+            magic_link = MagicLinkToken(
+                email=email,
+                token=token,
+                purpose="invitation",
+                expires_at=expires_at,
+                invited_by=invited_by,
+            )
+            session.add(magic_link)
+            session.commit()
+            return token
+        finally:
+            session.close()
+
+    def get_invitation_link(self, email: str, invited_by: str) -> str:
+        """
+        Create invitation token and return the full magic link URL.
+
+        Args:
+            email: The invited user's email
+            invited_by: Email of admin who sent the invitation
+
+        Returns:
+            str: The full invitation URL
+        """
+        token = self.create_invitation_token(email, invited_by)
+        return f"{FRONTEND_URL}/accept-invite?token={token}"
+
+    def accept_invitation(
+        self,
+        token: str,
+        user_agent: Optional[str] = None,
+        ip_address: Optional[str] = None,
+    ) -> dict:
+        """
+        Accept an invitation by verifying the magic link token.
+
+        Args:
+            token: The invitation token
+            user_agent: Optional browser user agent
+            ip_address: Optional client IP address
+
+        Returns:
+            dict: Response with tokens and user info
+
+        Raises:
+            HTTPException: If token is invalid or expired
+        """
+        session = DBSession()
+        try:
+            # Find and validate the invitation token
+            magic_link = session.query(MagicLinkToken).filter(
+                MagicLinkToken.token == token,
+                MagicLinkToken.purpose == "invitation",
+                MagicLinkToken.used_at.is_(None),
+                MagicLinkToken.expires_at > datetime.now(timezone.utc),
+            ).first()
+
+            if not magic_link:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Invalid or expired invitation link"
+                )
+
+            email = magic_link.email
+
+            # Get the user (should exist, created during invite)
+            user = session.query(User).filter(User.email == email).first()
+            if not user:
+                raise HTTPException(
+                    status_code=404,
+                    detail="User not found. The invitation may have been revoked."
+                )
+
+            # Check if user is already verified
+            if user.email_verified:
+                raise HTTPException(
+                    status_code=400,
+                    detail="This invitation has already been used. Please sign in."
+                )
+
+            # Mark token as used
+            magic_link.used_at = datetime.now(timezone.utc)
+
+            # Update user as verified
+            now = datetime.now(timezone.utc)
+            user.email_verified = True
+            user.last_login = now
+            user.verification_status = "verified"
+            user.verified_at = now
+
+            session.commit()
+
+            # Create tokens
+            access_token = create_access_token(email)
+            refresh_token, _, expires_at = create_refresh_token(email)
+
+            # Store session
+            create_session(
+                user_email=email,
+                refresh_token=refresh_token,
+                expires_at=expires_at,
+                user_agent=user_agent,
+                ip_address=ip_address,
+            )
+
+            # Check if user needs passkey setup
+            needs_passkey = not has_passkey(email)
+
+            self.logger.info(f"Invitation accepted: {email}")
+            return {
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "token_type": "bearer",
+                "user": {
+                    "email": user.email,
+                    "display_name": user.display_name,
+                    "is_admin": user.is_admin,
+                    "email_verified": user.email_verified,
+                },
+                "needs_passkey": needs_passkey,
+            }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Invitation acceptance failed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to accept invitation")
+        finally:
+            session.close()
+
+    def revoke_invitation(self, email: str, admin_email: str) -> dict:
+        """
+        Revoke a pending invitation.
+
+        Args:
+            email: The invited user's email
+            admin_email: The admin performing the revocation
+
+        Returns:
+            dict: Response with status
+        """
+        session = DBSession()
+        try:
+            # Find the user
+            user = session.query(User).filter(User.email == email).first()
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            # Check if user has already accepted the invitation
+            if user.email_verified:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot revoke invitation for a verified user"
+                )
+
+            # Invalidate any unused invitation tokens
+            invalidated = session.query(MagicLinkToken).filter(
+                MagicLinkToken.email == email,
+                MagicLinkToken.purpose == "invitation",
+                MagicLinkToken.used_at.is_(None),
+            ).update({"used_at": datetime.now(timezone.utc)})
+
+            # Delete the unverified user
+            # First, delete group memberships
+            from dataio.api.database.models import UserGroup
+            session.query(UserGroup).filter(UserGroup.user_email == email).delete()
+
+            # Delete the user
+            session.delete(user)
+            session.commit()
+
+            self.logger.info(f"Invitation revoked: {email} by {admin_email}")
+            return {
+                "revoked": True,
+                "email": email,
+                "tokens_invalidated": invalidated,
+            }
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Invitation revocation failed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to revoke invitation")
+        finally:
+            session.close()
+
+    def get_invitation_status(self, email: str) -> dict:
+        """
+        Get the status of an invitation for a user.
+
+        Args:
+            email: The user's email
+
+        Returns:
+            dict: Invitation status info
+        """
+        session = DBSession()
+        try:
+            # Find the user
+            user = session.query(User).filter(User.email == email).first()
+            if not user:
+                return {"exists": False}
+
+            # Check for pending invitation token
+            pending_token = session.query(MagicLinkToken).filter(
+                MagicLinkToken.email == email,
+                MagicLinkToken.purpose == "invitation",
+                MagicLinkToken.used_at.is_(None),
+                MagicLinkToken.expires_at > datetime.now(timezone.utc),
+            ).first()
+
+            return {
+                "exists": True,
+                "email_verified": user.email_verified,
+                "has_pending_invitation": pending_token is not None,
+                "invitation_expires_at": pending_token.expires_at.isoformat() if pending_token else None,
+                "invited_by": pending_token.invited_by if pending_token else None,
+            }
         finally:
             session.close()

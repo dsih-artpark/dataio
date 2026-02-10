@@ -1029,3 +1029,167 @@ async def admin_list_datasets(
     return admin_service.list_datasets_for_permissions(
         user, search=search, limit=limit, offset=offset
     )
+
+
+# =============================================================================
+# Chat Endpoints (AI Assistant)
+# =============================================================================
+
+
+class ChatRequest(BaseModel):
+    message: str
+    session_id: Optional[str] = None
+    history: Optional[List[dict]] = None
+
+
+class ChatSessionCreate(BaseModel):
+    title: Optional[str] = None
+
+
+@web_router.post("/chat", tags=["chat"])
+async def chat(
+    body: ChatRequest,
+    user: User = Depends(get_current_web_user),
+):
+    """
+    Send a message to the AI assistant and get a response.
+
+    This is a non-streaming endpoint that returns the complete response.
+    For streaming responses, use the /chat/stream endpoint.
+
+    The AI assistant can search datasets, get details, and help users
+    discover data relevant to their needs.
+    """
+    from dataio.api.services.chat_service import ChatService
+
+    chat_service = ChatService()
+    history = body.history or []
+
+    result = await chat_service.chat(
+        user_message=body.message,
+        conversation_history=history,
+        user_email=user.email,
+    )
+
+    return {
+        "response": result["response"],
+        "tool_calls": result["tool_calls"],
+    }
+
+
+@web_router.post("/chat/stream", tags=["chat"])
+async def chat_stream(
+    body: ChatRequest,
+    user: User = Depends(get_current_web_user),
+):
+    """
+    Send a message to the AI assistant and stream the response.
+
+    Returns a Server-Sent Events (SSE) stream with the following event types:
+    - text: Partial text content
+    - tool_use: Tool being called
+    - tool_result: Tool execution result
+    - done: Stream complete
+    - error: Error occurred
+
+    The AI assistant can search datasets, get details, and help users
+    discover data relevant to their needs.
+    """
+    from fastapi.responses import StreamingResponse
+    from dataio.api.services.chat_service import ChatService
+    import json
+
+    chat_service = ChatService()
+    history = body.history or []
+
+    async def generate():
+        async for event in chat_service.chat_stream(
+            user_message=body.message,
+            conversation_history=history,
+            user_email=user.email,
+            session_id=body.session_id,
+        ):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
+
+
+@web_router.get("/chat/sessions", tags=["chat"])
+async def list_chat_sessions(
+    limit: int = 20,
+    offset: int = 0,
+    user: User = Depends(get_current_web_user),
+):
+    """
+    List the user's chat sessions.
+    """
+    from dataio.api.services.chat_service import ChatHistoryService
+
+    history_service = ChatHistoryService()
+    sessions = await history_service.list_sessions(
+        user_email=user.email,
+        limit=limit,
+        offset=offset,
+    )
+    return {"sessions": sessions}
+
+
+@web_router.post("/chat/sessions", tags=["chat"])
+async def create_chat_session(
+    body: ChatSessionCreate,
+    user: User = Depends(get_current_web_user),
+):
+    """
+    Create a new chat session.
+    """
+    from dataio.api.services.chat_service import ChatHistoryService
+
+    history_service = ChatHistoryService()
+    session_id = await history_service.create_session(
+        user_email=user.email,
+        title=body.title,
+    )
+    return {"session_id": session_id}
+
+
+@web_router.get("/chat/sessions/{session_id}", tags=["chat"])
+async def get_chat_session(
+    session_id: str,
+    user: User = Depends(get_current_web_user),
+):
+    """
+    Get chat history for a session.
+    """
+    from dataio.api.services.chat_service import ChatHistoryService
+
+    history_service = ChatHistoryService()
+    history = await history_service.get_session_history(
+        session_id=session_id,
+        user_email=user.email,
+    )
+    return {"session_id": session_id, "messages": history}
+
+
+@web_router.delete("/chat/sessions/{session_id}", tags=["chat"])
+async def delete_chat_session(
+    session_id: str,
+    user: User = Depends(get_current_web_user),
+):
+    """
+    Delete a chat session.
+    """
+    from dataio.api.services.chat_service import ChatHistoryService
+
+    history_service = ChatHistoryService()
+    deleted = await history_service.delete_session(
+        session_id=session_id,
+        user_email=user.email,
+    )
+    return {"deleted": deleted}

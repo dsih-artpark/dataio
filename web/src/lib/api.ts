@@ -609,6 +609,47 @@ class ApiClient {
     );
   }
 
+  // Chat endpoints
+  async chat(message: string, history?: { role: string; content: { text: string }[] }[]) {
+    return this.request<{ response: string; tool_calls: { tool: string; input: Record<string, unknown> }[] }>(
+      '/chat',
+      {
+        method: 'POST',
+        body: JSON.stringify({ message, history }),
+      }
+    );
+  }
+
+  async listChatSessions(limit = 20, offset = 0) {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    return this.request<{ sessions: { id: string; title: string | null; created_at: string; updated_at: string }[] }>(
+      `/chat/sessions?${params}`
+    );
+  }
+
+  async createChatSession(title?: string) {
+    return this.request<{ session_id: string }>(
+      '/chat/sessions',
+      {
+        method: 'POST',
+        body: JSON.stringify({ title }),
+      }
+    );
+  }
+
+  async getChatSession(sessionId: string) {
+    return this.request<{ session_id: string; messages: { role: string; content: string; created_at: string }[] }>(
+      `/chat/sessions/${sessionId}`
+    );
+  }
+
+  async deleteChatSession(sessionId: string) {
+    return this.request<{ deleted: boolean }>(
+      `/chat/sessions/${sessionId}`,
+      { method: 'DELETE' }
+    );
+  }
+
   async adminListDatasets(params?: { search?: string; limit?: number; offset?: number }) {
     const searchParams = new URLSearchParams();
     if (params?.search) searchParams.set('search', params.search);

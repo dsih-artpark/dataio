@@ -133,6 +133,11 @@ WEBAUTHN_ORIGIN=http://localhost:3000      # Frontend URL
 FRONTEND_URL=http://localhost:3000         # Base URL for magic links in emails
 INVITATION_LINK_EXPIRY_HOURS=48            # How long invitation links are valid
 
+# AI Chat Assistant (AWS Bedrock)
+AWS_BEDROCK_REGION=us-east-1               # AWS region for Bedrock
+BEDROCK_MODEL_ID=anthropic.claude-3-5-sonnet-20241022-v2:0  # Claude model to use
+CHAT_MAX_TOOL_ITERATIONS=10                # Max tool calls per message
+
 # CORS
 CORS_ORIGINS=http://localhost:3000,http://localhost:4321
 ```
@@ -160,3 +165,56 @@ If the web auth migration needs to be reverted:
 ```bash
 psql -U postgres -d catalogue -f src/dataio/db/migrations/007_web_auth_rollback.sql
 ```
+
+## AI Chat Assistant (MCP + Bedrock)
+
+### Architecture
+The platform includes an AI-powered chat assistant that helps users discover and explore datasets.
+
+```
+Frontend (DataChat component)
+    │
+    ▼ SSE Stream
+FastAPI Backend (/api/v1/web/chat/stream)
+    │
+    ▼
+Chat Service (Orchestrator)
+    │
+    ├──▶ AWS Bedrock (Claude API)
+    │       ▲
+    │       │ Tool calls
+    │       ▼
+    └──▶ MCP Server (DataIO tools)
+            │
+            ▼
+        Database (datasets, permissions)
+```
+
+### Components
+- **MCP Server** (`src/dataio/mcp/`): Exposes DataIO capabilities as MCP tools
+  - `search_datasets`: Search by query, category, tags
+  - `get_dataset_details`: Get full dataset information
+  - `list_categories`: List available categories
+  - `list_data_owners`: List data providers
+  - `get_download_info`: Get download instructions
+  - `get_dataset_schema`: Get data dictionary
+
+- **Chat Service** (`src/dataio/api/services/chat_service.py`): Orchestrates Bedrock + MCP
+  - Handles the agentic loop (message → tools → response)
+  - Streams responses via SSE
+  - Respects user permissions for dataset access
+
+- **Frontend** (`web/src/components/chat/`): Interactive chat UI
+  - `DataChat.tsx`: Main chat component with streaming
+  - `ChatMessage.tsx`: Message display with markdown
+  - `ToolIndicator.tsx`: Shows tool execution status
+
+### Database Tables (Migration 012)
+- `chat_sessions`: User chat session tracking
+- `chat_messages`: Message history with tool calls
+
+### Running the Chat Feature
+1. Ensure AWS credentials are configured with Bedrock access
+2. Run migration: `psql -U postgres -d catalogue -f src/dataio/db/migrations/012_chat_sessions.sql`
+3. Set environment variables (see above)
+4. Access via `/chat` in the web UI

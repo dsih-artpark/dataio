@@ -280,3 +280,41 @@ class MagicLinkToken(Base):
     expires_at = Column(DateTime, nullable=False)
     used_at = Column(DateTime, nullable=True)
     invited_by = Column(Text, nullable=True)  # Admin email who sent the invitation
+
+
+# =============================================================================
+# Chat Models (AI Assistant)
+# =============================================================================
+
+
+class ChatSession(Base):
+    """Chat sessions for AI assistant conversations."""
+
+    __tablename__ = "chat_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_email = Column(Text, ForeignKey("users.email", ondelete="CASCADE"), nullable=False)
+    title = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    deleted_at = Column(DateTime, nullable=True)
+
+    # Relationships
+    user = relationship("User", backref="chat_sessions")
+    messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
+
+
+class ChatMessage(Base):
+    """Individual messages in a chat session."""
+
+    __tablename__ = "chat_messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False)
+    role = Column(Text, nullable=False)  # 'user', 'assistant', 'system'
+    content = Column(Text, nullable=False)
+    tool_calls = Column(JSONB, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    # Relationship
+    session = relationship("ChatSession", back_populates="messages")

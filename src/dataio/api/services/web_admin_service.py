@@ -477,9 +477,39 @@ class WebAdminService(BaseService):
             if user.is_group:
                 raise HTTPException(status_code=400, detail="Use delete_group for groups")
 
-            # Delete related data
+            # Delete all related data to avoid FK constraint issues
+            from dataio.api.database.models import (
+                Session as SessionModel,
+                UserAPIKey,
+                WebAuthnCredential,
+                MagicLinkToken,
+                OTPToken,
+                WebAuthnChallenge,
+            )
+
+            # Delete sessions
+            session.query(SessionModel).filter(SessionModel.user_email == email).delete()
+
+            # Delete group memberships
             session.query(UserGroup).filter(UserGroup.user_email == email).delete()
+
+            # Delete permissions
             session.query(UserPermission).filter(UserPermission.user_email == email).delete()
+
+            # Delete API keys
+            session.query(UserAPIKey).filter(UserAPIKey.user_email == email).delete()
+
+            # Delete passkeys
+            session.query(WebAuthnCredential).filter(WebAuthnCredential.user_email == email).delete()
+
+            # Delete WebAuthn challenges
+            session.query(WebAuthnChallenge).filter(WebAuthnChallenge.user_email == email).delete()
+
+            # Delete magic link tokens
+            session.query(MagicLinkToken).filter(MagicLinkToken.email == email).delete()
+
+            # Delete OTP tokens
+            session.query(OTPToken).filter(OTPToken.email == email).delete()
 
             # Delete user
             session.delete(user)

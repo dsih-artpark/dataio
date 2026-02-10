@@ -19,7 +19,7 @@ from typing import AsyncGenerator, Any
 import boto3
 from sqlalchemy.orm import Session
 
-from dataio.api.database.config import get_db_session
+from dataio.api.database.config import Session as DBSession
 from dataio.api.database.models import User
 from dataio.api.services.base_service import BaseService
 from dataio.mcp.server import DataIOMCPServer
@@ -281,7 +281,8 @@ class ChatService(BaseService):
 
     async def _get_user_context(self, user_email: str) -> UserContext:
         """Get user context for MCP permission checks."""
-        with get_db_session() as session:
+        session = DBSession()
+        try:
             user = session.query(User).filter(User.email == user_email).first()
             if not user:
                 return UserContext(email=user_email, is_admin=False)
@@ -291,6 +292,8 @@ class ChatService(BaseService):
                 is_admin=user.is_admin,
                 groups=[]  # TODO: Load user groups
             )
+        finally:
+            session.close()
 
     def _get_result_preview(self, data: Any, max_length: int = 100) -> str:
         """Get a short preview of tool result data."""

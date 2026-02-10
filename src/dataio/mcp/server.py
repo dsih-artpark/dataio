@@ -6,11 +6,20 @@ used by AI assistants like Claude via AWS Bedrock.
 """
 
 import logging
+from contextlib import contextmanager
 from typing import Any
 
-from sqlalchemy.orm import Session
+from dataio.api.database.config import Session as DBSession
 
-from dataio.api.database.config import get_db_session
+
+@contextmanager
+def get_db_session():
+    """Context manager for database sessions."""
+    session = DBSession()
+    try:
+        yield session
+    finally:
+        session.close()
 from dataio.api.database.models import Dataset, Collection, DataOwner, Tag
 from dataio.api.auth.permissions import check_dataset_access
 from dataio.mcp.types import (

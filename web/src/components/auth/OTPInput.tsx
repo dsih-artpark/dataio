@@ -1,4 +1,4 @@
-import { useRef, useState } from 'preact/hooks';
+import { useRef, useState, useCallback, useEffect } from 'preact/hooks';
 
 interface OTPInputProps {
   length: number;
@@ -9,6 +9,21 @@ interface OTPInputProps {
 export default function OTPInput({ length, onComplete, disabled = false }: OTPInputProps) {
   const [values, setValues] = useState<string[]>(Array(length).fill(''));
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const hasSubmittedRef = useRef(false);
+
+  // Reset submission guard when disabled changes (allows retry after error)
+  useEffect(() => {
+    if (!disabled) {
+      hasSubmittedRef.current = false;
+    }
+  }, [disabled]);
+
+  // Wrap onComplete to prevent double-submission during single paste/input
+  const handleComplete = useCallback((code: string) => {
+    if (hasSubmittedRef.current) return;
+    hasSubmittedRef.current = true;
+    onComplete(code);
+  }, [onComplete]);
 
   const handleChange = (index: number, value: string) => {
     // Only allow digits
@@ -25,7 +40,7 @@ export default function OTPInput({ length, onComplete, disabled = false }: OTPIn
 
     // Check if complete
     if (newValues.every((v) => v.length === 1)) {
-      onComplete(newValues.join(''));
+      handleComplete(newValues.join(''));
     }
   };
 
@@ -54,7 +69,7 @@ export default function OTPInput({ length, onComplete, disabled = false }: OTPIn
         inputRefs.current[nextEmpty]?.focus();
       } else {
         inputRefs.current[length - 1]?.focus();
-        onComplete(newValues.join(''));
+        handleComplete(newValues.join(''));
       }
     }
   };

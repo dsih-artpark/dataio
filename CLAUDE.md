@@ -129,6 +129,10 @@ WEBAUTHN_RP_ID=localhost                   # Domain for passkeys
 WEBAUTHN_RP_NAME=DataIO
 WEBAUTHN_ORIGIN=http://localhost:3000      # Frontend URL
 
+# Magic Links (Registration & Invitations)
+FRONTEND_URL=http://localhost:3000         # Base URL for magic links in emails
+INVITATION_LINK_EXPIRY_HOURS=48            # How long invitation links are valid
+
 # CORS
 CORS_ORIGINS=http://localhost:3000,http://localhost:4321
 ```

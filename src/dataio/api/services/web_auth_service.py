@@ -716,11 +716,21 @@ class WebAuthService(BaseService):
             # Revoke all sessions
             revoke_all_user_sessions(user_email)
 
+            # Delete group memberships (no CASCADE on FK)
+            from dataio.api.database.models import UserGroup, UserPermission
+            session.query(UserGroup).filter(UserGroup.user_email == user_email).delete()
+
+            # Delete permissions (no CASCADE on FK)
+            session.query(UserPermission).filter(UserPermission.user_email == user_email).delete()
+
             # Delete API keys (CASCADE should handle this, but being explicit)
             session.query(UserAPIKey).filter(UserAPIKey.user_email == user_email).delete()
 
             # Delete passkeys (CASCADE should handle this, but being explicit)
             session.query(WebAuthnCredential).filter(WebAuthnCredential.user_email == user_email).delete()
+
+            # Delete magic link tokens
+            session.query(MagicLinkToken).filter(MagicLinkToken.email == user_email).delete()
 
             # Delete the user
             session.delete(user)

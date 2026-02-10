@@ -10,6 +10,17 @@ from contextlib import contextmanager
 from typing import Any
 
 from dataio.api.database.config import Session as DBSession
+from dataio.api.database.models import Dataset, Collection, DataOwner, Tag, User, UserPermission, UserGroup
+from dataio.api.database.enums import AccessLevel
+from dataio.mcp.types import (
+    ToolResult,
+    ToolError,
+    UserContext,
+    BedrockToolSpec,
+    ToolName,
+)
+
+logger = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -20,17 +31,57 @@ def get_db_session():
         yield session
     finally:
         session.close()
-from dataio.api.database.models import Dataset, Collection, DataOwner, Tag
-from dataio.api.auth.permissions import check_dataset_access
-from dataio.mcp.types import (
-    ToolResult,
-    ToolError,
-    UserContext,
-    BedrockToolSpec,
-    ToolName,
-)
 
-logger = logging.getLogger(__name__)
+
+def check_dataset_access(session, user_email: str, dataset_id: str) -> bool:
+    """
+    Check if a user has access to a dataset.
+
+    Returns True if:
+    - Dataset is public (access_level = DOWNLOAD)
+    - User is admin
+    - User has direct permission
+    - User's group has permission
+    """
+    # Get the dataset
+    dataset = session.query(Dataset).filter(Dataset.ds_id == dataset_id).first()
+    if not dataset:
+        return False
+
+    # Public datasets are accessible to all
+    if dataset.access_level == AccessLevel.DOWNLOAD:
+        return True
+
+    # Get user
+    user = session.query(User).filter(User.email == user_email).first()
+    if not user:
+        return False
+
+    # Admins have access to everything
+    if user.is_admin:
+        return True
+
+    # Check direct permissions
+    direct_perm = session.query(UserPermission).filter(
+        UserPermission.user_email == user_email,
+        UserPermission.resource_type == "DATASET",
+        UserPermission.resource_id == dataset_id
+    ).first()
+    if direct_perm:
+        return True
+
+    # Check group permissions
+    user_groups = session.query(UserGroup).filter(UserGroup.user_email == user_email).all()
+    for ug in user_groups:
+        group_perm = session.query(UserPermission).filter(
+            UserPermission.user_email == ug.group_email,
+            UserPermission.resource_type == "DATASET",
+            UserPermission.resource_id == dataset_id
+        ).first()
+        if group_perm:
+            return True
+
+    return False
 
 
 class DataIOMCPServer:

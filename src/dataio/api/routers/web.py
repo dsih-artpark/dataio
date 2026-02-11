@@ -1040,6 +1040,7 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
     history: Optional[List[dict]] = None
+    provider: Optional[str] = None  # "bedrock" or "openrouter"
 
 
 class ChatSessionCreate(BaseModel):
@@ -1059,10 +1060,12 @@ async def chat(
 
     The AI assistant can search datasets, get details, and help users
     discover data relevant to their needs.
+
+    Supports optional `provider` parameter: "bedrock" (default) or "openrouter".
     """
     from dataio.api.services.chat_service import ChatService
 
-    chat_service = ChatService()
+    chat_service = ChatService(provider=body.provider)
     history = body.history or []
 
     result = await chat_service.chat(
@@ -1094,12 +1097,14 @@ async def chat_stream(
 
     The AI assistant can search datasets, get details, and help users
     discover data relevant to their needs.
+
+    Supports optional `provider` parameter: "bedrock" (default) or "openrouter".
     """
     from fastapi.responses import StreamingResponse
     from dataio.api.services.chat_service import ChatService
     import json
 
-    chat_service = ChatService()
+    chat_service = ChatService(provider=body.provider)
     history = body.history or []
 
     async def generate():

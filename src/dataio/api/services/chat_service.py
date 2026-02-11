@@ -1,22 +1,28 @@
 """
-Chat Service - Orchestrates conversations between users, AWS Bedrock, and MCP tools.
+Chat Service - Orchestrates conversations between users, AI providers, and MCP tools.
 
 This service handles the agentic loop:
 1. Receive user message
-2. Send to Bedrock with MCP tool definitions
+2. Send to AI provider (Bedrock or OpenRouter) with MCP tool definitions
 3. Execute any tool calls
-4. Return tool results to Bedrock
+4. Return tool results to AI provider
 5. Stream final response to user
+
+Supports multiple AI providers:
+- AWS Bedrock (default)
+- OpenRouter (OpenAI-compatible API)
 """
 
 import json
 import logging
 import os
 import uuid
+from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import AsyncGenerator, Any
+from typing import AsyncGenerator, Any, Literal
 
 import boto3
+import httpx
 from sqlalchemy.orm import Session
 
 from dataio.api.database.config import Session as DBSession
@@ -27,10 +33,21 @@ from dataio.mcp.types import UserContext
 
 logger = logging.getLogger(__name__)
 
+# Provider type
+AIProvider = Literal["bedrock", "openrouter"]
+
 # Configuration
+CHAT_PROVIDER = os.getenv("CHAT_PROVIDER", "bedrock").lower()
+MAX_TOOL_ITERATIONS = int(os.getenv("CHAT_MAX_TOOL_ITERATIONS", "10"))
+
+# Bedrock configuration
 BEDROCK_REGION = os.getenv("AWS_BEDROCK_REGION", "us-east-1")
 BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")
-MAX_TOOL_ITERATIONS = int(os.getenv("CHAT_MAX_TOOL_ITERATIONS", "10"))
+
+# OpenRouter configuration
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_MODEL_ID = os.getenv("OPENROUTER_MODEL_ID", "anthropic/claude-3.5-sonnet")
 
 # System prompt for the chat assistant
 SYSTEM_PROMPT = """You are a helpful data assistant for the DataIO platform. Your role is to help users discover, understand, and work with datasets.
@@ -50,6 +67,369 @@ When helping users:
 5. Be transparent about access restrictions - some datasets require permissions
 
 Always be concise and helpful. If the user doesn't have access to a dataset, explain how they might request access through the platform."""
+
+
+# =============================================================================
+# AI Provider Abstraction
+# =============================================================================
+
+
+class AIProviderBase(ABC):
+    """Abstract base class for AI providers."""
+
+    @abstractmethod
+    async def stream_response(
+        self,
+        messages: list[dict],
+        system_prompt: str,
+        tools: list[dict],
+    ) -> AsyncGenerator[dict, None]:
+        """
+        Stream a response from the AI provider.
+
+        Yields standardized events:
+        - {"type": "text", "content": "..."}
+        - {"type": "tool_call", "id": "...", "name": "...", "input": {...}}
+        - {"type": "tool_call_complete"}
+        - {"type": "message_stop", "stop_reason": "end_turn"|"tool_use"}
+        """
+        pass
+
+    @abstractmethod
+    def format_tool_result(self, tool_use_id: str, result: dict) -> dict:
+        """Format a tool result for the provider's expected format."""
+        pass
+
+
+class BedrockProvider(AIProviderBase):
+    """AWS Bedrock provider implementation."""
+
+    def __init__(self):
+        self._client = None
+
+    @property
+    def client(self):
+        """Lazy-load Bedrock client."""
+        if self._client is None:
+            self._client = boto3.client(
+                "bedrock-runtime",
+                region_name=BEDROCK_REGION
+            )
+        return self._client
+
+    def _convert_tools_to_bedrock_format(self, tools: list[dict]) -> dict:
+        """Convert MCP tool definitions to Bedrock format."""
+        return {"tools": tools}
+
+    async def stream_response(
+        self,
+        messages: list[dict],
+        system_prompt: str,
+        tools: list[dict],
+    ) -> AsyncGenerator[dict, None]:
+        """Stream response from Bedrock."""
+        response = self.client.converse_stream(
+            modelId=BEDROCK_MODEL_ID,
+            messages=messages,
+            system=[{"text": system_prompt}],
+            toolConfig=self._convert_tools_to_bedrock_format(tools),
+        )
+
+        current_tool_use = None
+
+        for event in response.get("stream", []):
+            # Content block start
+            if "contentBlockStart" in event:
+                start = event["contentBlockStart"]
+                if "toolUse" in start.get("start", {}):
+                    current_tool_use = {
+                        "id": start["start"]["toolUse"]["toolUseId"],
+                        "name": start["start"]["toolUse"]["name"],
+                        "input": ""
+                    }
+
+            # Content block delta
+            if "contentBlockDelta" in event:
+                delta = event["contentBlockDelta"]["delta"]
+
+                if "text" in delta:
+                    yield {"type": "text", "content": delta["text"]}
+
+                if "toolUse" in delta and current_tool_use:
+                    current_tool_use["input"] += delta["toolUse"].get("input", "")
+
+            # Content block stop
+            if "contentBlockStop" in event:
+                if current_tool_use:
+                    # Parse the accumulated input JSON
+                    try:
+                        tool_input = json.loads(current_tool_use["input"]) if current_tool_use["input"] else {}
+                    except json.JSONDecodeError:
+                        tool_input = {}
+
+                    yield {
+                        "type": "tool_call",
+                        "id": current_tool_use["id"],
+                        "name": current_tool_use["name"],
+                        "input": tool_input
+                    }
+                    current_tool_use = None
+
+            # Message stop
+            if "messageStop" in event:
+                stop_reason = event["messageStop"].get("stopReason")
+                yield {
+                    "type": "message_stop",
+                    "stop_reason": "tool_use" if stop_reason == "tool_use" else "end_turn"
+                }
+
+    def format_tool_result(self, tool_use_id: str, result: dict) -> dict:
+        """Format tool result for Bedrock."""
+        return {
+            "toolResult": {
+                "toolUseId": tool_use_id,
+                "content": [{"json": result}]
+            }
+        }
+
+    def format_assistant_content(self, tool_calls: list[dict]) -> list[dict]:
+        """Format assistant content with tool calls for Bedrock."""
+        return [
+            {
+                "toolUse": {
+                    "toolUseId": tc["id"],
+                    "name": tc["name"],
+                    "input": tc["input"]
+                }
+            }
+            for tc in tool_calls
+        ]
+
+
+class OpenRouterProvider(AIProviderBase):
+    """OpenRouter provider implementation (OpenAI-compatible API)."""
+
+    def __init__(self):
+        self._client = None
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        """Get or create async HTTP client."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                base_url=OPENROUTER_BASE_URL,
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "HTTP-Referer": os.getenv("FRONTEND_URL", "http://localhost:3000"),
+                    "X-Title": "DataIO Chat",
+                    "Content-Type": "application/json",
+                },
+                timeout=60.0
+            )
+        return self._client
+
+    def _convert_messages_to_openai_format(self, messages: list[dict], system_prompt: str) -> list[dict]:
+        """Convert Bedrock-style messages to OpenAI format."""
+        openai_messages = [{"role": "system", "content": system_prompt}]
+
+        for msg in messages:
+            role = msg["role"]
+            content = msg.get("content", [])
+
+            if isinstance(content, str):
+                openai_messages.append({"role": role, "content": content})
+            elif isinstance(content, list):
+                # Handle Bedrock-style content blocks
+                text_parts = []
+                tool_calls = []
+                tool_results = []
+
+                for block in content:
+                    if "text" in block:
+                        text_parts.append(block["text"])
+                    elif "toolUse" in block:
+                        tool_use = block["toolUse"]
+                        tool_calls.append({
+                            "id": tool_use["toolUseId"],
+                            "type": "function",
+                            "function": {
+                                "name": tool_use["name"],
+                                "arguments": json.dumps(tool_use["input"])
+                            }
+                        })
+                    elif "toolResult" in block:
+                        tool_result = block["toolResult"]
+                        tool_results.append({
+                            "tool_call_id": tool_result["toolUseId"],
+                            "content": json.dumps(tool_result["content"][0].get("json", {}))
+                        })
+
+                if role == "assistant":
+                    msg_data = {"role": "assistant"}
+                    if text_parts:
+                        msg_data["content"] = " ".join(text_parts)
+                    if tool_calls:
+                        msg_data["tool_calls"] = tool_calls
+                        if "content" not in msg_data:
+                            msg_data["content"] = None
+                    openai_messages.append(msg_data)
+                elif role == "user":
+                    if tool_results:
+                        # Tool results are sent as separate tool role messages
+                        for tr in tool_results:
+                            openai_messages.append({
+                                "role": "tool",
+                                "tool_call_id": tr["tool_call_id"],
+                                "content": tr["content"]
+                            })
+                    elif text_parts:
+                        openai_messages.append({"role": "user", "content": " ".join(text_parts)})
+
+        return openai_messages
+
+    def _convert_tools_to_openai_format(self, tools: list[dict]) -> list[dict]:
+        """Convert Bedrock-style tool definitions to OpenAI format."""
+        openai_tools = []
+        for tool in tools:
+            openai_tool = {
+                "type": "function",
+                "function": {
+                    "name": tool["toolSpec"]["name"],
+                    "description": tool["toolSpec"]["description"],
+                    "parameters": tool["toolSpec"]["inputSchema"]["json"]
+                }
+            }
+            openai_tools.append(openai_tool)
+        return openai_tools
+
+    async def stream_response(
+        self,
+        messages: list[dict],
+        system_prompt: str,
+        tools: list[dict],
+    ) -> AsyncGenerator[dict, None]:
+        """Stream response from OpenRouter."""
+        openai_messages = self._convert_messages_to_openai_format(messages, system_prompt)
+        openai_tools = self._convert_tools_to_openai_format(tools)
+
+        request_body = {
+            "model": OPENROUTER_MODEL_ID,
+            "messages": openai_messages,
+            "tools": openai_tools if openai_tools else None,
+            "stream": True,
+        }
+
+        # Remove None values
+        request_body = {k: v for k, v in request_body.items() if v is not None}
+
+        async with self.client.stream("POST", "/chat/completions", json=request_body) as response:
+            if response.status_code != 200:
+                error_text = await response.aread()
+                logger.error(f"OpenRouter error: {response.status_code} - {error_text}")
+                raise Exception(f"OpenRouter API error: {response.status_code}")
+
+            current_tool_calls: dict[int, dict] = {}
+            finish_reason = None
+
+            async for line in response.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+
+                data_str = line[6:].strip()
+                if data_str == "[DONE]":
+                    break
+
+                try:
+                    data = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+
+                choices = data.get("choices", [])
+                if not choices:
+                    continue
+
+                choice = choices[0]
+                delta = choice.get("delta", {})
+                finish_reason = choice.get("finish_reason")
+
+                # Handle text content
+                if "content" in delta and delta["content"]:
+                    yield {"type": "text", "content": delta["content"]}
+
+                # Handle tool calls
+                if "tool_calls" in delta:
+                    for tc in delta["tool_calls"]:
+                        idx = tc.get("index", 0)
+                        if idx not in current_tool_calls:
+                            current_tool_calls[idx] = {
+                                "id": tc.get("id", ""),
+                                "name": "",
+                                "arguments": ""
+                            }
+
+                        if tc.get("id"):
+                            current_tool_calls[idx]["id"] = tc["id"]
+
+                        func = tc.get("function", {})
+                        if func.get("name"):
+                            current_tool_calls[idx]["name"] = func["name"]
+                        if func.get("arguments"):
+                            current_tool_calls[idx]["arguments"] += func["arguments"]
+
+            # Emit completed tool calls
+            for idx in sorted(current_tool_calls.keys()):
+                tc = current_tool_calls[idx]
+                try:
+                    tool_input = json.loads(tc["arguments"]) if tc["arguments"] else {}
+                except json.JSONDecodeError:
+                    tool_input = {}
+
+                yield {
+                    "type": "tool_call",
+                    "id": tc["id"],
+                    "name": tc["name"],
+                    "input": tool_input
+                }
+
+            # Emit stop reason
+            stop_reason = "tool_use" if finish_reason == "tool_calls" else "end_turn"
+            yield {"type": "message_stop", "stop_reason": stop_reason}
+
+    def format_tool_result(self, tool_use_id: str, result: dict) -> dict:
+        """Format tool result for OpenRouter (stored in Bedrock format for consistency)."""
+        return {
+            "toolResult": {
+                "toolUseId": tool_use_id,
+                "content": [{"json": result}]
+            }
+        }
+
+    def format_assistant_content(self, tool_calls: list[dict]) -> list[dict]:
+        """Format assistant content with tool calls (Bedrock format for storage)."""
+        return [
+            {
+                "toolUse": {
+                    "toolUseId": tc["id"],
+                    "name": tc["name"],
+                    "input": tc["input"]
+                }
+            }
+            for tc in tool_calls
+        ]
+
+
+def get_ai_provider(provider: AIProvider | None = None) -> AIProviderBase:
+    """Factory function to get the appropriate AI provider."""
+    provider_name = provider or CHAT_PROVIDER
+
+    if provider_name == "openrouter":
+        if not OPENROUTER_API_KEY:
+            raise ValueError("OPENROUTER_API_KEY environment variable is required for OpenRouter provider")
+        return OpenRouterProvider()
+    elif provider_name == "bedrock":
+        return BedrockProvider()
+    else:
+        raise ValueError(f"Unknown AI provider: {provider_name}")
 
 
 class ChatMessage:
@@ -76,27 +456,29 @@ class ChatMessage:
 
 class ChatService(BaseService):
     """
-    Service for handling chat conversations with Bedrock + MCP.
+    Service for handling chat conversations with AI providers + MCP.
+
+    Supports multiple AI providers:
+    - bedrock: AWS Bedrock (default)
+    - openrouter: OpenRouter (OpenAI-compatible API)
     """
 
-    def __init__(self):
+    def __init__(self, provider: AIProvider | None = None):
         super().__init__()
         self.mcp_server = DataIOMCPServer()
-        self._bedrock_client = None
+        self._provider_name = provider or CHAT_PROVIDER
+        self._ai_provider: AIProviderBase | None = None
 
     @property
-    def bedrock(self):
-        """Lazy-load Bedrock client."""
-        if self._bedrock_client is None:
-            self._bedrock_client = boto3.client(
-                "bedrock-runtime",
-                region_name=BEDROCK_REGION
-            )
-        return self._bedrock_client
+    def ai_provider(self) -> AIProviderBase:
+        """Lazy-load AI provider."""
+        if self._ai_provider is None:
+            self._ai_provider = get_ai_provider(self._provider_name)
+        return self._ai_provider
 
-    def get_tools_config(self) -> dict:
-        """Get tool configuration for Bedrock."""
-        return {"tools": self.mcp_server.get_tool_definitions()}
+    def get_tools(self) -> list[dict]:
+        """Get tool definitions for the AI provider."""
+        return self.mcp_server.get_tool_definitions()
 
     async def chat_stream(
         self,
@@ -131,108 +513,95 @@ class ChatService(BaseService):
         messages = conversation_history.copy()
         messages.append({"role": "user", "content": [{"text": user_message}]})
 
+        # Get tools
+        tools = self.get_tools()
+
         # Agentic loop
         iteration = 0
         while iteration < MAX_TOOL_ITERATIONS:
             iteration += 1
 
             try:
-                # Call Bedrock
-                response = self.bedrock.converse_stream(
-                    modelId=BEDROCK_MODEL_ID,
+                # Collect tool calls from this iteration
+                tool_calls: list[dict] = []
+
+                # Stream response from provider
+                async for event in self.ai_provider.stream_response(
                     messages=messages,
-                    system=[{"text": SYSTEM_PROMPT}],
-                    toolConfig=self.get_tools_config(),
-                )
+                    system_prompt=SYSTEM_PROMPT,
+                    tools=tools,
+                ):
+                    event_type = event.get("type")
 
-                # Process streaming response
-                assistant_content = []
-                current_tool_use = None
+                    if event_type == "text":
+                        yield {"type": "text", "content": event["content"]}
 
-                for event in response.get("stream", []):
-                    # Content block start
-                    if "contentBlockStart" in event:
-                        start = event["contentBlockStart"]
-                        if "toolUse" in start.get("start", {}):
-                            current_tool_use = {
-                                "toolUseId": start["start"]["toolUse"]["toolUseId"],
-                                "name": start["start"]["toolUse"]["name"],
-                                "input": ""
-                            }
+                    elif event_type == "tool_call":
+                        tool_calls.append({
+                            "id": event["id"],
+                            "name": event["name"],
+                            "input": event["input"]
+                        })
 
-                    # Content block delta
-                    if "contentBlockDelta" in event:
-                        delta = event["contentBlockDelta"]["delta"]
+                    elif event_type == "message_stop":
+                        stop_reason = event.get("stop_reason")
 
-                        if "text" in delta:
-                            yield {"type": "text", "content": delta["text"]}
-
-                        if "toolUse" in delta and current_tool_use:
-                            current_tool_use["input"] += delta["toolUse"].get("input", "")
-
-                    # Content block stop
-                    if "contentBlockStop" in event:
-                        if current_tool_use:
-                            # Parse the accumulated input JSON
-                            try:
-                                tool_input = json.loads(current_tool_use["input"]) if current_tool_use["input"] else {}
-                            except json.JSONDecodeError:
-                                tool_input = {}
-
-                            assistant_content.append({
-                                "toolUse": {
-                                    "toolUseId": current_tool_use["toolUseId"],
-                                    "name": current_tool_use["name"],
-                                    "input": tool_input
-                                }
-                            })
-                            current_tool_use = None
-
-                    # Message stop
-                    if "messageStop" in event:
-                        stop_reason = event["messageStop"].get("stopReason")
-
-                        if stop_reason == "tool_use":
+                        if stop_reason == "tool_use" and tool_calls:
                             # Execute tools and continue loop
                             yield {"type": "tool_use_start"}
 
                             tool_results = []
-                            for block in assistant_content:
-                                if "toolUse" in block:
-                                    tool_use = block["toolUse"]
-                                    yield {
-                                        "type": "tool_use",
-                                        "tool": tool_use["name"],
-                                        "input": tool_use["input"]
-                                    }
+                            for tc in tool_calls:
+                                yield {
+                                    "type": "tool_use",
+                                    "tool": tc["name"],
+                                    "input": tc["input"]
+                                }
 
-                                    # Execute the tool
-                                    result = await self.mcp_server.execute_tool(
-                                        tool_use["name"],
-                                        tool_use["input"],
-                                        user_context
+                                # Execute the tool
+                                result = await self.mcp_server.execute_tool(
+                                    tc["name"],
+                                    tc["input"],
+                                    user_context
+                                )
+
+                                yield {
+                                    "type": "tool_result",
+                                    "tool": tc["name"],
+                                    "success": result.success,
+                                    "preview": self._get_result_preview(result.data)
+                                }
+
+                                tool_results.append(
+                                    self.ai_provider.format_tool_result(
+                                        tc["id"],
+                                        result.data if result.success else {"error": result.error}
                                     )
-
-                                    yield {
-                                        "type": "tool_result",
-                                        "tool": tool_use["name"],
-                                        "success": result.success,
-                                        "preview": self._get_result_preview(result.data)
-                                    }
-
-                                    tool_results.append({
-                                        "toolResult": {
-                                            "toolUseId": tool_use["toolUseId"],
-                                            "content": [{"json": result.data if result.success else {"error": result.error}}]
-                                        }
-                                    })
+                                )
 
                             # Add assistant message and tool results to history
+                            # Use provider-specific formatting for assistant content
+                            if hasattr(self.ai_provider, 'format_assistant_content'):
+                                assistant_content = self.ai_provider.format_assistant_content(tool_calls)
+                            else:
+                                assistant_content = [
+                                    {
+                                        "toolUse": {
+                                            "toolUseId": tc["id"],
+                                            "name": tc["name"],
+                                            "input": tc["input"]
+                                        }
+                                    }
+                                    for tc in tool_calls
+                                ]
+
                             messages.append({"role": "assistant", "content": assistant_content})
                             messages.append({"role": "user", "content": tool_results})
 
+                            # Reset for next iteration
+                            tool_calls = []
                             # Continue the loop
-                            continue
+                            break
                         else:
                             # End of response
                             yield {"type": "done"}

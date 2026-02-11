@@ -133,10 +133,18 @@ WEBAUTHN_ORIGIN=http://localhost:3000      # Frontend URL
 FRONTEND_URL=http://localhost:3000         # Base URL for magic links in emails
 INVITATION_LINK_EXPIRY_HOURS=48            # How long invitation links are valid
 
-# AI Chat Assistant (AWS Bedrock)
+# AI Chat Assistant
+CHAT_PROVIDER=bedrock                      # "bedrock" (default) or "openrouter"
+CHAT_MAX_TOOL_ITERATIONS=10                # Max tool calls per message
+
+# AWS Bedrock (when CHAT_PROVIDER=bedrock)
 AWS_BEDROCK_REGION=us-east-1               # AWS region for Bedrock
 BEDROCK_MODEL_ID=anthropic.claude-3-5-sonnet-20241022-v2:0  # Claude model to use
-CHAT_MAX_TOOL_ITERATIONS=10                # Max tool calls per message
+
+# OpenRouter (when CHAT_PROVIDER=openrouter)
+OPENROUTER_API_KEY=<your-api-key>          # Get from https://openrouter.ai/keys
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1  # Optional, default shown
+OPENROUTER_MODEL_ID=anthropic/claude-3.5-sonnet   # Model to use
 
 # CORS
 CORS_ORIGINS=http://localhost:3000,http://localhost:4321
@@ -166,21 +174,22 @@ If the web auth migration needs to be reverted:
 psql -U postgres -d catalogue -f src/dataio/db/migrations/007_web_auth_rollback.sql
 ```
 
-## AI Chat Assistant (MCP + Bedrock)
+## AI Chat Assistant (Multi-Provider)
 
 ### Architecture
 The platform includes an AI-powered chat assistant that helps users discover and explore datasets.
+Supports multiple AI providers: AWS Bedrock (default) and OpenRouter.
 
 ```
 Frontend (DataChat component)
     │
-    ▼ SSE Stream
+    ▼ SSE Stream (+ optional provider param)
 FastAPI Backend (/api/v1/web/chat/stream)
     │
     ▼
 Chat Service (Orchestrator)
     │
-    ├──▶ AWS Bedrock (Claude API)
+    ├──▶ AI Provider (Bedrock or OpenRouter)
     │       ▲
     │       │ Tool calls
     │       ▼
@@ -189,6 +198,18 @@ Chat Service (Orchestrator)
             ▼
         Database (datasets, permissions)
 ```
+
+### AI Providers
+The chat service supports multiple AI providers via an abstraction layer:
+
+- **AWS Bedrock** (default): Uses boto3 with the Converse API
+  - Requires AWS credentials with Bedrock access
+  - Model: `anthropic.claude-3-5-sonnet-20241022-v2:0` (configurable)
+
+- **OpenRouter**: OpenAI-compatible API supporting 100+ models
+  - Requires API key from https://openrouter.ai/keys
+  - Model: `anthropic/claude-3.5-sonnet` (configurable)
+  - Supports models from OpenAI, Anthropic, Google, Meta, Mistral, etc.
 
 ### Components
 - **MCP Server** (`src/dataio/mcp/`): Exposes DataIO capabilities as MCP tools
@@ -199,13 +220,14 @@ Chat Service (Orchestrator)
   - `get_download_info`: Get download instructions
   - `get_dataset_schema`: Get data dictionary
 
-- **Chat Service** (`src/dataio/api/services/chat_service.py`): Orchestrates Bedrock + MCP
+- **Chat Service** (`src/dataio/api/services/chat_service.py`): Orchestrates AI + MCP
+  - Provider abstraction layer (`BedrockProvider`, `OpenRouterProvider`)
   - Handles the agentic loop (message → tools → response)
   - Streams responses via SSE
   - Respects user permissions for dataset access
 
 - **Frontend** (`web/src/components/chat/`): Interactive chat UI
-  - `DataChat.tsx`: Main chat component with streaming
+  - `DataChat.tsx`: Main chat component with streaming and provider selector
   - `ChatMessage.tsx`: Message display with markdown
   - `ToolIndicator.tsx`: Shows tool execution status
 
@@ -214,7 +236,22 @@ Chat Service (Orchestrator)
 - `chat_messages`: Message history with tool calls
 
 ### Running the Chat Feature
-1. Ensure AWS credentials are configured with Bedrock access
-2. Run migration: `psql -U postgres -d catalogue -f src/dataio/db/migrations/012_chat_sessions.sql`
-3. Set environment variables (see above)
+1. Configure your chosen provider:
+   - **Bedrock**: Ensure AWS credentials are configured with Bedrock access
+   - **OpenRouter**: Set `OPENROUTER_API_KEY` environment variable
+2. Set `CHAT_PROVIDER` to "bedrock" or "openrouter" (or omit for default)
+3. Run migration: `psql -U postgres -d catalogue -f src/dataio/db/migrations/012_chat_sessions.sql`
 4. Access via `/chat` in the web UI
+
+### Frontend Provider Selection
+The `DataChat` component accepts optional props for provider configuration:
+```tsx
+// Use server default
+<DataChat />
+
+// Force specific provider
+<DataChat provider="openrouter" />
+
+// Allow user to select provider
+<DataChat showProviderSelector={true} />
+```

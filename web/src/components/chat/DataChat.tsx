@@ -16,16 +16,25 @@ interface ActiveTool {
   preview?: string;
 }
 
+type AIProvider = 'bedrock' | 'openrouter';
+
 interface DataChatProps {
   initialMessage?: string;
+  provider?: AIProvider;
+  showProviderSelector?: boolean;
 }
 
-export default function DataChat({ initialMessage }: DataChatProps) {
+export default function DataChat({
+  initialMessage,
+  provider: initialProvider,
+  showProviderSelector = false
+}: DataChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState(initialMessage || '');
   const [isLoading, setIsLoading] = useState(false);
   const [activeTools, setActiveTools] = useState<ActiveTool[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState<AIProvider | undefined>(initialProvider);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -87,6 +96,7 @@ export default function DataChat({ initialMessage }: DataChatProps) {
         body: JSON.stringify({
           message: trimmedInput,
           history: buildHistoryForAPI().slice(0, -1), // Exclude the message we just added
+          provider: selectedProvider,
         }),
       });
 
@@ -213,8 +223,27 @@ export default function DataChat({ initialMessage }: DataChatProps) {
     <div class="flex flex-col h-full bg-white rounded-lg shadow-sm border">
       {/* Header */}
       <div class="px-4 py-3 border-b bg-gray-50 rounded-t-lg">
-        <h2 class="font-semibold text-gray-900">Data Assistant</h2>
-        <p class="text-sm text-gray-500">Ask questions about available datasets</p>
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="font-semibold text-gray-900">Data Assistant</h2>
+            <p class="text-sm text-gray-500">Ask questions about available datasets</p>
+          </div>
+          {showProviderSelector && (
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-gray-500">Provider:</label>
+              <select
+                value={selectedProvider || ''}
+                onChange={(e) => setSelectedProvider(e.currentTarget.value as AIProvider || undefined)}
+                class="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                disabled={isLoading}
+              >
+                <option value="">Default</option>
+                <option value="bedrock">AWS Bedrock</option>
+                <option value="openrouter">OpenRouter</option>
+              </select>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Messages area */}

@@ -1107,14 +1107,24 @@ async def chat_stream(
     chat_service = ChatService(provider=body.provider)
     history = body.history or []
 
+    logger.info(f"Starting chat stream with provider: {body.provider}")
+
     async def generate():
-        async for event in chat_service.chat_stream(
-            user_message=body.message,
-            conversation_history=history,
-            user_email=user.email,
-            session_id=body.session_id,
-        ):
-            yield f"data: {json.dumps(event)}\n\n"
+        try:
+            event_count = 0
+            async for event in chat_service.chat_stream(
+                user_message=body.message,
+                conversation_history=history,
+                user_email=user.email,
+                session_id=body.session_id,
+            ):
+                event_count += 1
+                logger.debug(f"Router yielding event #{event_count}: {event.get('type')}")
+                yield f"data: {json.dumps(event)}\n\n"
+            logger.info(f"Chat stream completed, yielded {event_count} events")
+        except Exception as e:
+            logger.exception(f"Error in chat stream generate: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(
         generate(),

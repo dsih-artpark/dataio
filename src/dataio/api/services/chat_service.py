@@ -210,23 +210,20 @@ class OpenRouterProvider(AIProviderBase):
     """OpenRouter provider implementation (OpenAI-compatible API)."""
 
     def __init__(self):
-        self._client = None
+        pass
 
-    @property
-    def client(self) -> httpx.AsyncClient:
-        """Get or create async HTTP client."""
-        if self._client is None:
-            self._client = httpx.AsyncClient(
-                base_url=OPENROUTER_BASE_URL,
-                headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "HTTP-Referer": os.getenv("FRONTEND_URL", "http://localhost:3000"),
-                    "X-Title": "DataIO Chat",
-                    "Content-Type": "application/json",
-                },
-                timeout=60.0
-            )
-        return self._client
+    def _create_client(self) -> httpx.AsyncClient:
+        """Create a new async HTTP client for each request."""
+        return httpx.AsyncClient(
+            base_url=OPENROUTER_BASE_URL,
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "HTTP-Referer": os.getenv("FRONTEND_URL", "http://localhost:3000"),
+                "X-Title": "DataIO Chat",
+                "Content-Type": "application/json",
+            },
+            timeout=120.0
+        )
 
     def _convert_messages_to_openai_format(self, messages: list[dict], system_prompt: str) -> list[dict]:
         """Convert Bedrock-style messages to OpenAI format."""
@@ -312,6 +309,8 @@ class OpenRouterProvider(AIProviderBase):
         openai_messages = self._convert_messages_to_openai_format(messages, system_prompt)
         openai_tools = self._convert_tools_to_openai_format(tools)
 
+        logger.info(f"OpenRouter request - model: {OPENROUTER_MODEL_ID}, messages: {len(openai_messages)}, tools: {len(openai_tools)}")
+
         request_body = {
             "model": OPENROUTER_MODEL_ID,
             "messages": openai_messages,
@@ -322,78 +321,106 @@ class OpenRouterProvider(AIProviderBase):
         # Remove None values
         request_body = {k: v for k, v in request_body.items() if v is not None}
 
-        async with self.client.stream("POST", "/chat/completions", json=request_body) as response:
-            if response.status_code != 200:
-                error_text = await response.aread()
-                logger.error(f"OpenRouter error: {response.status_code} - {error_text}")
-                raise Exception(f"OpenRouter API error: {response.status_code}")
+        # Create a new client for this request
+        async with self._create_client() as client:
+            async with client.stream("POST", "/chat/completions", json=request_body) as response:
+                if response.status_code != 200:
+                    error_text = await response.aread()
+                    logger.error(f"OpenRouter error: {response.status_code} - {error_text}")
+                    raise Exception(f"OpenRouter API error: {response.status_code}")
 
-            current_tool_calls: dict[int, dict] = {}
-            finish_reason = None
+                current_tool_calls: dict[int, dict] = {}
+                finish_reason = None
+                buffer = ""
+                stream_done = False
 
-            async for line in response.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
+                # Read the stream as text and parse SSE manually
+                async for chunk in response.aiter_text():
+                    if stream_done:
+                        break
 
-                data_str = line[6:].strip()
-                if data_str == "[DONE]":
-                    break
+                    buffer += chunk
+                    logger.debug(f"OpenRouter received chunk: {len(chunk)} bytes")
 
-                try:
-                    data = json.loads(data_str)
-                except json.JSONDecodeError:
-                    continue
+                    # Process complete lines from buffer
+                    while "\n" in buffer:
+                        line, buffer = buffer.split("\n", 1)
+                        line = line.strip()
 
-                choices = data.get("choices", [])
-                if not choices:
-                    continue
+                        if not line:
+                            continue
 
-                choice = choices[0]
-                delta = choice.get("delta", {})
-                finish_reason = choice.get("finish_reason")
+                        if not line.startswith("data: "):
+                            logger.debug(f"Skipping non-data line: {line[:50]}")
+                            continue
 
-                # Handle text content
-                if "content" in delta and delta["content"]:
-                    yield {"type": "text", "content": delta["content"]}
+                        data_str = line[6:].strip()
+                        if data_str == "[DONE]":
+                            logger.info("OpenRouter stream done signal received")
+                            stream_done = True
+                            break
 
-                # Handle tool calls
-                if "tool_calls" in delta:
-                    for tc in delta["tool_calls"]:
-                        idx = tc.get("index", 0)
-                        if idx not in current_tool_calls:
-                            current_tool_calls[idx] = {
-                                "id": tc.get("id", ""),
-                                "name": "",
-                                "arguments": ""
-                            }
+                        try:
+                            data = json.loads(data_str)
+                        except json.JSONDecodeError as e:
+                            logger.debug(f"JSON decode error: {e}, data: {data_str[:100]}")
+                            continue
 
-                        if tc.get("id"):
-                            current_tool_calls[idx]["id"] = tc["id"]
+                        choices = data.get("choices", [])
+                        if not choices:
+                            continue
 
-                        func = tc.get("function", {})
-                        if func.get("name"):
-                            current_tool_calls[idx]["name"] = func["name"]
-                        if func.get("arguments"):
-                            current_tool_calls[idx]["arguments"] += func["arguments"]
+                        choice = choices[0]
+                        delta = choice.get("delta", {})
+                        finish_reason = choice.get("finish_reason") or finish_reason
 
-            # Emit completed tool calls
-            for idx in sorted(current_tool_calls.keys()):
-                tc = current_tool_calls[idx]
-                try:
-                    tool_input = json.loads(tc["arguments"]) if tc["arguments"] else {}
-                except json.JSONDecodeError:
-                    tool_input = {}
+                        # Handle text content
+                        if "content" in delta and delta["content"]:
+                            logger.debug(f"OpenRouter text chunk: {delta['content'][:50]}")
+                            yield {"type": "text", "content": delta["content"]}
 
-                yield {
-                    "type": "tool_call",
-                    "id": tc["id"],
-                    "name": tc["name"],
-                    "input": tool_input
-                }
+                        # Handle tool calls
+                        if "tool_calls" in delta:
+                            logger.debug(f"OpenRouter tool_calls delta: {delta['tool_calls']}")
+                            for tc in delta["tool_calls"]:
+                                idx = tc.get("index", 0)
+                                if idx not in current_tool_calls:
+                                    current_tool_calls[idx] = {
+                                        "id": tc.get("id", ""),
+                                        "name": "",
+                                        "arguments": ""
+                                    }
 
-            # Emit stop reason
-            stop_reason = "tool_use" if finish_reason == "tool_calls" else "end_turn"
-            yield {"type": "message_stop", "stop_reason": stop_reason}
+                                if tc.get("id"):
+                                    current_tool_calls[idx]["id"] = tc["id"]
+
+                                func = tc.get("function", {})
+                                if func.get("name"):
+                                    current_tool_calls[idx]["name"] = func["name"]
+                                if func.get("arguments"):
+                                    current_tool_calls[idx]["arguments"] += func["arguments"]
+
+                # Emit completed tool calls
+                logger.info(f"OpenRouter completed - tool_calls: {len(current_tool_calls)}, finish_reason: {finish_reason}")
+                for idx in sorted(current_tool_calls.keys()):
+                    tc = current_tool_calls[idx]
+                    logger.debug(f"Emitting tool_call: {tc['name']}")
+                    try:
+                        tool_input = json.loads(tc["arguments"]) if tc["arguments"] else {}
+                    except json.JSONDecodeError:
+                        tool_input = {}
+
+                    yield {
+                        "type": "tool_call",
+                        "id": tc["id"],
+                        "name": tc["name"],
+                        "input": tool_input
+                    }
+
+                # Emit stop reason
+                stop_reason = "tool_use" if finish_reason == "tool_calls" else "end_turn"
+                logger.info(f"OpenRouter emitting message_stop with reason: {stop_reason}")
+                yield {"type": "message_stop", "stop_reason": stop_reason}
 
     def format_tool_result(self, tool_use_id: str, result: dict) -> dict:
         """Format tool result for OpenRouter (stored in Bedrock format for consistency)."""
@@ -525,6 +552,8 @@ class ChatService(BaseService):
                 # Collect tool calls from this iteration
                 tool_calls: list[dict] = []
 
+                logger.info(f"Chat stream iteration {iteration} with provider {self._provider_name}")
+
                 # Stream response from provider
                 async for event in self.ai_provider.stream_response(
                     messages=messages,
@@ -532,8 +561,10 @@ class ChatService(BaseService):
                     tools=tools,
                 ):
                     event_type = event.get("type")
+                    logger.debug(f"Received event: {event_type}")
 
                     if event_type == "text":
+                        logger.debug(f"Yielding text: {event['content'][:50] if event['content'] else 'empty'}")
                         yield {"type": "text", "content": event["content"]}
 
                     elif event_type == "tool_call":

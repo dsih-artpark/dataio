@@ -1,0 +1,32 @@
+---
+import SettingsLayout from '../../layouts/SettingsLayout.astro';
+import UnifiedAccountSettings from '../../components/account/UnifiedAccountSettings';
+---
+
+<SettingsLayout title="Account Settings">
+  <div class="space-y-6">
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-bold text-gray-900">Account Settings</h1>
+        <p class="mt-1 text-gray-600">
+          Manage your profile, security, and API access.
+        </p>
+      </div>
+      <a href="/datasets" class="btn-secondary text-sm">
+        Back to Datasets
+      </a>
+    </div>
+
+    <UnifiedAccountSettings client:load />
+  </div>
+</SettingsLayout>
+
+<script>
+  import { initAuth, requireAuth } from '../../lib/auth';
+
+  if (!requireAuth()) {
+    // Not authenticated, redirecting
+  } else {
+    initAuth();
+  }
+</script>

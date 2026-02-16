@@ -14,8 +14,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -153,4 +153,5 @@ data/
 *.nc
 *.geojson
 # AI Files
-CLAUDE.md
+
+web/.astro

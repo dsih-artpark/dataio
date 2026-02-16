@@ -1,0 +1,50 @@
+---
+import UnifiedNav from '../components/common/UnifiedNav';
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description = 'ARTPARK Data Platform - Dataset Management System' } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content={description} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>{title} | ARTPARK Data Platform</title>
+  </head>
+  <body class="min-h-screen bg-gray-50 flex flex-col">
+    <!-- Unified Navigation -->
+    <UnifiedNav client:load />
+
+    <!-- Main content -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <slot />
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-gray-200">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <p class="text-sm text-gray-500">
+            &copy; {new Date().getFullYear()} ARTPARK. Licensed under AGPL-3.0.
+          </p>
+          <nav class="flex flex-wrap gap-x-6 gap-y-2 text-sm text-gray-500">
+            <a href="https://dataio.artpark.ai/docs" target="_blank" rel="noopener noreferrer" class="hover:text-gray-900">Docs</a>
+            <a href="https://github.com/dsih-artpark/dataio" target="_blank" rel="noopener noreferrer" class="hover:text-gray-900">GitHub</a>
+            <a href="https://artpark.in" target="_blank" rel="noopener noreferrer" class="hover:text-gray-900">ARTPARK</a>
+          </nav>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>
+
+<style is:global>
+  @import '../styles/global.css';
+</style>

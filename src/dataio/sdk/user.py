@@ -2,6 +2,7 @@ import gzip
 import json
 import os
 import re
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Union, List, Dict
@@ -10,6 +11,19 @@ import dotenv
 import requests
 import yaml
 from tabulate import tabulate
+
+# API Key prefix for web-generated keys
+API_KEY_PREFIX = os.getenv("API_KEY_PREFIX", "dio_")
+
+
+class LegacyAPIKeyWarning(DeprecationWarning):
+    """Warning issued when using a legacy API key without the 'dio_' prefix."""
+
+    pass
+
+
+# Ensure our deprecation warnings are shown by default
+warnings.filterwarnings("default", category=LegacyAPIKeyWarning)
 
 
 class DatasetList(list):
@@ -30,7 +44,14 @@ class DataIOAPI:
     :type data_dir: str
     :type api_key: str
 
+    .. deprecated::
+        Legacy API keys (without the 'dio_' prefix) are deprecated and will be
+        removed in a future version. Please generate a new API key at
+        https://data.artpark.ai/account
+
     """
+
+    _legacy_key_warning_shown = False
 
     def __init__(
         self,
@@ -53,6 +74,19 @@ class DataIOAPI:
             raise ValueError(
                 "DATAIO_API_KEY is neither set in environment variables nor provided as positional argument"
             )
+
+        # Check if using a legacy API key (without dio_ prefix)
+        self._using_legacy_key = api_key and not api_key.startswith(API_KEY_PREFIX)
+        if self._using_legacy_key and not DataIOAPI._legacy_key_warning_shown:
+            warnings.warn(
+                "You are using a legacy API key (without the 'dio_' prefix). "
+                "Legacy API keys are deprecated and will be removed in a future version. "
+                "Please generate a new API key at https://data.artpark.ai/account",
+                LegacyAPIKeyWarning,
+                stacklevel=2,
+            )
+            DataIOAPI._legacy_key_warning_shown = True
+
         if api_key:
             self.session.headers.update({"X-API-Key": f"{api_key}"})
         if data_dir is None:
@@ -68,6 +102,16 @@ class DataIOAPI:
         """
         url = f"{self.base_url}{endpoint}"
         response = self.session.request(method, url, **kwargs)
+
+        # Check for deprecation header from server
+        if response.headers.get("Deprecation") and not DataIOAPI._legacy_key_warning_shown:
+            deprecation_notice = response.headers.get(
+                "X-Deprecation-Notice",
+                "Your API key is deprecated. Please generate a new one at https://data.artpark.ai/account"
+            )
+            warnings.warn(deprecation_notice, LegacyAPIKeyWarning, stacklevel=3)
+            DataIOAPI._legacy_key_warning_shown = True
+
         response.raise_for_status()
         return response.json()
 

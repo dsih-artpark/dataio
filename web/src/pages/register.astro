@@ -1,0 +1,15 @@
+---
+import AuthLayout from '../layouts/AuthLayout.astro';
+import RegisterForm from '../components/auth/RegisterForm';
+---
+
+<AuthLayout title="Register">
+  <RegisterForm client:load />
+</AuthLayout>
+
+<script>
+  import { redirectIfAuthenticated } from '../lib/auth';
+
+  // If already logged in, redirect to dashboard
+  redirectIfAuthenticated();
+</script>

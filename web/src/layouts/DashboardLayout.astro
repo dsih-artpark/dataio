@@ -1,0 +1,27 @@
+---
+import BaseLayout from './BaseLayout.astro';
+import UnifiedNav from '../components/common/UnifiedNav';
+import Sidebar from '../components/common/Sidebar';
+
+interface Props {
+  title: string;
+}
+
+const { title } = Astro.props;
+---
+
+<BaseLayout title={title}>
+  <div class="min-h-screen bg-gray-50">
+    <UnifiedNav client:load />
+
+    <div class="flex">
+      <Sidebar client:load />
+
+      <main class="flex-1 p-6 lg:ml-64">
+        <div class="max-w-7xl mx-auto">
+          <slot />
+        </div>
+      </main>
+    </div>
+  </div>
+</BaseLayout>

@@ -8,10 +8,13 @@ from sqlalchemy import (
     Date,
     Boolean,
     DateTime,
+    LargeBinary,
+    ARRAY,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship, declarative_base
 from datetime import datetime
+import uuid
 from dataio.api.database.enums import (
     AccessLevel,
     SpatialResolution,
@@ -83,6 +86,11 @@ class Dataset(Base):
     access_level = Column(SQLEnum(AccessLevel), nullable=False)
     additional_metadata = Column(JSONB)
 
+    # Documentation caching fields (synced from file server)
+    readme_md = Column(Text, nullable=True)
+    data_dictionary_json = Column(Text, nullable=True)
+    documentation_synced_at = Column(DateTime, nullable=True)
+
     # Relationships
     collection = relationship("Collection")
     data_owner = relationship("DataOwner")
@@ -112,6 +120,17 @@ class User(Base):
     key = Column(Text, nullable=True)
     is_group = Column(Boolean, nullable=False, default=False)
     is_admin = Column(Boolean, nullable=False, default=False)
+    email_verified = Column(Boolean, nullable=False, default=False)
+    last_login = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    display_name = Column(Text, nullable=True)
+    # Registration and verification fields
+    verification_status = Column(Text, nullable=False, default="verified")  # 'verified', 'pending', 'rejected'
+    registered_at = Column(DateTime, nullable=True)
+    verified_at = Column(DateTime, nullable=True)
+    verified_by = Column(Text, nullable=True)  # Admin email who verified
+    suspended_at = Column(DateTime, nullable=True)  # User suspended timestamp
+    suspended_by = Column(Text, nullable=True)  # Admin email who suspended
 
 
 class UserGroup(Base):
@@ -157,3 +176,145 @@ class RateLimit(Base):
     max_limit_per_minute = Column(Integer, nullable=False, default=5)
     last_access_timestamp = Column(DateTime, nullable=False, default=datetime.now)
     access_point = Column(Text, nullable=False)
+
+
+# =============================================================================
+# Web Authentication Models
+# =============================================================================
+
+
+class Session(Base):
+    """JWT session tracking for web authentication."""
+
+    __tablename__ = "sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_email = Column(Text, ForeignKey("users.email", ondelete="CASCADE"), nullable=False)
+    refresh_token = Column(Text, nullable=False, unique=True)
+    user_agent = Column(Text, nullable=True)
+    ip_address = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+
+    # Relationship
+    user = relationship("User", backref="sessions")
+
+
+class OTPToken(Base):
+    """One-time password tokens for email verification and login."""
+
+    __tablename__ = "otp_tokens"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(Text, nullable=False)
+    code = Column(Text, nullable=False)
+    purpose = Column(Text, nullable=False)  # 'login', 'verify_email', 'invite'
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    attempts = Column(Integer, nullable=False, default=0)
+
+
+class WebAuthnCredential(Base):
+    """WebAuthn/Passkey credentials for passwordless authentication."""
+
+    __tablename__ = "webauthn_credentials"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_email = Column(Text, ForeignKey("users.email", ondelete="CASCADE"), nullable=False)
+    credential_id = Column(Text, nullable=False, unique=True)
+    public_key = Column(LargeBinary, nullable=False)
+    sign_count = Column(Integer, nullable=False, default=0)
+    device_name = Column(Text, nullable=True)
+    transports = Column(ARRAY(Text), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+
+    # Relationship
+    user = relationship("User", backref="webauthn_credentials")
+
+
+class WebAuthnChallenge(Base):
+    """Temporary storage for WebAuthn challenges during registration/authentication."""
+
+    __tablename__ = "webauthn_challenges"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_email = Column(Text, nullable=False)
+    challenge = Column(Text, nullable=False)
+    purpose = Column(Text, nullable=False)  # 'registration', 'authentication'
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+
+
+class UserAPIKey(Base):
+    """User-managed API keys for self-service key management."""
+
+    __tablename__ = "user_api_keys"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_email = Column(Text, ForeignKey("users.email", ondelete="CASCADE"), nullable=False)
+    key_hash = Column(Text, nullable=False)
+    key_prefix = Column(Text, nullable=False)  # First 8 chars for identification
+    name = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+
+    # Relationship
+    user = relationship("User", backref="api_keys")
+
+
+class MagicLinkToken(Base):
+    """Magic link tokens for registration, invitation, and account deletion verification."""
+
+    __tablename__ = "magic_link_tokens"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(Text, nullable=False)
+    token = Column(Text, nullable=False, unique=True)
+    purpose = Column(Text, nullable=False)  # 'registration', 'account_deletion', 'invitation'
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    invited_by = Column(Text, nullable=True)  # Admin email who sent the invitation
+
+
+# =============================================================================
+# Chat Models (AI Assistant)
+# =============================================================================
+
+
+class ChatSession(Base):
+    """Chat sessions for AI assistant conversations."""
+
+    __tablename__ = "chat_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_email = Column(Text, ForeignKey("users.email", ondelete="CASCADE"), nullable=False)
+    title = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    deleted_at = Column(DateTime, nullable=True)
+
+    # Relationships
+    user = relationship("User", backref="chat_sessions")
+    messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
+
+
+class ChatMessage(Base):
+    """Individual messages in a chat session."""
+
+    __tablename__ = "chat_messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False)
+    role = Column(Text, nullable=False)  # 'user', 'assistant', 'system'
+    content = Column(Text, nullable=False)
+    tool_calls = Column(JSONB, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    # Relationship
+    session = relationship("ChatSession", back_populates="messages")

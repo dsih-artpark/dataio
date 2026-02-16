@@ -7,7 +7,7 @@ from fastapi import UploadFile
 from dataio.api.models import VersionType, TableMetadata
 import json
 from pathlib import Path
-from dataio.api.services.base_service import BaseService
+from dataio.api.services.base_service import BaseService, get_aws_access_key_id
 
 dotenv.load_dotenv()
 
@@ -22,7 +22,7 @@ class FilestoreService(BaseService):
     def __init__(self):
         super().__init__()
         self.session = boto3.Session(
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY"),
+            aws_access_key_id=get_aws_access_key_id(),
             aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
         )
         self.s3 = self.session.resource("s3")
@@ -39,12 +39,17 @@ class FilestoreService(BaseService):
         try:
             obj = self.bucket.Object(f"{prefix}/metadata.json")
             return json.loads(obj.get()["Body"].read().decode("utf-8"))
-        except self.s3_client.exceptions.NoSuchKey:
-            self.bucket.put_object(
-                Body=json.dumps({"tables": {}}),
-                Key=f"{prefix}/metadata.json",
-            )
-            return {"tables": {}}
+        except ClientError as e:
+            # Handle NoSuchKey error - create empty metadata if file doesn't exist
+            if e.response.get("Error", {}).get("Code") == "NoSuchKey":
+                self.logger.info(f"No metadata.json found for {dataset_id}/{version_type.value}, creating empty one")
+                self.bucket.put_object(
+                    Body=json.dumps({"tables": {}}),
+                    Key=f"{prefix}/metadata.json",
+                )
+                return {"tables": {}}
+            # Re-raise other errors
+            raise
 
     def upload_file(
         self,
@@ -98,21 +103,39 @@ class FilestoreService(BaseService):
                 obj.key.split("/")[-1]
                 for obj in self.bucket.objects.filter(Prefix=prefix)
             ]
+            self.logger.info(f"Found {len(files_list)} files in S3 for {dataset_id}/{version_type.value}: {files_list}")
+
             return_json_list = []
             for file in files_list:
                 if file == "metadata.json":
                     continue
 
-                table_metadata = metadata_object["tables"][Path(file).stem]
+                file_stem = Path(file).stem
+                # Handle case where file exists in S3 but not in metadata
+                if file_stem not in metadata_object.get("tables", {}):
+                    self.logger.warning(f"File {file} exists in S3 but not in metadata.json for {dataset_id}")
+                    # Still include the file with minimal metadata
+                    return_json = {
+                        "table_name": file_stem,
+                        "download_link": self._get_download_link(dataset_id, version_type, file),
+                        "metadata": {},
+                    }
+                    return_json_list.append(return_json)
+                    continue
+
+                # Make a copy to avoid mutating the original
+                table_metadata = dict(metadata_object["tables"][file_stem])
                 return_json = {}
-                return_json["table_name"] = table_metadata.pop("table_name", None)
+                return_json["table_name"] = table_metadata.pop("table_name", file_stem)
                 download_link = self._get_download_link(dataset_id, version_type, file)
                 return_json["download_link"] = download_link
                 return_json["metadata"] = table_metadata
                 return_json_list.append(return_json)
+
+            self.logger.info(f"Returning {len(return_json_list)} tables for {dataset_id}")
             return return_json_list
         except Exception as e:
-            self.logger.error(f"Failed to list files: {str(e)}")
+            self.logger.error(f"Failed to list files for {dataset_id}: {str(e)}", exc_info=True)
             raise e
 
     def delete_file(self, dataset_id: str, version_type: VersionType, file_name: str):

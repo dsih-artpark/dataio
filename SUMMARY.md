@@ -293,7 +293,7 @@ psql -U postgres -d catalogue -f src/dataio/db/migrations/001_init.sql
 # Backend (.env)
 DB_HOST=localhost DB_PORT=5432 DB_USER=postgres DB_PASSWORD=xxx DB_NAME=catalogue
 JWT_SECRET_KEY=xxx JWT_ACCESS_TOKEN_EXPIRE_MINUTES=15 JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
-AWS_ACCESS_KEY=xxx AWS_SECRET_ACCESS_KEY=xxx AWS_BUCKET_NAME=xxx
+AWS_ACCESS_KEY_ID=xxx AWS_SECRET_ACCESS_KEY=xxx AWS_BUCKET_NAME=xxx
 DEBUG_EMAIL=true  # Prints OTP to console
 WEBAUTHN_RP_ID=localhost WEBAUTHN_ORIGIN=http://localhost:3000
 CORS_ORIGINS=http://localhost:3000,http://localhost:4321

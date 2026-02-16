@@ -30,6 +30,8 @@ import dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
+from dataio.api.services.base_service import get_aws_access_key_id
+
 dotenv.load_dotenv()
 
 # Configure logging
@@ -53,7 +55,7 @@ def get_database_url() -> str:
 def get_s3_client():
     """Initialize S3 client."""
     session = boto3.Session(
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY"),
+        aws_access_key_id=get_aws_access_key_id(),
         aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
     )
     s3 = session.resource("s3")

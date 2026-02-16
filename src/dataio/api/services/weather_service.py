@@ -7,7 +7,7 @@ import xarray as xr
 from shapely.geometry import shape
 from fastapi import HTTPException
 
-from dataio.api.services.base_service import BaseService
+from dataio.api.services.base_service import BaseService, get_aws_access_key_id
 from dataio.api.models import WeatherDataRequest, WeatherDatasetMetadata, WeatherVariableMetadata
 
 
@@ -21,7 +21,7 @@ class WeatherService(BaseService):
 
         # Set up S3 filesystem with credentials from environment
         self.s3 = s3fs.S3FileSystem(
-            key=os.getenv("AWS_ACCESS_KEY"),
+            key=get_aws_access_key_id(),
             secret=os.getenv("AWS_SECRET_ACCESS_KEY"),
         )
 

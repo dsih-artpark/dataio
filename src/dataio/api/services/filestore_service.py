@@ -7,7 +7,7 @@ from fastapi import UploadFile
 from dataio.api.models import VersionType, TableMetadata
 import json
 from pathlib import Path
-from dataio.api.services.base_service import BaseService
+from dataio.api.services.base_service import BaseService, get_aws_access_key_id
 
 dotenv.load_dotenv()
 
@@ -22,7 +22,7 @@ class FilestoreService(BaseService):
     def __init__(self):
         super().__init__()
         self.session = boto3.Session(
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY"),
+            aws_access_key_id=get_aws_access_key_id(),
             aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
         )
         self.s3 = self.session.resource("s3")

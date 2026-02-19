@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'preact/hooks';
+import { useState, useMemo, useEffect } from 'preact/hooks';
 import type { DatasetDetail, MetadataJson, TableMetadata } from '../../lib/types';
 import CodeSnippets from './CodeSnippets';
 import { marked } from 'marked';
@@ -43,7 +43,7 @@ export default function DatasetDetailPanel({
   }, [parsedMetadata]);
 
   // Set default active table when metadata loads
-  useMemo(() => {
+  useEffect(() => {
     if (tableNames.length > 0 && !activeTableTab) {
       setActiveTableTab(tableNames[0]);
     }

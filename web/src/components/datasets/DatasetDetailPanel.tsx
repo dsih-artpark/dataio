@@ -42,12 +42,17 @@ export default function DatasetDetailPanel({
     return Object.keys(parsedMetadata.tables);
   }, [parsedMetadata]);
 
-  // Set default active table when metadata loads
+  // Set default active table when metadata loads or dataset changes
   useEffect(() => {
-    if (tableNames.length > 0 && !activeTableTab) {
-      setActiveTableTab(tableNames[0]);
+    if (tableNames.length > 0) {
+      // Always set to first table if current selection is invalid
+      if (!activeTableTab || !tableNames.includes(activeTableTab)) {
+        setActiveTableTab(tableNames[0]);
+      }
+    } else {
+      setActiveTableTab(null);
     }
-  }, [tableNames, activeTableTab]);
+  }, [tableNames]);
 
   // Parse README markdown
   const renderedReadme = useMemo(() => {

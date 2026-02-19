@@ -210,5 +210,117 @@ def download_shapefile(
     console.print(f"Shapefile {region_id} downloaded to {shp_path}")
 
 
+@app.command("upload-dataset")
+def upload_dataset(
+    folder_path: Annotated[
+        str,
+        typer.Argument(
+            ...,
+            help="Path to the dataset folder containing info.yml, metadata.yaml, and CSV files.",
+        ),
+    ],
+    bucket_type: Annotated[
+        str,
+        typer.Option(
+            "-b",
+            "--bucket-type",
+            help="The bucket type to upload to (STANDARDISED or PREPROCESSED).",
+        ),
+    ] = "STANDARDISED",
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Validate without making API calls.",
+        ),
+    ] = False,
+):
+    """Upload a dataset folder to DataIO.
+
+    The folder must contain:
+    - info.yml: Dataset-level metadata (title, data_owner_name, etc.)
+    - metadata.yaml: Table-level metadata with data_dictionary
+    - *.csv: Data files to upload
+    """
+    from dataio.sdk.admin import DataIOAdminAPI
+
+    console = Console()
+    try:
+        client = DataIOAdminAPI()
+        result = client.upload_dataset_folder(
+            folder_path=folder_path,
+            bucket_type=bucket_type.upper(),
+            dry_run=dry_run,
+        )
+        if not dry_run:
+            console.print(f"\n[bold green]Dataset uploaded successfully![/]")
+    except FileNotFoundError as e:
+        console.print(f"[red]Error: {e}[/]")
+        raise typer.Exit(1)
+    except ValueError as e:
+        console.print(f"[red]Validation error: {e}[/]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Upload failed: {e}[/]")
+        raise typer.Exit(1)
+
+
+@app.command("upload-all-datasets")
+def upload_all_datasets(
+    data_dir: Annotated[
+        str,
+        typer.Option(
+            "-d",
+            "--data-dir",
+            help="Directory containing dataset folders. Defaults to DATAIO_DATA_DIR.",
+        ),
+    ] = None,
+    bucket_type: Annotated[
+        str,
+        typer.Option(
+            "-b",
+            "--bucket-type",
+            help="The bucket type to upload to (STANDARDISED or PREPROCESSED).",
+        ),
+    ] = "STANDARDISED",
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Validate without making API calls.",
+        ),
+    ] = False,
+):
+    """Upload all dataset folders in a directory to DataIO.
+
+    Scans the data directory for folders matching the ds_id pattern
+    (e.g., CS0026DS0111-*) and uploads each one.
+    """
+    from dataio.sdk.admin import DataIOAdminAPI
+
+    console = Console()
+    try:
+        client = DataIOAdminAPI()
+        results = client.upload_all_datasets(
+            data_dir=data_dir,
+            bucket_type=bucket_type.upper(),
+            dry_run=dry_run,
+        )
+
+        # Summary
+        successful = sum(1 for r in results if "error" not in r)
+        failed = len(results) - successful
+
+        console.print(f"\n[bold]Summary:[/]")
+        console.print(f"  Total datasets: {len(results)}")
+        console.print(f"  Successful: [green]{successful}[/]")
+        if failed:
+            console.print(f"  Failed: [red]{failed}[/]")
+
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/]")
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()

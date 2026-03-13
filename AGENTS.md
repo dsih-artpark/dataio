@@ -2,7 +2,7 @@
 
 ## Local Agent Notes
 
-- Use `/Users/saisneha/.local/bin/uv` for Python environment and test commands in this repo.
+- Use `/Users/{username}/.local/bin/uv` for Python environment and test commands in this repo.
 - Do not use `pip`, `python -m pytest`, or other package/test runners when `uv` is needed.
 
 ## Git Workflow

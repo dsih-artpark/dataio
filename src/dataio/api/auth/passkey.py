@@ -342,6 +342,14 @@ def verify_authentication(user_email: Optional[str], credential: dict) -> WebAut
         db_credential.sign_count = verification.new_sign_count
         db_credential.last_used_at = datetime.now(timezone.utc)
         session.commit()
+        session.refresh(db_credential)
+
+        # Load the scalar fields we need after the session closes and detach the
+        # instance so callers can safely read them without triggering lazy loads.
+        _ = db_credential.user_email
+        _ = db_credential.sign_count
+        _ = db_credential.last_used_at
+        session.expunge(db_credential)
 
         logger.info(f"Passkey authentication successful for user: {user_email}")
         return db_credential

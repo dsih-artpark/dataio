@@ -30,7 +30,21 @@ class DataIOValidationService:
         result = ValidationResult(dataset_kind=request.dataset_kind.value)
         try:
             manifest = load_manifest(request.manifest_source)
-        except (ValidationError, ValueError) as exc:
+        except ValidationError as exc:
+            for finding in _validation_error_findings(exc):
+                result.add_finding(finding)
+            if not result.findings:
+                result.add_finding(
+                    Finding(
+                        severity="error",
+                        code="invalid_manifest",
+                        message=str(exc),
+                        path="manifest",
+                        rule_id="manifest_parse",
+                    )
+                )
+            return result
+        except ValueError as exc:
             result.add_finding(
                 Finding(
                     severity="error",
@@ -75,3 +89,33 @@ class DataIOValidationService:
         if request.validate_data:
             plugin.validate_content(manifest, loaded_data, request, result)
         return result
+
+
+def _validation_error_findings(exc: ValidationError) -> list[Finding]:
+    findings: list[Finding] = []
+    for error in exc.errors():
+        path = _normalize_error_path(error.get("loc", ()))
+        findings.append(
+            Finding(
+                severity="error",
+                code="invalid_manifest",
+                message=error.get("msg", str(exc)),
+                path=path,
+                rule_id="manifest_parse",
+                hint=_build_error_hint(path),
+            )
+        )
+    return findings
+
+
+def _normalize_error_path(loc: tuple[object, ...] | list[object]) -> str:
+    parts = [str(part) for part in loc if part != "__root__"]
+    if not parts:
+        return "manifest"
+    return ".".join(parts)
+
+
+def _build_error_hint(path: str) -> str | None:
+    if path == "manifest":
+        return "The manifest could not be parsed into the expected contract."
+    return f"Check the YAML entry at '{path}' and its nested properties."

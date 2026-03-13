@@ -22,7 +22,9 @@ class DataIOValidator:
     ):
         dotenv.load_dotenv(override=True)
         self.service = DataIOValidationService()
-        self.api_base_url = api_base_url or os.getenv("DATAIO_API_BASE_URL")
+        self.api_base_url = (
+            api_base_url if api_base_url is not None else os.getenv("DATAIO_API_BASE_URL")
+        )
         self.timeout = timeout
         self.session = requests.Session()
         if api_key or os.getenv("DATAIO_API_KEY"):
@@ -130,24 +132,31 @@ class DataIOValidator:
         deep_check: bool,
     ) -> ValidationResult:
         base_url = self._require_api_base_url()
-        response = self.session.post(
-            f"{base_url}/validate",
-            files={
-                "manifest_file": (
-                    "manifest.yaml",
-                    self._normalize_manifest_bytes(manifest),
-                    "application/x-yaml",
-                ),
-            },
-            data={
-                "dataset_kind": DatasetKind.TABULAR.value,
-                "data_files": json.dumps(self._normalize_tabular_payload(data_files)),
-                "deep_check": json.dumps(deep_check),
-            },
-            timeout=self.timeout,
-        )
-        response.raise_for_status()
-        return ValidationResult.model_validate(response.json())
+        try:
+            response = self.session.post(
+                f"{base_url}/validate",
+                files={
+                    "manifest_file": (
+                        "manifest.yaml",
+                        self._normalize_manifest_bytes(manifest),
+                        "application/x-yaml",
+                    ),
+                },
+                data={
+                    "dataset_kind": DatasetKind.TABULAR.value,
+                    "data_files": json.dumps(self._normalize_tabular_payload(data_files)),
+                    "deep_check": json.dumps(deep_check),
+                },
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            return ValidationResult.model_validate(response.json())
+        except requests.RequestException as exc:
+            raise ValueError(
+                "deep_check API request failed. "
+                f"Verify DATAIO_API_BASE_URL points to a DataIO API with /validate available. "
+                f"Original error: {exc}"
+            ) from exc
 
     def _validate_geojson_via_api(
         self,
@@ -157,22 +166,29 @@ class DataIOValidator:
         deep_check: bool,
     ) -> ValidationResult:
         base_url = self._require_api_base_url()
-        response = self.session.post(
-            f"{base_url}/validate/geojson",
-            files={
-                "manifest_file": (
-                    "manifest.yaml",
-                    self._normalize_manifest_bytes(manifest),
-                    "application/x-yaml",
-                ),
-                "geojson": (
-                    "data.geojson",
-                    self._normalize_geojson_bytes(data),
-                    "application/geo+json",
-                ),
-            },
-            data={"deep_check": json.dumps(deep_check)},
-            timeout=self.timeout,
-        )
-        response.raise_for_status()
-        return ValidationResult.model_validate(response.json())
+        try:
+            response = self.session.post(
+                f"{base_url}/validate/geojson",
+                files={
+                    "manifest_file": (
+                        "manifest.yaml",
+                        self._normalize_manifest_bytes(manifest),
+                        "application/x-yaml",
+                    ),
+                    "geojson": (
+                        "data.geojson",
+                        self._normalize_geojson_bytes(data),
+                        "application/geo+json",
+                    ),
+                },
+                data={"deep_check": json.dumps(deep_check)},
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            return ValidationResult.model_validate(response.json())
+        except requests.RequestException as exc:
+            raise ValueError(
+                "deep_check API request failed. "
+                f"Verify DATAIO_API_BASE_URL points to a DataIO API with /validate/geojson available. "
+                f"Original error: {exc}"
+            ) from exc

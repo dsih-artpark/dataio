@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-
 import pytest
 
 from dataio.validate.contracts.models import ValidationRequest
@@ -153,6 +152,7 @@ datasetTables:
     result = DataIOValidator().validate_tabular(manifest=manifest, data_files={})
     assert result.status == "fail"
     assert any(f.code == "invalid_manifest" for f in result.findings)
+    assert any(f.path == "datasetTables.sample.dataDictionary.value" for f in result.findings)
 
 
 def test_unresolved_enum_ref_fails(tmp_path):
@@ -259,6 +259,31 @@ datasetTables:
     assert any(f.code == "invalid_dataset_slug" for f in result.findings)
 
 
+def test_unknown_declared_type_is_an_error():
+    manifest = """
+metadataSpecVersion: v2
+datasetTitle: Unknown Type Manifest
+datasetSlug: ts0001ds0001-unknown-type-manifest
+datasetDescription: Example
+source: Test
+category: {ID: TS, name: Test}
+collection: {ID: TS0001, name: Tests}
+datasetID: TS0001DS0001
+datasetKind: tabular
+datasetTables:
+  sample:
+    dataDictionary:
+      status:
+        type: enum1
+        nullable: false
+"""
+    result = DataIOValidator().validate_tabular(manifest=manifest, data_files={})
+    assert result.status == "fail"
+    finding = next(f for f in result.findings if f.code == "unknown_declared_type")
+    assert finding.severity == "error"
+    assert finding.path == "datasetTables.sample.dataDictionary.status.type"
+
+
 def test_datetime_format_requires_timezone():
     manifest = """
 metadataSpecVersion: v2
@@ -332,7 +357,7 @@ datasetTables:
 
 def test_deep_check_requires_api_access():
     with pytest.raises(ValueError, match="deep_check requires API access"):
-        DataIOValidator().validate_tabular(
+        DataIOValidator(api_base_url="").validate_tabular(
             manifest=VALID_TABULAR_MANIFEST.replace("REPLACEME", "sample.csv"),
             data_files={"livestock": "state.ID,year,species,count\nstate_29,2024,cattle,10\n"},
             deep_check=True,
@@ -376,3 +401,22 @@ def test_deep_check_uses_api_for_tabular(monkeypatch, tmp_path):
     assert json.loads(recorded["data"]["data_files"]) == {
         "livestock": "state.ID,year,species,count\nstate_29,2024,cattle,10\n"
     }
+
+
+def test_deep_check_surfaces_clean_api_error(monkeypatch):
+    validator = DataIOValidator(api_base_url="https://dataio.artpark.ai/api/v1")
+
+    class DummyResponse:
+        def raise_for_status(self) -> None:
+            from requests import HTTPError
+
+            raise HTTPError("404 Client Error: Not Found for url: https://dataio.artpark.ai/api/v1/validate")
+
+    monkeypatch.setattr(validator.session, "post", lambda *args, **kwargs: DummyResponse())
+
+    with pytest.raises(ValueError, match="deep_check API request failed"):
+        validator.validate_tabular(
+            manifest=VALID_TABULAR_MANIFEST.replace("REPLACEME", "sample.csv"),
+            data_files={"livestock": "state.ID,year,species,count\nstate_29,2024,cattle,10\n"},
+            deep_check=True,
+        )

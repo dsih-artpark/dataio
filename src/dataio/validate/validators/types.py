@@ -13,13 +13,20 @@ def validate_declared_types(manifest: DatasetManifest, result: ValidationResult)
             if field.type not in TYPE_VALIDATORS:
                 result.add_finding(
                     Finding(
-                        severity="warning",
+                        severity="error",
                         code="unknown_declared_type",
-                        message=f"Field declares unknown type '{field.type}'.",
+                        message=(
+                            f"Field declares unknown type '{field.type}'. "
+                            "Declared types must use a supported validator keyword."
+                        ),
                         path=f"datasetTables.{table_name}.dataDictionary.{field_name}.type",
                         table=table_name,
                         field=field_name,
                         rule_id="declared_type_known",
+                        hint=(
+                            "Supported types: "
+                            + ", ".join(sorted(TYPE_VALIDATORS.keys()))
+                        ),
                     )
                 )
 

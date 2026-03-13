@@ -1,4 +1,4 @@
--- Migration 014: Add dataset manifest cache fields and include them in datasets_full_view
+-- Migration 015: Add dataset manifest cache fields and include them in datasets_full_view
 
 BEGIN;
 
@@ -36,6 +36,6 @@ d.description, spatial_coverage, d.spatial_resolution, d.temporal_coverage_start
 d.access_level, d.additional_metadata,
 d.readme_md, d.data_dictionary_json, d.manifest_yaml, d.manifest_json, d.manifest_updated_at, d.manifest_updated_by, d.documentation_synced_at;
 
-SELECT add_migration(14, '014_dataset_manifests');
+SELECT add_migration(15, '015_dataset_manifests');
 
 COMMIT;

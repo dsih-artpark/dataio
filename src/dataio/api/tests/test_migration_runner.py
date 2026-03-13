@@ -17,7 +17,10 @@ from dataio.db.migration_runner import (
 
 def test_parse_migration_file_ignores_rollbacks(tmp_path: Path):
     rollback = tmp_path / "014_auth_signoff_and_sso_rollback.sql"
-    rollback.write_text("DELETE FROM db_migration_history WHERE migration_number = 14;", encoding="utf-8")
+    rollback.write_text(
+        "DELETE FROM db_migration_history WHERE migration_number = 14;",
+        encoding="utf-8",
+    )
 
     assert parse_migration_file(rollback) is None
 
@@ -31,7 +34,10 @@ def test_discover_forward_migrations_skips_untracked_sql(tmp_path: Path):
     untracked = tmp_path / "legacy_registration_and_verification.sql"
     untracked.write_text("-- legacy manual migration without add_migration\n", encoding="utf-8")
     rollback = tmp_path / "013_auth_hardening_rollback.sql"
-    rollback.write_text("DELETE FROM db_migration_history WHERE migration_number = 13;", encoding="utf-8")
+    rollback.write_text(
+        "DELETE FROM db_migration_history WHERE migration_number = 13;",
+        encoding="utf-8",
+    )
 
     migrations, skipped = discover_forward_migrations(tmp_path)
 
@@ -76,3 +82,11 @@ def test_normalize_migration_name_handles_sql_suffix():
     assert normalize_migration_name("002_helper_functions_to_add_datasets") == (
         "002_helper_functions_to_add_datasets"
     )
+
+
+def test_current_legacy_auth_and_chat_files_are_now_tracked():
+    migrations_dir = Path(__file__).resolve().parents[2] / "db" / "migrations"
+    migrations, _skipped = discover_forward_migrations(migrations_dir)
+    numbers = {migration.number for migration in migrations}
+
+    assert {9, 10, 11, 12}.issubset(numbers)

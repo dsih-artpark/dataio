@@ -1,6 +1,8 @@
 -- Migration 012: Chat Sessions
 -- Adds tables for storing chat history between users and the AI assistant
 
+BEGIN;
+
 -- Chat sessions table
 CREATE TABLE IF NOT EXISTS chat_sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -42,3 +44,7 @@ CREATE TRIGGER trigger_update_chat_session_updated_at
     AFTER INSERT ON chat_messages
     FOR EACH ROW
     EXECUTE FUNCTION update_chat_session_updated_at();
+
+SELECT add_migration(12, '012_chat_sessions');
+
+COMMIT;

@@ -28,6 +28,6 @@ DROP COLUMN IF EXISTS manifest_json,
 DROP COLUMN IF EXISTS manifest_updated_at,
 DROP COLUMN IF EXISTS manifest_updated_by;
 
-DELETE FROM db_migration_history WHERE migration_number = 14;
+DELETE FROM db_migration_history WHERE migration_number = 15;
 
 COMMIT;

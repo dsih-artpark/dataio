@@ -10,6 +10,7 @@ os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 from dataio.db.migration_runner import (
     build_parser,
     discover_forward_migrations,
+    normalize_migration_name,
     parse_migration_file,
 )
 
@@ -66,3 +67,12 @@ def test_parser_supports_min_number():
     parser = build_parser()
     args = parser.parse_args(["--min-number", "13"])
     assert args.min_number == 13
+
+
+def test_normalize_migration_name_handles_sql_suffix():
+    assert normalize_migration_name("002_helper_functions_to_add_datasets.sql") == (
+        "002_helper_functions_to_add_datasets"
+    )
+    assert normalize_migration_name("002_helper_functions_to_add_datasets") == (
+        "002_helper_functions_to_add_datasets"
+    )

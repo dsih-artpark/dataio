@@ -34,6 +34,13 @@ class MigrationFile:
     path: Path
 
 
+def normalize_migration_name(name: str) -> str:
+    normalized = name.strip()
+    if normalized.endswith(".sql"):
+        normalized = normalized[:-4]
+    return normalized
+
+
 def migration_dir() -> Path:
     configured = os.getenv("MIGRATIONS_DIR")
     if configured:
@@ -64,7 +71,11 @@ def parse_migration_file(path: Path) -> MigrationFile | None:
             f"SQL registers {migration_number}"
         )
 
-    return MigrationFile(number=migration_number, name=migration_name, path=path)
+    return MigrationFile(
+        number=migration_number,
+        name=normalize_migration_name(migration_name),
+        path=path,
+    )
 
 
 def discover_forward_migrations(migrations_path: Path) -> tuple[list[MigrationFile], list[Path]]:
@@ -197,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
 
     for number, name in applied.items():
         discovered = next((migration for migration in migrations if migration.number == number), None)
-        if discovered and discovered.name != name:
+        if discovered and discovered.name != normalize_migration_name(name):
             raise ValueError(
                 f"Applied migration {number} is recorded as {name!r}, "
                 f"but file {discovered.path.name} registers {discovered.name!r}"

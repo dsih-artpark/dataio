@@ -5,7 +5,17 @@ import type { ValidationFinding, ValidationResult } from '../../lib/types';
 
 type DatasetKind = 'tabular' | 'geojson';
 
-const SUPPORTED_DATA_TYPES = ['boolean', 'date', 'dateTime', 'enum', 'float', 'int', 'regionID', 'regionName', 'string'] as const;
+const SUPPORTED_DATA_TYPES = [
+  'boolean',
+  'date',
+  'dateTime',
+  'enum',
+  'float',
+  'int',
+  'regionID',
+  'regionName',
+  'string',
+] as const;
 
 const RULE_GROUPS = [
   {
@@ -21,7 +31,7 @@ const RULE_GROUPS = [
     items: [
       '`datasetTables` is required for tabular manifests',
       'Each table should define a non-empty `dataDictionary`',
-      'Uploaded table columns are checked against declared fields',
+      'Field declarations are validated without requiring uploaded data files on this screen',
     ],
   },
   {
@@ -35,11 +45,9 @@ const RULE_GROUPS = [
     ],
   },
   {
-    title: 'Data validation rules',
+    title: 'Platform rules',
     items: [
-      'Required columns must exist in uploaded files',
-      'Unknown declared field types are treated as validation errors',
-      'Cell values are checked against their declared type and nullability',
+      'Unknown declared field types are validation errors',
       'Deep check optionally validates dataset, collection, and category identifiers against the platform database',
     ],
   },
@@ -64,21 +72,58 @@ function severityClasses(severity: string) {
   return 'bg-emerald-50 text-emerald-700 ring-emerald-200';
 }
 
+function normalizeLineKey(text: string): string | null {
+  const trimmed = text.trim();
+  const keyMatch = trimmed.match(/^['"]?([^'":]+)['"]?\s*:/);
+  return keyMatch ? keyMatch[1].trim() : null;
+}
+
+function findBestLineIndexForFinding(lines: ReviewLine[], finding: ValidationFinding): number {
+  const findingPath = finding.path;
+  if (!findingPath) return -1;
+  if (findingPath === 'manifest') return 0;
+
+  const targetKey = findingPath.split('.').pop();
+  let bestIndex = -1;
+  let bestScore = -1;
+
+  lines.forEach((line, index) => {
+    const lineKey = normalizeLineKey(line.text);
+    for (const linePath of line.paths) {
+      let score = -1;
+      if (findingPath === linePath) {
+        score = 10000 + linePath.length;
+      } else if (lineKey && targetKey && lineKey === targetKey && findingPath.endsWith(`.${lineKey}`)) {
+        score = 9000 + linePath.length;
+      } else if (findingPath.startsWith(`${linePath}.`)) {
+        score = linePath.length;
+      } else if (linePath.startsWith(`${findingPath}.`)) {
+        score = findingPath.length;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = index;
+      }
+    }
+  });
+
+  return bestIndex;
+}
+
 function buildLineReviews(manifestText: string, findings: ValidationFinding[]): ReviewLine[] {
   const lines = manifestText.split(/\r?\n/);
   const stack: { indent: number; path: string }[] = [];
   const reviewLines = lines.map((text, index) => {
     const indent = text.match(/^(\s*)/)?.[1].length ?? 0;
-    const trimmed = text.trim();
-    const keyMatch = trimmed.match(/^['"]?([^'":]+)['"]?\s*:/);
+    const key = normalizeLineKey(text);
 
     while (stack.length > 0 && indent <= stack[stack.length - 1].indent) {
       stack.pop();
     }
 
     const paths: string[] = [];
-    if (keyMatch) {
-      const key = keyMatch[1].trim();
+    if (key) {
       const parentPath = stack.length > 0 ? stack[stack.length - 1].path : '';
       const fullPath = parentPath ? `${parentPath}.${key}` : key;
       stack.push({ indent, path: fullPath });
@@ -106,16 +151,6 @@ function buildLineReviews(manifestText: string, findings: ValidationFinding[]): 
   return reviewLines;
 }
 
-function findingLabel(finding: ValidationFinding) {
-  const parts = [
-    finding.path ? `path ${finding.path}` : null,
-    finding.table ? `table ${finding.table}` : null,
-    typeof finding.row === 'number' ? `row ${finding.row}` : null,
-    finding.field ? `field ${finding.field}` : null,
-  ].filter(Boolean);
-  return parts.join(' • ');
-}
-
 function buildNarrative(result: ValidationResult) {
   if (result.status === 'pass') {
     return 'Validation completed successfully. The manifest parsed and the declared contract checks passed without errors or warnings.';
@@ -125,39 +160,73 @@ function buildNarrative(result: ValidationResult) {
     return `Validation completed with ${result.summary.warnings} warning${result.summary.warnings === 1 ? '' : 's'}. The manifest is structurally acceptable, but there are issues you should review before promotion.`;
   }
 
-  return `Validation failed with ${result.summary.errors} error${result.summary.errors === 1 ? '' : 's'} and ${result.summary.warnings} warning${result.summary.warnings === 1 ? '' : 's'}. Fix the highlighted manifest paths first, then rerun validation to confirm downstream data checks.`;
+  return `Validation failed with ${result.summary.errors} error${result.summary.errors === 1 ? '' : 's'} and ${result.summary.warnings} warning${result.summary.warnings === 1 ? '' : 's'}. Fix the highlighted manifest paths first, then rerun validation to confirm the contract is clean.`;
 }
 
 function buildVerboseSuccessMessages(paths: string[], text: string): string[] {
   if (paths.length === 0) return [];
 
   const currentPath = paths[0];
-  const rawValue = text.includes(':') ? text.split(':').slice(1).join(':').trim().replace(/^['"]|['"]$/g, '') : '';
+  const rawValue = text.includes(':')
+    ? text
+        .split(':')
+        .slice(1)
+        .join(':')
+        .trim()
+        .replace(/^['"]|['"]$/g, '')
+    : '';
   const messages: string[] = [];
 
-  if (currentPath.endsWith('.type') && SUPPORTED_DATA_TYPES.includes(rawValue as (typeof SUPPORTED_DATA_TYPES)[number])) {
+  if (
+    currentPath.endsWith('.type') &&
+    SUPPORTED_DATA_TYPES.includes(rawValue as (typeof SUPPORTED_DATA_TYPES)[number])
+  ) {
     messages.push(`'${rawValue}' is an allowed data type.`);
   }
   if (currentPath.endsWith('.format') && rawValue.includes('%')) {
     messages.push(`'${rawValue}' uses strftime directives, which is required for date and datetime fields.`);
   }
-  if (currentPath.endsWith('.nullable') && ['true', 'false'].includes(rawValue.toLowerCase())) {
+  if (
+    currentPath.endsWith('.nullable') &&
+    ['true', 'false'].includes(rawValue.toLowerCase())
+  ) {
     messages.push(`'${rawValue.toLowerCase()}' is a valid nullability flag.`);
   }
   if (currentPath === 'datasetKind' && ['tabular', 'geojson'].includes(rawValue)) {
     messages.push(`'${rawValue}' is an allowed dataset kind.`);
   }
+  if (currentPath === 'metadataSpecVersion' && rawValue) {
+    messages.push(`Metadata spec version '${rawValue}' is present.`);
+  }
+  if (currentPath === 'datasetID' && rawValue) {
+    messages.push(`Dataset ID '${rawValue}' is present for platform validation.`);
+  }
+  if (currentPath === 'datasetSlug' && rawValue) {
+    messages.push(`Dataset slug '${rawValue}' is present and will be validated against the naming rules.`);
+  }
+  if (currentPath === 'collection.ID' && rawValue) {
+    messages.push(`Collection ID '${rawValue}' is present and eligible for platform cross-checks.`);
+  }
+  if (currentPath === 'collection.name' && rawValue) {
+    messages.push(`Collection name '${rawValue}' is present.`);
+  }
+  if (currentPath === 'category.ID' && rawValue) {
+    messages.push(`Category ID '${rawValue}' is present and eligible for platform cross-checks.`);
+  }
+  if (currentPath === 'category.name' && rawValue) {
+    messages.push(`Category name '${rawValue}' is present.`);
+  }
   if (currentPath.endsWith('.enumRef') && rawValue) {
     messages.push(`Enum reference '${rawValue}' is syntactically valid and will be resolved against enumDefinitions.`);
-  }
-  if (currentPath.endsWith('.allowedValues') && rawValue) {
-    messages.push('Allowed values are declared inline for this enum field.');
   }
 
   return messages;
 }
 
-function findLineNumberForPath(lines: ReviewLine[], findingPath: string | null | undefined): number | null {
+function findLineNumberForPath(
+  lines: ReviewLine[],
+  findingPath: string | null | undefined
+): number | null {
   if (!findingPath) return null;
   const exactLine = lines.find((line) => line.paths.includes(findingPath));
   if (exactLine) return exactLine.lineNumber;
@@ -167,33 +236,14 @@ function findLineNumberForPath(lines: ReviewLine[], findingPath: string | null |
   return nearestLine ? nearestLine.lineNumber : null;
 }
 
-function findBestLineIndexForFinding(lines: ReviewLine[], finding: ValidationFinding): number {
-  const findingPath = finding.path;
-  if (!findingPath) return -1;
-  if (findingPath === 'manifest') return 0;
-
-  let bestIndex = -1;
-  let bestScore = -1;
-
-  lines.forEach((line, index) => {
-    for (const linePath of line.paths) {
-      let score = -1;
-      if (findingPath === linePath) {
-        score = 10000 + linePath.length;
-      } else if (findingPath.startsWith(`${linePath}.`)) {
-        score = linePath.length;
-      } else if (linePath.startsWith(`${findingPath}.`)) {
-        score = findingPath.length;
-      }
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestIndex = index;
-      }
-    }
-  });
-
-  return bestIndex;
+function findingLabel(finding: ValidationFinding) {
+  const parts = [
+    finding.path ? `path ${finding.path}` : null,
+    finding.table ? `table ${finding.table}` : null,
+    typeof finding.row === 'number' ? `row ${finding.row}` : null,
+    finding.field ? `field ${finding.field}` : null,
+  ].filter(Boolean);
+  return parts.join(' • ');
 }
 
 export default function ManifestValidationManager() {
@@ -216,7 +266,9 @@ export default function ManifestValidationManager() {
   const passedChecks = useMemo(() => {
     if (!validationResult) return [];
 
-    const findingPaths = new Set(validationResult.findings.map((finding) => finding.path).filter(Boolean));
+    const findingPaths = new Set(
+      validationResult.findings.map((finding) => finding.path).filter(Boolean)
+    );
     const checks = [
       { label: 'Manifest parses successfully', path: 'manifest' },
       { label: 'datasetID is present and patterned correctly', path: 'datasetID' },
@@ -235,7 +287,7 @@ export default function ManifestValidationManager() {
         id: `${finding.code}-${finding.path || 'manifest'}-${index}`,
         lineNumber: findLineNumberForPath(lineReviews, finding.path),
         path: finding.path || 'manifest',
-        messages: [finding.message],
+        message: finding.message,
       })),
     [lineReviews, validationResult]
   );
@@ -246,7 +298,11 @@ export default function ManifestValidationManager() {
     const visibleLineNumbers = new Set<number>();
     for (const line of lineReviews) {
       if (line.findings.length > 0) {
-        for (let lineNumber = line.lineNumber - 2; lineNumber <= line.lineNumber + 2; lineNumber += 1) {
+        for (
+          let lineNumber = line.lineNumber - 2;
+          lineNumber <= line.lineNumber + 2;
+          lineNumber += 1
+        ) {
           if (lineNumber >= 1 && lineNumber <= lineReviews.length) {
             visibleLineNumbers.add(lineNumber);
           }
@@ -256,6 +312,11 @@ export default function ManifestValidationManager() {
 
     return lineReviews.filter((line) => visibleLineNumbers.has(line.lineNumber));
   }, [lineReviews, showIssueRowsOnly]);
+
+  const annotatedFindingCount = useMemo(
+    () => lineReviews.reduce((count, line) => count + line.findings.length, 0),
+    [lineReviews]
+  );
 
   const handleManifestChange = async (file: File | null) => {
     setManifestFile(file);
@@ -299,40 +360,29 @@ export default function ManifestValidationManager() {
   };
 
   return (
-    <div class="space-y-6">
-      <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <div class="space-y-5">
+      <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div>
           <h2 class="text-lg font-semibold text-slate-900">Manifest Validation</h2>
           <p class="mt-1 text-sm text-slate-600">
             Validate a candidate manifest before promoting it.
           </p>
-          <p class="mt-2 text-sm text-slate-500">
-            The uploaded manifest is only kept in your browser until you submit this form. The validation request reads it in memory and does not persist it.
-          </p>
         </div>
 
-        <form class="mt-6 space-y-4" onSubmit={handleValidation}>
-          <div class="grid gap-4 xl:grid-cols-[minmax(20rem,1.15fr)_minmax(20rem,1.1fr)_minmax(12rem,0.7fr)_minmax(18rem,1fr)_auto]">
-            <div class="rounded-2xl border border-slate-200 bg-slate-50">
-              <button
-                type="button"
-                onClick={() => setShowRules((value) => !value)}
-                class="flex h-full w-full items-center justify-between px-4 py-3 text-left"
-              >
-                <div>
-                  <span class="block text-sm font-semibold text-slate-900">Validation rules and allowed values</span>
-                  <span class="mt-1 block text-xs text-slate-500">
-                    Open the rulebook, including supported data types and manifest constraints.
-                  </span>
-                </div>
-                <span class="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700">
-                  {showRules ? 'Hide' : 'Show'}
-                </span>
-              </button>
-            </div>
+        <form class="mt-5 space-y-3" onSubmit={handleValidation}>
+          <div class="flex flex-wrap items-end gap-3">
+            <button
+              type="button"
+              onClick={() => setShowRules((value) => !value)}
+              class="inline-flex h-11 items-center rounded-xl border border-slate-300 bg-slate-50 px-4 text-sm font-medium text-slate-800 transition hover:bg-white"
+            >
+              {showRules ? 'Hide rulebook' : 'Rules & allowed values'}
+            </button>
 
-            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <span class="mb-2 block text-sm font-medium text-slate-700">Candidate manifest</span>
+            <div class="min-w-[22rem] flex-1 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <span class="mb-2 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                Candidate manifest
+              </span>
               <div class="flex items-center gap-3">
                 <input
                   type="file"
@@ -353,13 +403,15 @@ export default function ManifestValidationManager() {
                   </button>
                 ) : null}
               </div>
-              <div class="mt-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+              <div class="mt-2 truncate text-sm text-slate-600">
                 {manifestFile?.name || 'No manifest selected'}
               </div>
             </div>
 
-            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <span class="mb-2 block text-sm font-medium text-slate-700">Dataset kind</span>
+            <div class="min-w-[11rem] rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <span class="mb-2 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                Dataset kind
+              </span>
               <select
                 value={datasetKind}
                 onChange={(e) => setDatasetKind((e.currentTarget as HTMLSelectElement).value as DatasetKind)}
@@ -370,78 +422,61 @@ export default function ManifestValidationManager() {
               </select>
             </div>
 
-            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div class="space-y-3">
-                <label class="flex items-start gap-3">
+            <div class="min-w-[21rem] rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <div class="grid gap-2 sm:grid-cols-3">
+                <label class="flex items-start gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox"
                     checked={deepCheck}
                     onChange={(e) => setDeepCheck((e.currentTarget as HTMLInputElement).checked)}
                     class="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
                   />
-                  <span>
-                    <span class="block text-sm font-medium text-slate-800">Deep check</span>
-                    <span class="block text-xs text-slate-500">Verify dataset, collection, and category identity against the database.</span>
-                  </span>
+                  <span>Deep check</span>
                 </label>
-
-                <label class="flex items-start gap-3">
+                <label class="flex items-start gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox"
                     checked={showVerboseSuccess}
                     onChange={(e) => setShowVerboseSuccess((e.currentTarget as HTMLInputElement).checked)}
                     class="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
                   />
-                  <span>
-                    <span class="block text-sm font-medium text-slate-800">Verbose success</span>
-                    <span class="block text-xs text-slate-500">Show positive rule confirmations in the YAML pane.</span>
-                  </span>
+                  <span>Verbose success</span>
                 </label>
-
-                <label class="flex items-start gap-3">
+                <label class="flex items-start gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox"
                     checked={showIssueRowsOnly}
                     onChange={(e) => setShowIssueRowsOnly((e.currentTarget as HTMLInputElement).checked)}
                     class="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
                   />
-                  <span>
-                    <span class="block text-sm font-medium text-slate-800">Issue rows only</span>
-                    <span class="block text-xs text-slate-500">Show only broken lines and nearby context.</span>
-                  </span>
+                  <span>Issue rows only</span>
                 </label>
               </div>
             </div>
 
-            <div class="flex items-end">
+            <div class="ml-auto">
               <button
                 type="submit"
                 disabled={!manifestFile || validating}
-                class="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                class="h-11 rounded-xl bg-slate-900 px-5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {validating ? 'Validating...' : 'Run Validation'}
               </button>
             </div>
           </div>
 
-          <div class="rounded-2xl border border-slate-200 bg-slate-50">
-            <button
-              type="button"
-              onClick={() => setShowRules((value) => !value)}
-              class="flex w-full items-center justify-between px-4 py-3 text-left"
-            >
-              <div>
-                <span class="block text-sm font-semibold text-slate-900">Validation rules and allowed values</span>
+          {showRules ? (
+            <div class="rounded-2xl border border-slate-200 bg-slate-50">
+              <div class="border-b border-slate-200 px-4 py-3">
+                <span class="block text-sm font-semibold text-slate-900">
+                  Validation rules and allowed values
+                </span>
                 <span class="mt-1 block text-xs text-slate-500">
-                  Open the full rulebook, including supported data types and manifest constraints.
+                  Supported data types, manifest constraints, and validation checks used on
+                  this screen.
                 </span>
               </div>
-              <span class="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700">
-                {showRules ? 'Hide' : 'Show'}
-              </span>
-            </button>
-            {showRules ? (
-              <div class="grid gap-4 border-t border-slate-200 px-4 py-4">
+              <div class="grid gap-4 px-4 py-4 lg:grid-cols-2">
                 {RULE_GROUPS.map((group) => (
                   <div key={group.title} class="rounded-xl border border-slate-200 bg-white p-4">
                     <h3 class="text-sm font-semibold text-slate-900">{group.title}</h3>
@@ -453,8 +488,8 @@ export default function ManifestValidationManager() {
                   </div>
                 ))}
               </div>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
 
           {validationError ? (
             <div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -464,27 +499,30 @@ export default function ManifestValidationManager() {
         </form>
       </section>
 
-      <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div class="flex items-center justify-between">
           <div>
             <h2 class="text-lg font-semibold text-slate-900">Review</h2>
             <p class="mt-1 text-sm text-slate-600">
-              The validator calls out what it accepted and what it rejected from the uploaded manifest.
+              The validator calls out what it accepted and what it rejected from the uploaded
+              manifest.
             </p>
           </div>
           {validationResult ? (
-            <span class={`rounded-full px-3 py-1 text-sm font-semibold ring-1 ${statusClasses(validationResult.status)}`}>
+            <span
+              class={`rounded-full px-3 py-1 text-sm font-semibold ring-1 ${statusClasses(validationResult.status)}`}
+            >
               {validationResult.status.toUpperCase()}
             </span>
           ) : null}
         </div>
 
         {!validationResult ? (
-          <div class="mt-6 rounded-xl border border-dashed border-slate-300 px-4 py-8 text-sm text-slate-500">
+          <div class="mt-5 rounded-xl border border-dashed border-slate-300 px-4 py-8 text-sm text-slate-500">
             Upload a manifest and run validation to see line-by-line review and findings.
           </div>
         ) : (
-          <div class="mt-6 grid min-h-[42rem] gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(24rem,0.95fr)]">
+          <div class="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(24rem,0.95fr)]">
             <div>
               <div class="flex items-center justify-between">
                 <h3 class="text-sm font-semibold text-slate-900">Annotated manifest</h3>
@@ -492,44 +530,56 @@ export default function ManifestValidationManager() {
                   {showIssueRowsOnly ? 'Issue rows plus nearby context' : 'Full deep-dive view'}
                 </span>
               </div>
-              <div class="mt-3 max-h-[70vh] overflow-auto rounded-2xl border border-slate-200">
+              <div class="mt-3 max-h-[62vh] overflow-auto rounded-2xl border border-slate-200">
                 {displayedLineReviews.map((line) => (
-                  <div key={line.lineNumber} class="grid grid-cols-[56px_1fr] border-b border-slate-100 last:border-b-0">
-                    <div class="bg-slate-50 px-3 py-2 text-right font-mono text-xs text-slate-400">{line.lineNumber}</div>
+                  <div
+                    key={line.lineNumber}
+                    class="grid grid-cols-[56px_1fr] border-b border-slate-100 last:border-b-0"
+                  >
+                    <div class="bg-slate-50 px-3 py-2 text-right font-mono text-xs text-slate-400">
+                      {line.lineNumber}
+                    </div>
                     <div class="px-3 py-2">
-                      <pre class="overflow-x-auto whitespace-pre text-xs leading-6 text-slate-800">{line.text || ' '}</pre>
+                      <pre class="overflow-x-auto whitespace-pre text-xs leading-6 text-slate-800">
+                        {line.text || ' '}
+                      </pre>
                       {line.paths.length > 0 ? (
                         <div class="mt-1 text-[10px] uppercase tracking-wide text-slate-400">
                           {line.paths[0]}
                         </div>
                       ) : null}
-                      {line.findings.length === 0 ? (
-                        showVerboseSuccess && line.text.trim() ? (
-                          <div class="mt-2 space-y-2">
-                            {buildVerboseSuccessMessages(line.paths, line.text).map((message) => (
-                              <div key={message} class="rounded-lg bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700 ring-1 ring-emerald-200">
-                                {message}
-                              </div>
-                            ))}
-                          </div>
-                        ) : null
-                      ) : (
+                      {line.findings.length > 0 ? (
                         <div class="mt-2 space-y-2">
                           {line.findings.map((finding, index) => (
-                            <div key={`${line.lineNumber}-${finding.code}-${index}`} class={`rounded-lg px-3 py-2 text-[11px] ring-1 ${severityClasses(finding.severity)}`}>
+                            <div
+                              key={`${line.lineNumber}-${finding.code}-${index}`}
+                              class={`rounded-lg px-3 py-2 text-[11px] ring-1 ${severityClasses(finding.severity)}`}
+                            >
                               <div class="font-semibold uppercase">{finding.severity}</div>
                               <div class="mt-1">{finding.message}</div>
                             </div>
                           ))}
                         </div>
-                      )}
+                      ) : null}
+                      {showVerboseSuccess && line.text.trim() ? (
+                        <div class="mt-2 space-y-2">
+                          {buildVerboseSuccessMessages(line.paths, line.text).map((message) => (
+                            <div
+                              key={message}
+                              class="rounded-lg bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700 ring-1 ring-emerald-200"
+                            >
+                              {message}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 ))}
               </div>
             </div>
 
-            <div class="space-y-6">
+            <div class="space-y-5">
               <div class={`rounded-2xl border px-5 py-4 ${statusClasses(validationResult.status)}`}>
                 <h3 class="text-sm font-semibold uppercase tracking-wide">Validation narrative</h3>
                 <p class="mt-2 text-sm leading-6">{buildNarrative(validationResult)}</p>
@@ -548,7 +598,9 @@ export default function ManifestValidationManager() {
                   </div>
                   <div class="rounded-xl bg-white/60 px-3 py-2">
                     <dt class="text-xs uppercase tracking-wide opacity-70">Dataset kind</dt>
-                    <dd class="mt-1 text-lg font-semibold capitalize">{validationResult.dataset_kind}</dd>
+                    <dd class="mt-1 text-lg font-semibold capitalize">
+                      {validationResult.dataset_kind}
+                    </dd>
                   </div>
                 </dl>
               </div>
@@ -558,11 +610,13 @@ export default function ManifestValidationManager() {
                   <div>
                     <h3 class="text-sm font-semibold text-slate-900">Issue summary</h3>
                     <p class="mt-1 text-xs text-slate-500">
-                      Exact YAML lines with findings, so you can jump straight to the broken entries.
+                      Exact YAML lines with findings, so you can jump straight to the broken
+                      entries.
                     </p>
                   </div>
                   <span class="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700">
-                    {issueSummary.length} line{issueSummary.length === 1 ? '' : 's'} affected
+                    {issueSummary.length} line{issueSummary.length === 1 ? '' : 's'} affected ·{' '}
+                    {annotatedFindingCount} finding{annotatedFindingCount === 1 ? '' : 's'} annotated
                   </span>
                 </div>
                 <div class="mt-3 space-y-2">
@@ -579,11 +633,7 @@ export default function ManifestValidationManager() {
                           </span>
                           <code class="text-xs text-slate-600">{issue.path}</code>
                         </div>
-                        <div class="mt-2 space-y-1 text-sm text-slate-700">
-                          {issue.messages.map((message) => (
-                            <p key={message}>{message}</p>
-                          ))}
-                        </div>
+                        <p class="mt-2 text-sm text-slate-700">{issue.message}</p>
                       </div>
                     ))
                   )}
@@ -599,7 +649,10 @@ export default function ManifestValidationManager() {
                     </div>
                   ) : (
                     passedChecks.map((check) => (
-                      <div key={check.label} class="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700 ring-1 ring-emerald-200">
+                      <div
+                        key={check.label}
+                        class="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700 ring-1 ring-emerald-200"
+                      >
                         {check.label}
                       </div>
                     ))
@@ -609,24 +662,33 @@ export default function ManifestValidationManager() {
 
               <div>
                 <h3 class="text-sm font-semibold text-slate-900">Verbose findings</h3>
-                <div class="mt-3 max-h-[42vh] space-y-3 overflow-auto pr-1">
+                <div class="mt-3 max-h-[38vh] space-y-3 overflow-auto pr-1">
                   {validationResult.findings.length === 0 ? (
                     <div class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
                       No findings returned. The candidate payload passed validation.
                     </div>
                   ) : (
                     validationResult.findings.map((finding, index) => (
-                      <div key={`${finding.code}-${index}`} class={`rounded-xl px-4 py-3 text-sm ring-1 ${severityClasses(finding.severity)}`}>
+                      <div
+                        key={`${finding.code}-${index}`}
+                        class={`rounded-xl px-4 py-3 text-sm ring-1 ${severityClasses(finding.severity)}`}
+                      >
                         <div class="flex flex-wrap items-center gap-2">
                           <span class="font-semibold uppercase">{finding.severity}</span>
                           <span class="font-mono text-xs">{finding.code}</span>
                           {finding.rule_id ? (
-                            <span class="rounded-full bg-white/70 px-2 py-0.5 text-[11px]">{finding.rule_id}</span>
+                            <span class="rounded-full bg-white/70 px-2 py-0.5 text-[11px]">
+                              {finding.rule_id}
+                            </span>
                           ) : null}
                         </div>
                         <p class="mt-2 leading-6">{finding.message}</p>
-                        {findingLabel(finding) ? <p class="mt-2 text-xs opacity-80">{findingLabel(finding)}</p> : null}
-                        {finding.hint ? <p class="mt-2 text-xs opacity-80">Hint: {finding.hint}</p> : null}
+                        {findingLabel(finding) ? (
+                          <p class="mt-2 text-xs opacity-80">{findingLabel(finding)}</p>
+                        ) : null}
+                        {finding.hint ? (
+                          <p class="mt-2 text-xs opacity-80">Hint: {finding.hint}</p>
+                        ) : null}
                       </div>
                     ))
                   )}

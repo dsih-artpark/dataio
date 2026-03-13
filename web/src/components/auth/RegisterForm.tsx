@@ -192,7 +192,7 @@ export default function RegisterForm() {
             value={email}
             onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
             class="input"
-            placeholder="you@institution.edu"
+            placeholder="name@institute.ac.in"
             required
             disabled={loading}
           />

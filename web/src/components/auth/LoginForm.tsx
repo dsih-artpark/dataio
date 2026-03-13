@@ -39,8 +39,26 @@ export default function LoginForm() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [pendingMessage, setPendingMessage] = useState('');
+  const [authProviders, setAuthProviders] = useState({
+    google: false,
+    github: false,
+    passkey: isWebAuthnSupported(),
+  });
 
   useEffect(() => {
+    api.getAuthProviders()
+      .then((providers) => setAuthProviders({
+        ...providers,
+        passkey: providers.passkey && isWebAuthnSupported(),
+      }))
+      .catch(() => {
+        setAuthProviders({
+          google: false,
+          github: false,
+          passkey: isWebAuthnSupported(),
+        });
+      });
+
     const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
     const oauthSuccess = hash.get('oauth') === 'success';
     const needsPasskey = hash.get('needs_passkey') === 'true';
@@ -227,23 +245,27 @@ export default function LoginForm() {
       )}
 
       <div class="space-y-3">
-        <button
-          onClick={() => api.startOAuth('google')}
-          disabled={loading}
-          class="btn-secondary w-full flex items-center justify-center gap-3"
-        >
-          <GoogleIcon />
-          Continue with Google
-        </button>
-        <button
-          onClick={() => api.startOAuth('github')}
-          disabled={loading}
-          class="btn-secondary w-full flex items-center justify-center gap-3"
-        >
-          <GitHubIcon />
-          Continue with GitHub
-        </button>
-        {isWebAuthnSupported() && (
+        {authProviders.google && (
+          <button
+            onClick={() => api.startOAuth('google')}
+            disabled={loading}
+            class="btn-secondary w-full flex items-center justify-center gap-3"
+          >
+            <GoogleIcon />
+            Continue with Google
+          </button>
+        )}
+        {authProviders.github && (
+          <button
+            onClick={() => api.startOAuth('github')}
+            disabled={loading}
+            class="btn-secondary w-full flex items-center justify-center gap-3"
+          >
+            <GitHubIcon />
+            Continue with GitHub
+          </button>
+        )}
+        {authProviders.passkey && (
           <button
             onClick={handlePasskeyLogin}
             disabled={loading}
@@ -255,14 +277,16 @@ export default function LoginForm() {
         )}
       </div>
 
-      <div class="relative">
-        <div class="absolute inset-0 flex items-center">
-          <div class="w-full border-t border-gray-200" />
+      {(authProviders.google || authProviders.github || authProviders.passkey) && (
+        <div class="relative">
+          <div class="absolute inset-0 flex items-center">
+            <div class="w-full border-t border-gray-200" />
+          </div>
+          <div class="relative flex justify-center text-xs uppercase">
+            <span class="bg-white px-2 text-gray-500">or continue with email</span>
+          </div>
         </div>
-        <div class="relative flex justify-center text-xs uppercase">
-          <span class="bg-white px-2 text-gray-500">or continue with email</span>
-        </div>
-      </div>
+      )}
 
       <form onSubmit={handleEmailSubmit} class="space-y-4">
         <div>
@@ -275,7 +299,7 @@ export default function LoginForm() {
             value={email}
             onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
             class="input"
-            placeholder="you@institution.edu"
+            placeholder="name@institute.ac.in"
             required
             disabled={loading}
           />

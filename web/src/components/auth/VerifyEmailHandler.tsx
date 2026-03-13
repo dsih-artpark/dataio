@@ -128,11 +128,11 @@ export default function VerifyEmailHandler() {
       </div>
 
       <div class="space-y-3">
-        <a href="/register" class="btn-primary w-full block text-center">
-          Try Again
-        </a>
-        <a href="/login" class="btn-secondary w-full block text-center">
+        <a href="/login" class="btn-primary w-full block text-center">
           Sign In
+        </a>
+        <a href="/" class="btn-secondary w-full block text-center">
+          Return Home
         </a>
       </div>
     </div>

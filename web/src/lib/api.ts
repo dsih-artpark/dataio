@@ -16,6 +16,12 @@ interface ApiError {
   detail: string;
 }
 
+interface AuthProviders {
+  google: boolean;
+  github: boolean;
+  passkey: boolean;
+}
+
 class ApiClient {
   private accessToken: string | null = null;
   private refreshPromise: Promise<boolean> | null = null;
@@ -179,6 +185,10 @@ class ApiClient {
       this.clearTokens();
     }
     return data;
+  }
+
+  async getAuthProviders() {
+    return this.request<AuthProviders>('/auth/providers', {}, false);
   }
 
   // Registration endpoints

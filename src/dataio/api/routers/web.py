@@ -119,6 +119,12 @@ class OAuthCallbackRequest(BaseModel):
     state: str
 
 
+class AuthProvidersResponse(BaseModel):
+    google: bool
+    github: bool
+    passkey: bool
+
+
 # =============================================================================
 # Helper Functions
 # =============================================================================
@@ -161,6 +167,20 @@ def clear_refresh_cookie(response: Response) -> None:
 # =============================================================================
 # Authentication Endpoints
 # =============================================================================
+
+
+@web_router.get("/auth/providers", tags=["auth"], response_model=AuthProvidersResponse)
+async def get_auth_providers():
+    """Return which login providers are configured and should be shown in the UI."""
+    return {
+        "google": bool(
+            os.getenv("GOOGLE_OAUTH_CLIENT_ID") and os.getenv("GOOGLE_OAUTH_CLIENT_SECRET")
+        ),
+        "github": bool(
+            os.getenv("GITHUB_OAUTH_CLIENT_ID") and os.getenv("GITHUB_OAUTH_CLIENT_SECRET")
+        ),
+        "passkey": True,
+    }
 
 
 @web_router.post("/auth/login/initiate", tags=["auth"])

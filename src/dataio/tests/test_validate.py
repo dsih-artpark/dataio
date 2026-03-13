@@ -151,8 +151,14 @@ datasetTables:
 """
     result = DataIOValidator().validate_tabular(manifest=manifest, data_files={})
     assert result.status == "fail"
-    assert any(f.code == "invalid_manifest" for f in result.findings)
-    assert any(f.path == "datasetTables.sample.dataDictionary.value" for f in result.findings)
+    finding = next(f for f in result.findings if f.code == "invalid_manifest")
+    assert finding.path == "datasetTables.sample.dataDictionary.value"
+    expected_line = next(
+        line_no
+        for line_no, line in enumerate(manifest.splitlines(), start=1)
+        if line.strip() == "value:"
+    )
+    assert finding.line == expected_line
 
 
 def test_unresolved_enum_ref_fails(tmp_path):
@@ -276,12 +282,18 @@ datasetTables:
       status:
         type: enum1
         nullable: false
-"""
+    """
     result = DataIOValidator().validate_tabular(manifest=manifest, data_files={})
     assert result.status == "fail"
     finding = next(f for f in result.findings if f.code == "unknown_declared_type")
     assert finding.severity == "error"
     assert finding.path == "datasetTables.sample.dataDictionary.status.type"
+    expected_line = next(
+        line_no
+        for line_no, line in enumerate(manifest.splitlines(), start=1)
+        if "type: enum1" in line
+    )
+    assert finding.line == expected_line
 
 
 def test_datetime_format_requires_timezone():

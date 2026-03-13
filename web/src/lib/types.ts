@@ -182,6 +182,8 @@ export interface ValidationFinding {
   code: string;
   message: string;
   path?: string | null;
+  line?: number | null;
+  column?: number | null;
   table?: string | null;
   row?: number | null;
   field?: string | null;

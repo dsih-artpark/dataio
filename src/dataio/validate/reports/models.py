@@ -10,6 +10,8 @@ class Finding(BaseModel):
     code: str
     message: str
     path: str | None = None
+    line: int | None = None
+    column: int | None = None
     table: str | None = None
     row: int | None = None
     field: str | None = None

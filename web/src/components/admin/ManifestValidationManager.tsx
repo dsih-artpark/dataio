@@ -79,6 +79,10 @@ function normalizeLineKey(text: string): string | null {
 }
 
 function findBestLineIndexForFinding(lines: ReviewLine[], finding: ValidationFinding): number {
+  if (finding.line && finding.line >= 1 && finding.line <= lines.length) {
+    return finding.line - 1;
+  }
+
   const findingPath = finding.path;
   if (!findingPath) return -1;
   if (findingPath === 'manifest') return 0;
@@ -225,8 +229,12 @@ function buildVerboseSuccessMessages(paths: string[], text: string): string[] {
 
 function findLineNumberForPath(
   lines: ReviewLine[],
-  findingPath: string | null | undefined
+  findingPath: string | null | undefined,
+  explicitLine?: number | null
 ): number | null {
+  if (explicitLine && explicitLine >= 1 && explicitLine <= lines.length) {
+    return explicitLine;
+  }
   if (!findingPath) return null;
   const exactLine = lines.find((line) => line.paths.includes(findingPath));
   if (exactLine) return exactLine.lineNumber;
@@ -285,7 +293,7 @@ export default function ManifestValidationManager() {
     () =>
       (validationResult?.findings ?? []).map((finding, index) => ({
         id: `${finding.code}-${finding.path || 'manifest'}-${index}`,
-        lineNumber: findLineNumberForPath(lineReviews, finding.path),
+        lineNumber: findLineNumberForPath(lineReviews, finding.path, finding.line),
         path: finding.path || 'manifest',
         message: finding.message,
       })),

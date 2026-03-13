@@ -265,7 +265,7 @@ export default function ManifestValidationManager() {
   };
 
   return (
-    <div class="grid min-h-[calc(100vh-10rem)] gap-6 xl:grid-cols-[minmax(23rem,0.82fr)_minmax(0,1.6fr)]">
+    <div class="space-y-6">
       <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div>
           <h2 class="text-lg font-semibold text-slate-900">Manifest Validation</h2>
@@ -310,7 +310,7 @@ export default function ManifestValidationManager() {
             ) : null}
           </div>
 
-          <div class="grid gap-4 xl:grid-cols-2">
+          <div class="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1.15fr)_minmax(14rem,0.8fr)_minmax(14rem,0.8fr)]">
             <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <span class="mb-2 block text-sm font-medium text-slate-700">Candidate manifest</span>
               <input
@@ -362,36 +362,34 @@ export default function ManifestValidationManager() {
                 ) : null}
               </div>
             </div>
-          </div>
 
-          <div class="grid gap-4 xl:grid-cols-[0.8fr_1fr]">
-            <label class="block">
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <span class="mb-2 block text-sm font-medium text-slate-700">Dataset kind</span>
               <select
                 value={datasetKind}
                 onChange={(e) => setDatasetKind((e.currentTarget as HTMLSelectElement).value as DatasetKind)}
-                class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-200"
               >
                 <option value="tabular">Tabular</option>
                 <option value="geojson">GeoJSON</option>
               </select>
-            </label>
+            </div>
 
-            {datasetKind === 'tabular' ? (
-              <label class="block">
-                <span class="mb-2 block text-sm font-medium text-slate-700">Table name</span>
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <span class="mb-2 block text-sm font-medium text-slate-700">Table name</span>
+              {datasetKind === 'tabular' ? (
                 <input
                   value={tableName}
                   onInput={(e) => setTableName((e.currentTarget as HTMLInputElement).value)}
                   placeholder="Optional if the manifest defines a single table"
-                  class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                  class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-200"
                 />
-              </label>
-            ) : (
-              <div class="rounded-2xl border border-dashed border-slate-200 px-4 py-3 text-sm text-slate-500">
-                GeoJSON validation does not require a table name.
-              </div>
-            )}
+              ) : (
+                <div class="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
+                  GeoJSON validation does not require a table name.
+                </div>
+              )}
+            </div>
           </div>
 
           <div class="grid gap-4 xl:grid-cols-2">

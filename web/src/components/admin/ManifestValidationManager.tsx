@@ -67,8 +67,7 @@ function severityClasses(severity: string) {
 function buildLineReviews(manifestText: string, findings: ValidationFinding[]): ReviewLine[] {
   const lines = manifestText.split(/\r?\n/);
   const stack: { indent: number; path: string }[] = [];
-
-  return lines.map((text, index) => {
+  const reviewLines = lines.map((text, index) => {
     const indent = text.match(/^(\s*)/)?.[1].length ?? 0;
     const trimmed = text.trim();
     const keyMatch = trimmed.match(/^['"]?([^'":]+)['"]?\s*:/);
@@ -89,20 +88,22 @@ function buildLineReviews(manifestText: string, findings: ValidationFinding[]): 
       }
     }
 
-    const matchingFindings = findings.filter((finding) => {
-      const findingPath = finding.path;
-      if (!findingPath) return false;
-      if (findingPath === 'manifest') return index === 0;
-      return paths.some((path) => findingPath === path);
-    });
-
     return {
       lineNumber: index + 1,
       text,
-      findings: matchingFindings,
+      findings: [],
       paths,
     };
   });
+
+  for (const finding of findings) {
+    const targetLineIndex = findBestLineIndexForFinding(reviewLines, finding);
+    if (targetLineIndex >= 0) {
+      reviewLines[targetLineIndex].findings.push(finding);
+    }
+  }
+
+  return reviewLines;
 }
 
 function findingLabel(finding: ValidationFinding) {
@@ -117,7 +118,7 @@ function findingLabel(finding: ValidationFinding) {
 
 function buildNarrative(result: ValidationResult) {
   if (result.status === 'pass') {
-    return `Validation completed successfully. The manifest parsed, ${result.summary.tables_checked || 0} table definitions were checked, and ${result.summary.rows_checked || 0} data rows were scanned without errors or warnings.`;
+    return 'Validation completed successfully. The manifest parsed and the declared contract checks passed without errors or warnings.';
   }
 
   if (result.status === 'warn') {
@@ -156,12 +157,49 @@ function buildVerboseSuccessMessages(paths: string[], text: string): string[] {
   return messages;
 }
 
+function findLineNumberForPath(lines: ReviewLine[], findingPath: string | null | undefined): number | null {
+  if (!findingPath) return null;
+  const exactLine = lines.find((line) => line.paths.includes(findingPath));
+  if (exactLine) return exactLine.lineNumber;
+  const nearestLine = lines.find((line) =>
+    line.paths.some((path) => findingPath === path || findingPath.startsWith(`${path}.`))
+  );
+  return nearestLine ? nearestLine.lineNumber : null;
+}
+
+function findBestLineIndexForFinding(lines: ReviewLine[], finding: ValidationFinding): number {
+  const findingPath = finding.path;
+  if (!findingPath) return -1;
+  if (findingPath === 'manifest') return 0;
+
+  let bestIndex = -1;
+  let bestScore = -1;
+
+  lines.forEach((line, index) => {
+    for (const linePath of line.paths) {
+      let score = -1;
+      if (findingPath === linePath) {
+        score = 10000 + linePath.length;
+      } else if (findingPath.startsWith(`${linePath}.`)) {
+        score = linePath.length;
+      } else if (linePath.startsWith(`${findingPath}.`)) {
+        score = findingPath.length;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = index;
+      }
+    }
+  });
+
+  return bestIndex;
+}
+
 export default function ManifestValidationManager() {
   const [datasetKind, setDatasetKind] = useState<DatasetKind>('tabular');
   const [manifestFile, setManifestFile] = useState<File | null>(null);
   const [manifestText, setManifestText] = useState('');
-  const [dataFile, setDataFile] = useState<File | null>(null);
-  const [tableName, setTableName] = useState('');
   const [deepCheck, setDeepCheck] = useState(true);
   const [showRules, setShowRules] = useState(false);
   const [showVerboseSuccess, setShowVerboseSuccess] = useState(false);
@@ -193,14 +231,13 @@ export default function ManifestValidationManager() {
 
   const issueSummary = useMemo(
     () =>
-      lineReviews
-        .filter((line) => line.findings.length > 0)
-        .map((line) => ({
-          lineNumber: line.lineNumber,
-          path: line.findings[0]?.path || line.paths[0] || 'manifest',
-          messages: Array.from(new Set(line.findings.map((finding) => finding.message))),
-        })),
-    [lineReviews]
+      (validationResult?.findings ?? []).map((finding, index) => ({
+        id: `${finding.code}-${finding.path || 'manifest'}-${index}`,
+        lineNumber: findLineNumberForPath(lineReviews, finding.path),
+        path: finding.path || 'manifest',
+        messages: [finding.message],
+      })),
+    [lineReviews, validationResult]
   );
 
   const displayedLineReviews = useMemo(() => {
@@ -247,13 +284,10 @@ export default function ManifestValidationManager() {
         datasetKind === 'tabular'
           ? await api.adminValidateTabular({
               manifestFile,
-              tableFile: dataFile,
-              tableName: tableName || undefined,
               deepCheck,
             })
           : await api.adminValidateGeojson({
               manifestFile,
-              geojsonFile: dataFile,
               deepCheck,
             });
       setValidationResult(result);
@@ -270,14 +304,126 @@ export default function ManifestValidationManager() {
         <div>
           <h2 class="text-lg font-semibold text-slate-900">Manifest Validation</h2>
           <p class="mt-1 text-sm text-slate-600">
-            Validate a candidate manifest and optional data file before promoting it.
+            Validate a candidate manifest before promoting it.
           </p>
           <p class="mt-2 text-sm text-slate-500">
-            Uploaded files are only kept in your browser until you submit this form. The validation request reads them in memory and does not persist them.
+            The uploaded manifest is only kept in your browser until you submit this form. The validation request reads it in memory and does not persist it.
           </p>
         </div>
 
         <form class="mt-6 space-y-4" onSubmit={handleValidation}>
+          <div class="grid gap-4 xl:grid-cols-[minmax(20rem,1.15fr)_minmax(20rem,1.1fr)_minmax(12rem,0.7fr)_minmax(18rem,1fr)_auto]">
+            <div class="rounded-2xl border border-slate-200 bg-slate-50">
+              <button
+                type="button"
+                onClick={() => setShowRules((value) => !value)}
+                class="flex h-full w-full items-center justify-between px-4 py-3 text-left"
+              >
+                <div>
+                  <span class="block text-sm font-semibold text-slate-900">Validation rules and allowed values</span>
+                  <span class="mt-1 block text-xs text-slate-500">
+                    Open the rulebook, including supported data types and manifest constraints.
+                  </span>
+                </div>
+                <span class="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700">
+                  {showRules ? 'Hide' : 'Show'}
+                </span>
+              </button>
+            </div>
+
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <span class="mb-2 block text-sm font-medium text-slate-700">Candidate manifest</span>
+              <div class="flex items-center gap-3">
+                <input
+                  type="file"
+                  accept=".yaml,.yml"
+                  onChange={(e) => {
+                    const input = e.currentTarget as HTMLInputElement;
+                    handleManifestChange(input.files?.[0] ?? null);
+                  }}
+                  class="block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 file:mr-4 file:rounded-lg file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white"
+                />
+                {manifestFile ? (
+                  <button
+                    type="button"
+                    onClick={() => handleManifestChange(null)}
+                    class="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 transition hover:bg-white"
+                  >
+                    Clear
+                  </button>
+                ) : null}
+              </div>
+              <div class="mt-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                {manifestFile?.name || 'No manifest selected'}
+              </div>
+            </div>
+
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <span class="mb-2 block text-sm font-medium text-slate-700">Dataset kind</span>
+              <select
+                value={datasetKind}
+                onChange={(e) => setDatasetKind((e.currentTarget as HTMLSelectElement).value as DatasetKind)}
+                class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-200"
+              >
+                <option value="tabular">Tabular</option>
+                <option value="geojson">GeoJSON</option>
+              </select>
+            </div>
+
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div class="space-y-3">
+                <label class="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={deepCheck}
+                    onChange={(e) => setDeepCheck((e.currentTarget as HTMLInputElement).checked)}
+                    class="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
+                  />
+                  <span>
+                    <span class="block text-sm font-medium text-slate-800">Deep check</span>
+                    <span class="block text-xs text-slate-500">Verify dataset, collection, and category identity against the database.</span>
+                  </span>
+                </label>
+
+                <label class="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={showVerboseSuccess}
+                    onChange={(e) => setShowVerboseSuccess((e.currentTarget as HTMLInputElement).checked)}
+                    class="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
+                  />
+                  <span>
+                    <span class="block text-sm font-medium text-slate-800">Verbose success</span>
+                    <span class="block text-xs text-slate-500">Show positive rule confirmations in the YAML pane.</span>
+                  </span>
+                </label>
+
+                <label class="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={showIssueRowsOnly}
+                    onChange={(e) => setShowIssueRowsOnly((e.currentTarget as HTMLInputElement).checked)}
+                    class="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
+                  />
+                  <span>
+                    <span class="block text-sm font-medium text-slate-800">Issue rows only</span>
+                    <span class="block text-xs text-slate-500">Show only broken lines and nearby context.</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div class="flex items-end">
+              <button
+                type="submit"
+                disabled={!manifestFile || validating}
+                class="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {validating ? 'Validating...' : 'Run Validation'}
+              </button>
+            </div>
+          </div>
+
           <div class="rounded-2xl border border-slate-200 bg-slate-50">
             <button
               type="button"
@@ -310,142 +456,11 @@ export default function ManifestValidationManager() {
             ) : null}
           </div>
 
-          <div class="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1.15fr)_minmax(14rem,0.8fr)_minmax(14rem,0.8fr)]">
-            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <span class="mb-2 block text-sm font-medium text-slate-700">Candidate manifest</span>
-              <input
-                type="file"
-                accept=".yaml,.yml"
-                onChange={(e) => {
-                  const input = e.currentTarget as HTMLInputElement;
-                  handleManifestChange(input.files?.[0] ?? null);
-                }}
-                class="block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 file:mr-4 file:rounded-lg file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white"
-              />
-              <div class="mt-3 flex min-h-11 items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
-                <span class="truncate text-slate-700">{manifestFile?.name || 'No manifest selected'}</span>
-                {manifestFile ? (
-                  <button
-                    type="button"
-                    onClick={() => handleManifestChange(null)}
-                    class="rounded-lg border border-slate-300 px-3 py-1.5 text-slate-700 transition hover:bg-slate-50"
-                  >
-                    Remove
-                  </button>
-                ) : null}
-              </div>
-            </div>
-
-            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <span class="mb-2 block text-sm font-medium text-slate-700">
-                {datasetKind === 'tabular' ? 'CSV or table file (optional)' : 'GeoJSON file (optional)'}
-              </span>
-              <input
-                type="file"
-                accept={datasetKind === 'tabular' ? '.csv,text/csv' : '.geojson,.json,application/geo+json,application/json'}
-                onChange={(e) => {
-                  const input = e.currentTarget as HTMLInputElement;
-                  setDataFile(input.files?.[0] ?? null);
-                }}
-                class="block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 file:mr-4 file:rounded-lg file:border-0 file:bg-slate-200 file:px-3 file:py-2 file:text-sm file:font-medium file:text-slate-900"
-              />
-              <div class="mt-3 flex min-h-11 items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
-                <span class="truncate text-slate-700">{dataFile?.name || 'No data file selected'}</span>
-                {dataFile ? (
-                  <button
-                    type="button"
-                    onClick={() => setDataFile(null)}
-                    class="rounded-lg border border-slate-300 px-3 py-1.5 text-slate-700 transition hover:bg-slate-50"
-                  >
-                    Remove
-                  </button>
-                ) : null}
-              </div>
-            </div>
-
-            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <span class="mb-2 block text-sm font-medium text-slate-700">Dataset kind</span>
-              <select
-                value={datasetKind}
-                onChange={(e) => setDatasetKind((e.currentTarget as HTMLSelectElement).value as DatasetKind)}
-                class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-200"
-              >
-                <option value="tabular">Tabular</option>
-                <option value="geojson">GeoJSON</option>
-              </select>
-            </div>
-
-            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <span class="mb-2 block text-sm font-medium text-slate-700">Table name</span>
-              {datasetKind === 'tabular' ? (
-                <input
-                  value={tableName}
-                  onInput={(e) => setTableName((e.currentTarget as HTMLInputElement).value)}
-                  placeholder="Optional if the manifest defines a single table"
-                  class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-200"
-                />
-              ) : (
-                <div class="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">
-                  GeoJSON validation does not require a table name.
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div class="grid gap-4 xl:grid-cols-2">
-            <label class="flex items-center gap-3 rounded-2xl border border-slate-200 px-4 py-3">
-              <input
-                type="checkbox"
-                checked={deepCheck}
-                onChange={(e) => setDeepCheck((e.currentTarget as HTMLInputElement).checked)}
-                class="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
-              />
-              <span>
-                <span class="block text-sm font-medium text-slate-800">Deep check</span>
-                <span class="block text-xs text-slate-500">Also verify dataset, collection, and category identity against the database.</span>
-              </span>
-            </label>
-
-            <label class="flex items-center gap-3 rounded-2xl border border-slate-200 px-4 py-3">
-              <input
-                type="checkbox"
-                checked={showVerboseSuccess}
-                onChange={(e) => setShowVerboseSuccess((e.currentTarget as HTMLInputElement).checked)}
-                class="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
-              />
-              <span>
-                <span class="block text-sm font-medium text-slate-800">Verbose success messages</span>
-                <span class="block text-xs text-slate-500">Show positive rule confirmations in the annotated YAML, not just failures.</span>
-              </span>
-            </label>
-          </div>
-
-          <label class="flex items-center gap-3 rounded-2xl border border-slate-200 px-4 py-3">
-            <input
-              type="checkbox"
-              checked={showIssueRowsOnly}
-              onChange={(e) => setShowIssueRowsOnly((e.currentTarget as HTMLInputElement).checked)}
-              class="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
-            />
-            <span>
-              <span class="block text-sm font-medium text-slate-800">Filter to issue rows with context</span>
-              <span class="block text-xs text-slate-500">Show only lines with findings and two nearby lines on either side.</span>
-            </span>
-          </label>
-
           {validationError ? (
             <div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               {validationError}
             </div>
           ) : null}
-
-          <button
-            type="submit"
-            disabled={!manifestFile || validating}
-            class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {validating ? 'Validating...' : 'Run Validation'}
-          </button>
         </form>
       </section>
 
@@ -528,12 +543,12 @@ export default function ManifestValidationManager() {
                     <dd class="mt-1 text-lg font-semibold">{validationResult.summary.warnings}</dd>
                   </div>
                   <div class="rounded-xl bg-white/60 px-3 py-2">
-                    <dt class="text-xs uppercase tracking-wide opacity-70">Tables checked</dt>
-                    <dd class="mt-1 text-lg font-semibold">{validationResult.summary.tables_checked}</dd>
+                    <dt class="text-xs uppercase tracking-wide opacity-70">Findings</dt>
+                    <dd class="mt-1 text-lg font-semibold">{validationResult.findings.length}</dd>
                   </div>
                   <div class="rounded-xl bg-white/60 px-3 py-2">
-                    <dt class="text-xs uppercase tracking-wide opacity-70">Rows checked</dt>
-                    <dd class="mt-1 text-lg font-semibold">{validationResult.summary.rows_checked}</dd>
+                    <dt class="text-xs uppercase tracking-wide opacity-70">Dataset kind</dt>
+                    <dd class="mt-1 text-lg font-semibold capitalize">{validationResult.dataset_kind}</dd>
                   </div>
                 </dl>
               </div>
@@ -557,10 +572,10 @@ export default function ManifestValidationManager() {
                     </div>
                   ) : (
                     issueSummary.map((issue) => (
-                      <div key={`${issue.lineNumber}-${issue.path}`} class="rounded-xl border border-red-200 bg-white px-4 py-3">
+                      <div key={issue.id} class="rounded-xl border border-red-200 bg-white px-4 py-3">
                         <div class="flex flex-wrap items-center gap-2 text-sm">
                           <span class="rounded-full bg-red-50 px-2 py-0.5 font-semibold text-red-700 ring-1 ring-red-200">
-                            Line {issue.lineNumber}
+                            {issue.lineNumber ? `Line ${issue.lineNumber}` : 'Unmapped'}
                           </span>
                           <code class="text-xs text-slate-600">{issue.path}</code>
                         </div>

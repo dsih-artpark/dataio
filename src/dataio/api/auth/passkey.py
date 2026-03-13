@@ -153,7 +153,9 @@ def get_registration_options(user_email: str) -> dict:
             exclude_credentials=exclude_credentials,
             authenticator_selection=AuthenticatorSelectionCriteria(
                 authenticator_attachment=AuthenticatorAttachment.PLATFORM,
-                resident_key=ResidentKeyRequirement.PREFERRED,
+                # Require discoverable credentials so the sign-in screen can
+                # support passkey auth without asking for an email first.
+                resident_key=ResidentKeyRequirement.REQUIRED,
                 user_verification=UserVerificationRequirement.PREFERRED,
             ),
         )

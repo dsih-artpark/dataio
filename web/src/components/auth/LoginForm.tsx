@@ -6,6 +6,33 @@ import OTPInput from './OTPInput';
 
 type LoginStep = 'email' | 'otp' | 'passkey-prompt' | 'pending';
 
+function GoogleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" class="h-5 w-5" aria-hidden="true">
+      <path fill="#4285F4" d="M21.6 12.23c0-.68-.06-1.33-.17-1.95H12v3.69h5.39a4.61 4.61 0 0 1-2 3.03v2.5h3.24c1.9-1.75 2.97-4.34 2.97-7.27Z" />
+      <path fill="#34A853" d="M12 22c2.7 0 4.97-.9 6.63-2.43l-3.24-2.5c-.9.6-2.05.96-3.39.96-2.61 0-4.82-1.77-5.61-4.14H3.05v2.57A10 10 0 0 0 12 22Z" />
+      <path fill="#FBBC05" d="M6.39 13.89A5.97 5.97 0 0 1 6.08 12c0-.66.11-1.3.31-1.89V7.54H3.05A10 10 0 0 0 2 12c0 1.61.38 3.14 1.05 4.46l3.34-2.57Z" />
+      <path fill="#EA4335" d="M12 5.97c1.47 0 2.8.5 3.85 1.49l2.89-2.89C16.96 2.92 14.7 2 12 2a10 10 0 0 0-8.95 5.54l3.34 2.57C7.18 7.74 9.39 5.97 12 5.97Z" />
+    </svg>
+  );
+}
+
+function GitHubIcon() {
+  return (
+    <svg viewBox="0 0 24 24" class="h-5 w-5 fill-current" aria-hidden="true">
+      <path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.11.82-.26.82-.58v-2.03c-3.34.73-4.04-1.42-4.04-1.42-.55-1.37-1.33-1.74-1.33-1.74-1.09-.74.08-.73.08-.73 1.2.09 1.84 1.23 1.84 1.23 1.08 1.82 2.82 1.29 3.5.99.11-.77.42-1.29.76-1.59-2.67-.3-5.47-1.31-5.47-5.86 0-1.3.47-2.37 1.24-3.2-.12-.3-.54-1.53.12-3.19 0 0 1.01-.32 3.3 1.22a11.5 11.5 0 0 1 6 0c2.28-1.54 3.29-1.22 3.29-1.22.66 1.66.24 2.89.12 3.19.77.83 1.24 1.9 1.24 3.2 0 4.56-2.81 5.55-5.49 5.85.43.37.82 1.1.82 2.23v3.3c0 .32.22.7.83.58A12 12 0 0 0 12 .5Z" />
+    </svg>
+  );
+}
+
+function PasskeyIcon() {
+  return (
+    <svg viewBox="0 0 24 24" class="h-5 w-5" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M14.5 10.5a3.5 3.5 0 1 0-2.8 3.43V17h2v1.5h2V20h2v-2.35l1.15-1.15A6.5 6.5 0 1 0 14.5 10.5Z" />
+    </svg>
+  );
+}
+
 export default function LoginForm() {
   const [step, setStep] = useState<LoginStep>('email');
   const [email, setEmail] = useState('');
@@ -99,7 +126,10 @@ export default function LoginForm() {
       await authenticateWithPasskey(email || undefined);
       window.location.href = '/datasets';
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Passkey login failed');
+      const fallbackMessage = email
+        ? 'Passkey login failed. Please try again.'
+        : 'Passkey login failed. If this passkey was created earlier, enter your email and try again.';
+      setError(err instanceof Error ? err.message : fallbackMessage);
       setLoading(false);
     }
   };
@@ -200,23 +230,26 @@ export default function LoginForm() {
         <button
           onClick={() => api.startOAuth('google')}
           disabled={loading}
-          class="btn-secondary w-full"
+          class="btn-secondary w-full flex items-center justify-center gap-3"
         >
+          <GoogleIcon />
           Continue with Google
         </button>
         <button
           onClick={() => api.startOAuth('github')}
           disabled={loading}
-          class="btn-secondary w-full"
+          class="btn-secondary w-full flex items-center justify-center gap-3"
         >
+          <GitHubIcon />
           Continue with GitHub
         </button>
         {isWebAuthnSupported() && (
           <button
             onClick={handlePasskeyLogin}
             disabled={loading}
-            class="btn-secondary w-full"
+            class="btn-secondary w-full flex items-center justify-center gap-3"
           >
+            <PasskeyIcon />
             Sign in with Passkey
           </button>
         )}

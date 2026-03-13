@@ -121,6 +121,12 @@ class DataIOAdminAPI:
         with open(metadata_path, "r") as f:
             metadata = yaml.safe_load(f)
 
+        manifest_path = folder / "manifest.yaml"
+        if not manifest_path.exists():
+            manifest_path = folder / "manifest.yml"
+        if not manifest_path.exists():
+            manifest_path = None
+
         # Get table definitions
         tables = metadata.get("tables", {})
 
@@ -132,6 +138,7 @@ class DataIOAdminAPI:
             "collection_id": collection_id,
             "folder_path": folder,
             "info": info,
+            "manifest_path": manifest_path,
             "tables": tables,
             "csv_files": csv_files,
         }
@@ -287,6 +294,28 @@ class DataIOAdminAPI:
             response.raise_for_status()
             return response.json()
 
+    def upload_manifest(
+        self,
+        dataset_id: str,
+        bucket_type: str,
+        manifest_path: Path,
+    ) -> Dict:
+        with open(manifest_path, "rb") as manifest_file:
+            files = {
+                "manifest_file": (
+                    manifest_path.name,
+                    manifest_file,
+                    "application/x-yaml",
+                )
+            }
+            url = f"{self.base_url}/admin/datasets/{dataset_id}/{bucket_type}/manifest"
+            response = self.session.put(url, files=files)
+            response.raise_for_status()
+            return response.json()
+
+    def get_manifest(self, dataset_id: str, bucket_type: str) -> Dict:
+        return self._request("GET", f"/admin/datasets/{dataset_id}/{bucket_type}/manifest")
+
     def upload_dataset_folder(
         self,
         folder_path: str,
@@ -307,6 +336,7 @@ class DataIOAdminAPI:
         ds_id = parsed["ds_id"]
         collection_id = parsed["collection_id"]
         info = parsed["info"]
+        manifest_path = parsed["manifest_path"]
         tables = parsed["tables"]
         csv_files = parsed["csv_files"]
 
@@ -326,6 +356,7 @@ class DataIOAdminAPI:
             "data_owner_created": False,
             "raw_dataset": None,
             "dataset": None,
+            "manifest_uploaded": False,
             "tables_uploaded": [],
             "tables_failed": [],
         }
@@ -411,8 +442,22 @@ class DataIOAdminAPI:
                 console.print(f"  [red]✗[/] Failed to create dataset: {e.response.text}")
                 raise
 
-        # Step 4: Upload tables
-        console.print(f"\n[bold]Step 4:[/] Uploading {len(csv_files)} tables...")
+        if manifest_path:
+            console.print(f"\n[bold]Step 4:[/] Uploading manifest [cyan]{manifest_path.name}[/]...")
+            try:
+                self.upload_manifest(
+                    dataset_id=ds_id,
+                    bucket_type=bucket_type,
+                    manifest_path=manifest_path,
+                )
+                results["manifest_uploaded"] = True
+                console.print("  [green]✓[/] Manifest uploaded")
+            except requests.HTTPError as e:
+                console.print(f"  [red]✗[/] Failed to upload manifest: {e.response.text}")
+                raise
+
+        # Step 5: Upload tables
+        console.print(f"\n[bold]Step 5:[/] Uploading {len(csv_files)} tables...")
 
         with Progress(
             SpinnerColumn(),

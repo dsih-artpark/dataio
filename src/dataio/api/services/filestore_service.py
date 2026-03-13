@@ -1,12 +1,14 @@
+import json
+import os
+from pathlib import Path
+
 import boto3
+import dotenv
 from botocore.client import Config
 from botocore.exceptions import ClientError
-import dotenv
-import os
 from fastapi import UploadFile
-from dataio.api.models import VersionType, TableMetadata
-import json
-from pathlib import Path
+
+from dataio.api.models import TableMetadata, VersionType
 from dataio.api.services.base_service import BaseService, get_aws_access_key_id
 
 dotenv.load_dotenv()
@@ -34,6 +36,12 @@ class FilestoreService(BaseService):
     def _get_prefix_for_dataset(self, dataset_id: str, version_type: VersionType):
         return f"filestore/{version_type.value}/{dataset_id}"
 
+    def _manifest_yaml_key(self, dataset_id: str, version_type: VersionType) -> str:
+        return f"{self._get_prefix_for_dataset(dataset_id, version_type)}/manifest.yaml"
+
+    def _manifest_json_key(self, dataset_id: str, version_type: VersionType) -> str:
+        return f"{self._get_prefix_for_dataset(dataset_id, version_type)}/manifest.json"
+
     def _get_metadata_object(self, dataset_id: str, version_type: VersionType):
         prefix = self._get_prefix_for_dataset(dataset_id, version_type)
         try:
@@ -42,7 +50,11 @@ class FilestoreService(BaseService):
         except ClientError as e:
             # Handle NoSuchKey error - create empty metadata if file doesn't exist
             if e.response.get("Error", {}).get("Code") == "NoSuchKey":
-                self.logger.info(f"No metadata.json found for {dataset_id}/{version_type.value}, creating empty one")
+                self.logger.info(
+                    "No metadata.json found for %s/%s, creating empty one",
+                    dataset_id,
+                    version_type.value,
+                )
                 self.bucket.put_object(
                     Body=json.dumps({"tables": {}}),
                     Key=f"{prefix}/metadata.json",
@@ -85,11 +97,60 @@ class FilestoreService(BaseService):
                 Key=f"{prefix}/metadata.json",
             )
         except ValidationError as e:
-            self.logger.error(f"Validation error uploading file: {str(e)}")
+            self.logger.error(f"Validation error uploading file: {e!s}")
             raise e
         except Exception as e:
-            self.logger.error(f"Failed to upload file: {str(e)}")
+            self.logger.error(f"Failed to upload file: {e!s}")
             raise e
+
+    def upload_manifest(
+        self,
+        dataset_id: str,
+        version_type: VersionType,
+        manifest_yaml: str,
+        manifest_json: dict,
+    ) -> None:
+        self.bucket.put_object(
+            Body=manifest_yaml.encode("utf-8"),
+            Key=self._manifest_yaml_key(dataset_id, version_type),
+            ContentType="application/x-yaml",
+        )
+        self.bucket.put_object(
+            Body=json.dumps(manifest_json).encode("utf-8"),
+            Key=self._manifest_json_key(dataset_id, version_type),
+            ContentType="application/json",
+        )
+
+    def get_manifest(self, dataset_id: str, version_type: VersionType) -> dict:
+        manifest_yaml = None
+        manifest_json = None
+        try:
+            manifest_yaml = (
+                self.bucket.Object(self._manifest_yaml_key(dataset_id, version_type))
+                .get()["Body"]
+                .read()
+                .decode("utf-8")
+            )
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") != "NoSuchKey":
+                raise
+
+        try:
+            manifest_json = json.loads(
+                self.bucket.Object(self._manifest_json_key(dataset_id, version_type))
+                .get()["Body"]
+                .read()
+                .decode("utf-8")
+            )
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") != "NoSuchKey":
+                raise
+
+        return {
+            "manifest_yaml": manifest_yaml,
+            "manifest_json": manifest_json,
+            "has_manifest": manifest_yaml is not None or manifest_json is not None,
+        }
 
     def list_files_in_s3(self, dataset_id: str, version_type: VersionType):
         """
@@ -103,7 +164,13 @@ class FilestoreService(BaseService):
                 obj.key.split("/")[-1]
                 for obj in self.bucket.objects.filter(Prefix=prefix)
             ]
-            self.logger.info(f"Found {len(files_list)} files in S3 for {dataset_id}/{version_type.value}: {files_list}")
+            self.logger.info(
+                "Found %s files in S3 for %s/%s: %s",
+                len(files_list),
+                dataset_id,
+                version_type.value,
+                files_list,
+            )
 
             return_json_list = []
             for file in files_list:
@@ -113,7 +180,11 @@ class FilestoreService(BaseService):
                 file_stem = Path(file).stem
                 # Handle case where file exists in S3 but not in metadata
                 if file_stem not in metadata_object.get("tables", {}):
-                    self.logger.warning(f"File {file} exists in S3 but not in metadata.json for {dataset_id}")
+                    self.logger.warning(
+                        "File %s exists in S3 but not in metadata.json for %s",
+                        file,
+                        dataset_id,
+                    )
                     # Still include the file with minimal metadata
                     return_json = {
                         "table_name": file_stem,
@@ -135,7 +206,7 @@ class FilestoreService(BaseService):
             self.logger.info(f"Returning {len(return_json_list)} tables for {dataset_id}")
             return return_json_list
         except Exception as e:
-            self.logger.error(f"Failed to list files for {dataset_id}: {str(e)}", exc_info=True)
+            self.logger.error(f"Failed to list files for {dataset_id}: {e!s}", exc_info=True)
             raise e
 
     def delete_file(self, dataset_id: str, version_type: VersionType, file_name: str):
@@ -154,7 +225,7 @@ class FilestoreService(BaseService):
                 Delete={"Objects": [{"Key": f"{prefix}/{file_name + '.csv'}"}]}
             )
         except Exception as e:
-            self.logger.error(f"Failed to delete file: {str(e)}")
+            self.logger.error(f"Failed to delete file: {e!s}")
             raise e
 
     def _get_download_link(
@@ -218,5 +289,5 @@ class FilestoreService(BaseService):
 
             return shapefiles_list
         except Exception as e:
-            self.logger.error(f"Failed to list shapefiles: {str(e)}")
+            self.logger.error(f"Failed to list shapefiles: {e!s}")
             raise e

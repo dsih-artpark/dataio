@@ -400,7 +400,14 @@ CREATE TABLE public.datasets (
     temporal_coverage_end_date date,
     temporal_resolution public.temporal_resolution,
     access_level public.access_level NOT NULL,
-    additional_metadata jsonb
+    additional_metadata jsonb,
+    readme_md text,
+    data_dictionary_json text,
+    manifest_yaml text,
+    manifest_json jsonb,
+    manifest_updated_at timestamp with time zone,
+    manifest_updated_by text,
+    documentation_synced_at timestamp with time zone
 );
 
 
@@ -462,7 +469,14 @@ CREATE VIEW public.datasets_full_view AS
     d.temporal_coverage_end_date,
     d.temporal_resolution,
     d.access_level,
-    d.additional_metadata
+    d.additional_metadata,
+    d.readme_md,
+    d.data_dictionary_json,
+    d.manifest_yaml,
+    d.manifest_json,
+    d.manifest_updated_at,
+    d.manifest_updated_by,
+    d.documentation_synced_at
    FROM (((((((public.datasets d
      LEFT JOIN public.collections c ON ((d.collection_id = c.id)))
      LEFT JOIN public.data_owners do2 ON ((d.data_owner_id = do2.id)))
@@ -471,7 +485,7 @@ CREATE VIEW public.datasets_full_view AS
      LEFT JOIN public.dataset_tags dt ON ((dt.dataset_id = d.id)))
      LEFT JOIN public.tags t ON ((t.id = dt.tag_id)))
      LEFT JOIN public.regions r ON ((r.region_id = d.spatial_coverage_region_id)))
-  GROUP BY d.id, d.ds_id, d.title, c.collection_id, c.collection_name, c.category_id, c.category_name, do2.name, do2.contact_person, do2.contact_person_email, d.description, r.region_name, d.spatial_resolution, d.temporal_coverage_start_date, d.temporal_coverage_end_date, d.temporal_resolution, d.access_level, d.additional_metadata;
+  GROUP BY d.id, d.ds_id, d.title, c.collection_id, c.collection_name, c.category_id, c.category_name, do2.name, do2.contact_person, do2.contact_person_email, d.description, r.region_name, d.spatial_resolution, d.temporal_coverage_start_date, d.temporal_coverage_end_date, d.temporal_resolution, d.access_level, d.additional_metadata, d.readme_md, d.data_dictionary_json, d.manifest_yaml, d.manifest_json, d.manifest_updated_at, d.manifest_updated_by, d.documentation_synced_at;
 
 
 --
@@ -942,4 +956,3 @@ ALTER TABLE ONLY public.user_permissions
 --
 -- PostgreSQL database dump complete
 --
-

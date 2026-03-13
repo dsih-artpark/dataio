@@ -1,5 +1,5 @@
-import os
 import logging
+import os
 
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse, JSONResponse
@@ -9,6 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from dataio.api.routers.admin import admin_router
 from dataio.api.routers.user import user_router
+from dataio.api.routers.validate import validate_router
 from dataio.api.routers.web import web_router
 from dataio.api.auth.providers import API_KEY_PREFIX
 
@@ -76,6 +77,7 @@ app.add_middleware(
 app.include_router(user_router)
 app.include_router(admin_router)
 app.include_router(web_router)
+app.include_router(validate_router)
 
 
 # Global exception handler to ensure all errors return JSON
@@ -87,7 +89,8 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"detail": "An unexpected error occurred. Please try again."},
     )
 
-app.mount("/docs", StaticFiles(directory="docs/build/", html=True), name="docs")
+if os.path.isdir("docs/build/"):
+    app.mount("/docs", StaticFiles(directory="docs/build/", html=True), name="docs")
 
 
 @app.get("/api")

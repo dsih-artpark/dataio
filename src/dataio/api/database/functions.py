@@ -88,6 +88,35 @@ def get_dataset(dataset_id: str):
         session.close()
 
 
+def update_dataset_manifest_cache(
+    dataset_id: str,
+    *,
+    manifest_yaml: str,
+    manifest_json: dict,
+    updated_by: str,
+):
+    session = Session()
+    try:
+        dataset = session.query(Dataset).filter(Dataset.ds_id == dataset_id).first()
+        if not dataset:
+            raise ValueError(f"Dataset with ID {dataset_id} not found")
+
+        now = datetime.utcnow()
+        dataset.manifest_yaml = manifest_yaml
+        dataset.manifest_json = manifest_json
+        dataset.manifest_updated_at = now
+        dataset.manifest_updated_by = updated_by
+        dataset.documentation_synced_at = now
+        session.commit()
+        session.refresh(dataset)
+        return dataset
+    except Exception as e:
+        logger.error(f"Error updating dataset manifest cache: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
 def get_datasets(
     limit: int = 100, offset: int = 0, user_permissions: List[UserPermission] = None
 ) -> List[Dataset]:

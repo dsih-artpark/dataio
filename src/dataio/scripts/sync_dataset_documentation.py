@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Sync dataset documentation (README.md and metadata.json) from S3 file server to database.
+Sync dataset documentation (README.md and manifest files) from S3 file server to database.
 
-This script fetches README.md and metadata.json files from the S3 filestore
+This script fetches README.md and manifest files from the S3 filestore
 and caches their contents in the datasets table for faster access.
 
 Usage:
@@ -17,11 +17,12 @@ Usage:
 """
 
 import argparse
+import json
 import logging
-from datetime import datetime
-from typing import Optional
 import os
 import sys
+from datetime import datetime
+from typing import Optional
 
 import boto3
 from botocore.client import Config
@@ -29,6 +30,7 @@ from botocore.exceptions import ClientError
 import dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
+import yaml
 
 from dataio.api.services.base_service import get_aws_access_key_id
 
@@ -113,25 +115,43 @@ def sync_dataset_documentation(
             result["readme_found"] = True
             logger.info(f"  Found README.md ({len(readme_content)} chars)")
 
-        # Fetch metadata.json (data dictionary)
-        data_dict_content = fetch_file_from_s3(bucket, dataset_id, "metadata.json")
-        if data_dict_content:
+        # Fetch manifest.yaml first, then fall back to legacy metadata.json
+        manifest_yaml = fetch_file_from_s3(bucket, dataset_id, "manifest.yaml")
+        manifest_json_content = fetch_file_from_s3(bucket, dataset_id, "manifest.json")
+        data_dict_content = None
+        if manifest_yaml:
             result["data_dictionary_found"] = True
-            logger.info(f"  Found metadata.json ({len(data_dict_content)} chars)")
+            logger.info(f"  Found manifest.yaml ({len(manifest_yaml)} chars)")
+            if not manifest_json_content:
+                try:
+                    manifest_json_content = json.dumps(yaml.safe_load(manifest_yaml))
+                except Exception as e:
+                    logger.warning(f"  Failed to normalize manifest.yaml for {dataset_id}: {e}")
+        else:
+            data_dict_content = fetch_file_from_s3(bucket, dataset_id, "metadata.json")
+            if data_dict_content:
+                result["data_dictionary_found"] = True
+                logger.info(f"  Found legacy metadata.json ({len(data_dict_content)} chars)")
 
         # Update database if any content found
-        if readme_content or data_dict_content:
+        if readme_content or data_dict_content or manifest_yaml or manifest_json_content:
             if not dry_run:
                 update_query = text("""
                     UPDATE datasets
                     SET readme_md = :readme,
                         data_dictionary_json = :data_dict,
+                        manifest_yaml = :manifest_yaml,
+                        manifest_json = CAST(:manifest_json AS jsonb),
+                        manifest_updated_at = :manifest_updated_at,
                         documentation_synced_at = :synced_at
                     WHERE ds_id = :ds_id
                 """)
                 db_session.execute(update_query, {
                     "readme": readme_content,
                     "data_dict": data_dict_content,
+                    "manifest_yaml": manifest_yaml,
+                    "manifest_json": manifest_json_content,
+                    "manifest_updated_at": datetime.utcnow() if manifest_yaml or manifest_json_content else None,
                     "synced_at": datetime.utcnow(),
                     "ds_id": dataset_id,
                 })

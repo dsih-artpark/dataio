@@ -89,6 +89,10 @@ class Dataset(Base):
     # Documentation caching fields (synced from file server)
     readme_md = Column(Text, nullable=True)
     data_dictionary_json = Column(Text, nullable=True)
+    manifest_yaml = Column(Text, nullable=True)
+    manifest_json = Column(JSONB, nullable=True)
+    manifest_updated_at = Column(DateTime, nullable=True)
+    manifest_updated_by = Column(Text, nullable=True)
     documentation_synced_at = Column(DateTime, nullable=True)
 
     # Relationships

@@ -141,6 +141,35 @@ async def create_dataset_table(
     )
 
 
+@admin_router.put(
+    "/datasets/{dataset_id}/{bucket_type}/manifest", tags=["admin/datasets"]
+)
+@admin_required
+async def upsert_dataset_manifest(
+    dataset_id: str,
+    bucket_type: VersionType,
+    manifest_file: UploadFile,
+    user: User = Depends(get_user),
+    admin_dataset_service: AdminDatasetService = Depends(AdminDatasetService),
+):
+    return admin_dataset_service.upsert_dataset_manifest(
+        dataset_id, bucket_type, manifest_file, user.email
+    )
+
+
+@admin_router.get(
+    "/datasets/{dataset_id}/{bucket_type}/manifest", tags=["admin/datasets"]
+)
+@admin_required
+async def get_dataset_manifest(
+    dataset_id: str,
+    bucket_type: VersionType,
+    user: User = Depends(get_user),
+    admin_dataset_service: AdminDatasetService = Depends(AdminDatasetService),
+):
+    return admin_dataset_service.get_dataset_manifest(dataset_id, bucket_type)
+
+
 @admin_router.delete(
     "/datasets/{dataset_id}/{bucket_type}/tables/{table_name}", tags=["admin/datasets"]
 )

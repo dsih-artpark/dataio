@@ -510,9 +510,11 @@ class DataIOMCPServer:
                     error="You don't have access to this dataset's schema"
                 )
 
-            # Parse data dictionary if available
+            # Prefer normalized manifest JSON, then fall back to legacy metadata.json.
             schema_data = None
-            if dataset.data_dictionary_json:
+            if getattr(dataset, "manifest_json", None):
+                schema_data = dataset.manifest_json
+            elif dataset.data_dictionary_json:
                 import json
                 try:
                     schema_data = json.loads(dataset.data_dictionary_json)
@@ -525,6 +527,8 @@ class DataIOMCPServer:
                     "dataset_id": dataset_id,
                     "title": dataset.title,
                     "schema": schema_data,
+                    "manifest": schema_data,
                     "has_schema": schema_data is not None,
+                    "has_manifest": schema_data is not None,
                 }
             )

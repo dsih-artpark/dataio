@@ -404,6 +404,10 @@ class WebUserService(BaseService):
                 # Documentation fields (cached from file server)
                 "readme_md": dataset.readme_md if hasattr(dataset, 'readme_md') else None,
                 "data_dictionary_json": dataset.data_dictionary_json if hasattr(dataset, 'data_dictionary_json') else None,
+                "manifest_yaml": dataset.manifest_yaml if hasattr(dataset, 'manifest_yaml') else None,
+                "manifest_json": dataset.manifest_json if hasattr(dataset, 'manifest_json') else None,
+                "manifest_updated_at": dataset.manifest_updated_at.isoformat() if hasattr(dataset, 'manifest_updated_at') and dataset.manifest_updated_at else None,
+                "manifest_updated_by": dataset.manifest_updated_by if hasattr(dataset, 'manifest_updated_by') else None,
                 "documentation_synced_at": dataset.documentation_synced_at.isoformat() if hasattr(dataset, 'documentation_synced_at') and dataset.documentation_synced_at else None,
             }
         except HTTPException:
@@ -485,6 +489,8 @@ class WebUserService(BaseService):
                 "tables": tables,
                 "readme_md": dataset.readme_md if hasattr(dataset, 'readme_md') else None,
                 "data_dictionary_json": dataset.data_dictionary_json if hasattr(dataset, 'data_dictionary_json') else None,
+                "manifest_yaml": dataset.manifest_yaml if hasattr(dataset, 'manifest_yaml') else None,
+                "manifest_json": dataset.manifest_json if hasattr(dataset, 'manifest_json') else None,
             }
         except HTTPException:
             raise
@@ -694,6 +700,10 @@ class WebUserService(BaseService):
                 # Documentation fields (cached from file server)
                 "readme_md": dataset.readme_md if hasattr(dataset, 'readme_md') else None,
                 "data_dictionary_json": dataset.data_dictionary_json if hasattr(dataset, 'data_dictionary_json') else None,
+                "manifest_yaml": dataset.manifest_yaml if hasattr(dataset, 'manifest_yaml') else None,
+                "manifest_json": dataset.manifest_json if hasattr(dataset, 'manifest_json') else None,
+                "manifest_updated_at": dataset.manifest_updated_at.isoformat() if hasattr(dataset, 'manifest_updated_at') and dataset.manifest_updated_at else None,
+                "manifest_updated_by": dataset.manifest_updated_by if hasattr(dataset, 'manifest_updated_by') else None,
                 "documentation_synced_at": dataset.documentation_synced_at.isoformat() if hasattr(dataset, 'documentation_synced_at') and dataset.documentation_synced_at else None,
             }
         except HTTPException:

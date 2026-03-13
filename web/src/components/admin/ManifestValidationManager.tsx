@@ -50,9 +50,10 @@ function buildLineReviews(manifestText: string, findings: ValidationFinding[]): 
     }
 
     const matchingFindings = findings.filter((finding) => {
-      if (!finding.path) return false;
-      if (finding.path === 'manifest') return index === 0;
-      return paths.some((path) => finding.path === path || finding.path.startsWith(`${path}.`));
+      const findingPath = finding.path;
+      if (!findingPath) return false;
+      if (findingPath === 'manifest') return index === 0;
+      return paths.some((path) => findingPath === path || findingPath.startsWith(`${path}.`));
     });
 
     return {

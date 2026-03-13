@@ -36,6 +36,16 @@ interface AuthProviders {
   passkey: boolean;
 }
 
+interface AuthSession {
+  id: string;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+  ip_address: string | null;
+  user_agent: string | null;
+  current: boolean;
+}
+
 class ApiClient {
   private accessToken: string | null = null;
   private refreshPromise: Promise<boolean> | null = null;
@@ -281,6 +291,16 @@ class ApiClient {
       // Ignore logout errors
     }
     this.clearTokens();
+  }
+
+  async listSessions() {
+    return this.request<{ sessions: AuthSession[] }>('/auth/sessions');
+  }
+
+  async revokeSession(sessionId: string) {
+    return this.request<{ revoked: boolean; session_id: string }>(`/auth/sessions/${sessionId}`, {
+      method: 'DELETE',
+    });
   }
 
   // Passkey endpoints

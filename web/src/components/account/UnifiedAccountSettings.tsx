@@ -21,6 +21,16 @@ interface APIKey {
   expires_at: string | null;
 }
 
+interface AuthSession {
+  id: string;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+  ip_address: string | null;
+  user_agent: string | null;
+  current: boolean;
+}
+
 export default function UnifiedAccountSettings() {
   // Profile state
   const [displayName, setDisplayName] = useState('');
@@ -42,6 +52,12 @@ export default function UnifiedAccountSettings() {
   const [creatingKey, setCreatingKey] = useState(false);
   const [newKey, setNewKey] = useState<string | null>(null);
 
+  // Session state
+  const [sessions, setSessions] = useState<AuthSession[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [sessionsError, setSessionsError] = useState('');
+  const [revokingSessionId, setRevokingSessionId] = useState<string | null>(null);
+
   // Delete modal state
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
@@ -53,6 +69,7 @@ export default function UnifiedAccountSettings() {
     }
     fetchPasskeys();
     fetchApiKeys();
+    fetchSessions();
 
     const params = new URLSearchParams(window.location.search);
     if (params.get('setup-passkey') === 'true') {
@@ -79,6 +96,19 @@ export default function UnifiedAccountSettings() {
       setApiKeysError(err instanceof Error ? err.message : 'Failed to load API keys');
     } finally {
       setApiKeysLoading(false);
+    }
+  };
+
+  const fetchSessions = async () => {
+    setSessionsLoading(true);
+    try {
+      setSessionsError('');
+      const response = await api.listSessions();
+      setSessions(response.sessions);
+    } catch (err) {
+      setSessionsError(err instanceof Error ? err.message : 'Failed to load sessions');
+    } finally {
+      setSessionsLoading(false);
     }
   };
 
@@ -143,6 +173,29 @@ export default function UnifiedAccountSettings() {
       setApiKeys(apiKeys.filter((k) => k.id !== keyId));
     } catch (err) {
       setApiKeysError(err instanceof Error ? err.message : 'Failed to revoke API key');
+    }
+  };
+
+  const handleRevokeSession = async (sessionId: string, isCurrent: boolean) => {
+    const message = isCurrent
+      ? 'Sign out this current session? You will be returned to the login screen.'
+      : 'Revoke this session? The device will need to sign in again.';
+    if (!confirm(message)) return;
+
+    setRevokingSessionId(sessionId);
+    setSessionsError('');
+    try {
+      await api.revokeSession(sessionId);
+      if (isCurrent) {
+        await api.logout();
+        window.location.replace('/login');
+        return;
+      }
+      setSessions(sessions.filter((session) => session.id !== sessionId));
+    } catch (err) {
+      setSessionsError(err instanceof Error ? err.message : 'Failed to revoke session');
+    } finally {
+      setRevokingSessionId(null);
     }
   };
 
@@ -291,6 +344,59 @@ export default function UnifiedAccountSettings() {
                   </dd>
                 </div>
               </dl>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h2 class="text-lg font-semibold text-gray-900">Active Sessions</h2>
+              <p class="text-sm text-gray-500 mt-0.5">Review and revoke signed-in browsers</p>
+            </div>
+            <div class="card-body">
+              {sessionsError && (
+                <div class="mb-4 px-4 py-3 rounded-lg text-sm bg-red-50 text-red-700 border border-red-200">
+                  {sessionsError}
+                </div>
+              )}
+              {sessionsLoading ? (
+                <div class="text-center py-6">
+                  <div class="animate-spin w-6 h-6 border-2 border-primary-600 border-t-transparent rounded-full mx-auto" />
+                </div>
+              ) : sessions.length === 0 ? (
+                <p class="text-sm text-gray-500">No active sessions found.</p>
+              ) : (
+                <ul class="divide-y divide-gray-200">
+                  {sessions.map((session) => (
+                    <li key={session.id} class="py-3 flex items-start justify-between gap-4">
+                      <div>
+                        <div class="flex items-center gap-2">
+                          <p class="font-medium text-gray-900 text-sm">
+                            {session.user_agent || 'Unknown browser'}
+                          </p>
+                          {session.current && (
+                            <span class="inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700 border border-green-200">
+                              Current
+                            </span>
+                          )}
+                        </div>
+                        <p class="text-xs text-gray-500 mt-1">
+                          Last seen {formatDate(session.last_seen_at)} · IP {session.ip_address || 'Unavailable'}
+                        </p>
+                        <p class="text-xs text-gray-400 mt-1">
+                          Started {formatDate(session.created_at)} · Expires {formatDate(session.expires_at)}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleRevokeSession(session.id, session.current)}
+                        disabled={revokingSessionId === session.id}
+                        class="text-red-600 hover:text-red-700 text-sm disabled:opacity-60"
+                      >
+                        {revokingSessionId === session.id ? 'Revoking...' : session.current ? 'Sign out' : 'Revoke'}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
 

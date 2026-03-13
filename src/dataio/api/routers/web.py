@@ -136,6 +136,16 @@ class AuthProvidersResponse(BaseModel):
     passkey: bool
 
 
+class SessionInfoResponse(BaseModel):
+    id: str
+    created_at: str
+    last_seen_at: str
+    expires_at: str
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    current: bool
+
+
 # =============================================================================
 # Helper Functions
 # =============================================================================
@@ -298,6 +308,47 @@ async def logout_all(
     if response:
         clear_refresh_cookie(response)
     return auth_service.logout_all_sessions(user.email)
+
+
+@web_router.get("/auth/sessions", tags=["auth"])
+async def list_auth_sessions(
+    request: Request,
+    user: User = Depends(get_current_web_user),
+    auth_service: WebAuthService = Depends(WebAuthService),
+):
+    """
+    List the user's active browser sessions.
+
+    Requires authentication.
+    """
+    return auth_service.list_sessions(
+        user.email,
+        current_refresh_token=request.cookies.get(REFRESH_COOKIE_NAME),
+    )
+
+
+@web_router.delete("/auth/sessions/{session_id}", tags=["auth"])
+async def revoke_auth_session(
+    session_id: str,
+    request: Request,
+    response: Response,
+    user: User = Depends(get_current_web_user),
+    auth_service: WebAuthService = Depends(WebAuthService),
+):
+    """
+    Revoke one active browser session.
+
+    Requires authentication.
+    """
+    current_refresh_token = request.cookies.get(REFRESH_COOKIE_NAME)
+    current_session = auth_service.list_sessions(
+        user.email,
+        current_refresh_token=current_refresh_token,
+    )
+    result = auth_service.revoke_session_by_id(user.email, session_id)
+    if any(session["id"] == session_id and session["current"] for session in current_session["sessions"]):
+        clear_refresh_cookie(response)
+    return result
 
 
 # =============================================================================

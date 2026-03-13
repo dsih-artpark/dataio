@@ -141,6 +141,89 @@ class WebAuthSecurityTests(unittest.TestCase):
         self.assertEqual(response["verification_status"], "pending")
         self.assertNotIn("access_token", response)
 
+    def test_verify_login_sends_sign_in_alert_for_verified_user(self):
+        _, service_module, _ = _load_modules()
+        service = service_module.WebAuthService()
+        verified_user = SimpleNamespace(
+            email="verified@example.com",
+            display_name="Verified User",
+            is_admin=False,
+            is_group=False,
+            email_verified=True,
+            verification_status="verified",
+            last_login=None,
+            suspended_at=None,
+        )
+        session = _build_session_with_user(verified_user)
+
+        with patch.object(service_module, "DBSession", return_value=session), \
+             patch.object(service_module, "enforce_rate_limit"), \
+             patch.object(service_module, "verify_otp", return_value=True), \
+             patch.object(service_module, "record_auth_event"), \
+             patch.object(service, "_create_auth_payload", return_value={"access_token": "token", "refresh_token": "refresh", "needs_passkey": False}), \
+             patch.object(service, "_send_sign_in_alert") as send_alert:
+            response = service.verify_login(
+                "verified@example.com",
+                "123456",
+                user_agent="Mozilla/5.0",
+                ip_address="127.0.0.1",
+            )
+
+        self.assertEqual(response["access_token"], "token")
+        send_alert.assert_called_once_with(
+            user_email="verified@example.com",
+            method="Email code",
+            ip_address="127.0.0.1",
+            user_agent="Mozilla/5.0",
+        )
+
+    def test_list_sessions_marks_current_session(self):
+        _, service_module, _ = _load_modules()
+        service = service_module.WebAuthService()
+        current_session = SimpleNamespace(id="current-id")
+        db_sessions = [
+            SimpleNamespace(
+                id="current-id",
+                created_at=SimpleNamespace(isoformat=lambda: "2026-03-13T00:00:00+00:00"),
+                last_seen_at=SimpleNamespace(isoformat=lambda: "2026-03-13T00:05:00+00:00"),
+                expires_at=SimpleNamespace(isoformat=lambda: "2026-03-20T00:00:00+00:00"),
+                ip_address="127.0.0.1",
+                user_agent="Current Browser",
+            ),
+            SimpleNamespace(
+                id="other-id",
+                created_at=SimpleNamespace(isoformat=lambda: "2026-03-12T00:00:00+00:00"),
+                last_seen_at=SimpleNamespace(isoformat=lambda: "2026-03-12T00:05:00+00:00"),
+                expires_at=SimpleNamespace(isoformat=lambda: "2026-03-19T00:00:00+00:00"),
+                ip_address="10.0.0.2",
+                user_agent="Other Browser",
+            ),
+        ]
+        session = MagicMock()
+        query = session.query.return_value
+        filtered = query.filter.return_value
+        ordered = filtered.order_by.return_value
+        ordered.all.return_value = db_sessions
+
+        with patch.object(service_module, "DBSession", return_value=session), \
+             patch.object(service_module, "get_current_session", return_value=current_session):
+            response = service.list_sessions("verified@example.com", "refresh-token")
+
+        self.assertEqual(len(response["sessions"]), 2)
+        self.assertTrue(response["sessions"][0]["current"])
+        self.assertFalse(response["sessions"][1]["current"])
+
+    def test_revoke_session_by_id_returns_success(self):
+        _, service_module, _ = _load_modules()
+        service = service_module.WebAuthService()
+
+        with patch.object(service_module, "revoke_session_record", return_value=True), \
+             patch.object(service_module, "record_auth_event") as record_event:
+            response = service.revoke_session_by_id("verified@example.com", "session-123")
+
+        self.assertEqual(response, {"revoked": True, "session_id": "session-123"})
+        record_event.assert_called_once()
+
     def test_github_oauth_requires_verified_email_match(self):
         _, service_module, _ = _load_modules()
         service = service_module.WebAuthService()

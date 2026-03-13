@@ -16,6 +16,7 @@ import requests
 from dataio.api.database.config import Session as DBSession
 from dataio.api.database.models import (
     User,
+    Session as WebSession,
     MagicLinkToken,
     OAuthIdentity,
     UserAPIKey,
@@ -37,7 +38,9 @@ from dataio.api.auth.jwt import (
     create_access_token,
     create_refresh_token,
     create_session,
+    get_current_session,
     revoke_session,
+    revoke_session_by_id as revoke_session_record,
     revoke_all_user_sessions,
     validate_refresh_token,
 )
@@ -131,6 +134,30 @@ class WebAuthService(BaseService):
             },
             "needs_passkey": not has_passkey(user.email),
         }
+
+    def _send_sign_in_alert(
+        self,
+        user_email: str,
+        method: str,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> None:
+        """Send a best-effort notification for successful interactive sign-ins."""
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        try:
+            self.email_service.send_sign_in_alert_email(
+                to_email=user_email,
+                method=method,
+                timestamp=timestamp,
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+        except Exception as exc:
+            self.logger.warning(
+                "Failed to send sign-in alert to %s: %s",
+                user_email,
+                exc,
+            )
 
     def _get_or_create_user(
         self,
@@ -386,6 +413,12 @@ class WebAuthService(BaseService):
             )
 
             self.logger.info(f"User logged in: {email}")
+            self._send_sign_in_alert(
+                user_email=email,
+                method="Email code",
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
             record_auth_event(
                 event_type="login.verify",
                 outcome="success",
@@ -518,6 +551,63 @@ class WebAuthService(BaseService):
             details={"revoked_sessions": count},
         )
         return {"revoked_sessions": count}
+
+    def list_sessions(
+        self,
+        user_email: str,
+        current_refresh_token: Optional[str] = None,
+    ) -> dict:
+        """List active sessions for the user, marking the current browser session when possible."""
+        current_session = get_current_session(current_refresh_token)
+        session = DBSession()
+        try:
+            db_sessions = (
+                session.query(WebSession)
+                .filter(
+                    WebSession.user_email == user_email,
+                    WebSession.revoked_at.is_(None),
+                )
+                .order_by(
+                    WebSession.last_seen_at.desc(),
+                    WebSession.created_at.desc(),
+                )
+                .all()
+            )
+            active_sessions = []
+            current_session_id = str(current_session.id) if current_session else None
+            for db_session in db_sessions:
+                active_sessions.append(
+                    {
+                        "id": str(db_session.id),
+                        "created_at": db_session.created_at.isoformat(),
+                        "last_seen_at": db_session.last_seen_at.isoformat(),
+                        "expires_at": db_session.expires_at.isoformat(),
+                        "ip_address": db_session.ip_address,
+                        "user_agent": db_session.user_agent,
+                        "current": str(db_session.id) == current_session_id,
+                    }
+                )
+            return {"sessions": active_sessions}
+        finally:
+            session.close()
+
+    def revoke_session_by_id(
+        self,
+        user_email: str,
+        session_id: str,
+    ) -> dict:
+        """Revoke one active session owned by the current user."""
+        revoked = revoke_session_record(user_email, session_id)
+        if not revoked:
+            raise HTTPException(status_code=404, detail="Session not found")
+        record_auth_event(
+            event_type="session.revoke",
+            outcome="success",
+            actor_email=user_email,
+            target_email=user_email,
+            details={"session_id": session_id},
+        )
+        return {"revoked": True, "session_id": session_id}
 
     # Passkey methods
 
@@ -706,6 +796,12 @@ class WebAuthService(BaseService):
             )
 
             self.logger.info(f"User logged in via passkey: {user.email}")
+            self._send_sign_in_alert(
+                user_email=user.email,
+                method="Passkey",
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
             record_auth_event(
                 event_type="passkey.login_verify",
                 outcome="success",
@@ -994,6 +1090,12 @@ class WebAuthService(BaseService):
                 response["refresh_token"] = auth_payload["refresh_token"]
                 response["token_type"] = auth_payload["token_type"]
                 response["needs_passkey"] = auth_payload["needs_passkey"]
+                self._send_sign_in_alert(
+                    user_email=user.email,
+                    method="Email verification",
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                )
 
             record_auth_event(
                 event_type="registration.verify",
@@ -1414,6 +1516,12 @@ class WebAuthService(BaseService):
             )
 
             self.logger.info(f"Invitation accepted: {email}")
+            self._send_sign_in_alert(
+                user_email=email,
+                method="Invitation link",
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
             record_auth_event(
                 event_type="invitation.accept",
                 outcome="success",
@@ -1683,6 +1791,12 @@ class WebAuthService(BaseService):
             ip_address=ip_address,
         )
         auth_payload["matched_email"] = matched_email
+        self._send_sign_in_alert(
+            user_email=user.email,
+            method=f"{provider.title()} SSO",
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
         record_auth_event(
             event_type=f"oauth.{provider}",
             outcome="success",

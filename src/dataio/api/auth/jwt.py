@@ -277,6 +277,7 @@ def create_session(
             expires_at=expires_at,
             user_agent=user_agent,
             ip_address=ip_address,
+            last_seen_at=datetime.now(timezone.utc),
         )
         session.add(db_session)
         session.commit()
@@ -398,9 +399,49 @@ def validate_refresh_token(refresh_token: str) -> Optional[Session]:
                 )
                 .first()
             )
+            if db_session:
+                db_session.last_seen_at = datetime.now(timezone.utc)
+                session.commit()
+                session.refresh(db_session)
+                session.expunge(db_session)
             return db_session
         finally:
             session.close()
 
     except AuthenticationError:
         return None
+
+
+def get_current_session(refresh_token: Optional[str]) -> Optional[Session]:
+    """Return the active session represented by the refresh token, if any."""
+    if not refresh_token:
+        return None
+    return validate_refresh_token(refresh_token)
+
+
+def revoke_session_by_id(user_email: str, session_id: str) -> bool:
+    """Revoke a single active session owned by the user."""
+    session = DBSession()
+    try:
+        db_session = (
+            session.query(Session)
+            .filter(
+                Session.id == session_id,
+                Session.user_email == user_email,
+                Session.revoked_at.is_(None),
+            )
+            .first()
+        )
+        if not db_session:
+            return False
+
+        db_session.revoked_at = datetime.now(timezone.utc)
+        session.commit()
+        logger.info("Revoked session %s for user: %s", session_id, user_email)
+        return True
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Failed to revoke session by id: {str(e)}")
+        raise
+    finally:
+        session.close()

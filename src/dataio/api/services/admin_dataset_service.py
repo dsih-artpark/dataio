@@ -14,7 +14,7 @@ from dataio.api.models import (
 )
 from dataio.api.services.base_service import BaseService
 from dataio.api.services.filestore_service import FilestoreService, ValidationError
-from dataio.validate import DataIOValidationService, ValidationRequest
+from dataio.validate import DataIOValidationService, DatasetKind, ValidationRequest
 
 
 class AdminDatasetService(BaseService):
@@ -164,19 +164,39 @@ class AdminDatasetService(BaseService):
             dataset_kind = parsed_manifest.get("datasetKind")
             if not dataset_kind:
                 raise ValidationError("Manifest must define datasetKind")
+            try:
+                dataset_kind_enum = DatasetKind(dataset_kind)
+            except ValueError as e:
+                raise ValidationError(f"Unsupported datasetKind '{dataset_kind}'") from e
 
-            validation_result = self.validation_service.validate(
-                ValidationRequest(
-                    dataset_kind=dataset_kind,
-                    manifest_source=manifest_text,
-                    validate_data=False,
-                )
+            validation_request = ValidationRequest(
+                dataset_kind=dataset_kind_enum,
+                manifest_source=manifest_text,
+                validate_data=True,
             )
+            if dataset_kind_enum == DatasetKind.TABULAR:
+                validation_request.data_files = (
+                    self.filestore_service.get_tabular_validation_sources(
+                        dataset_id,
+                        bucket_type,
+                    )
+                )
+                if not validation_request.data_files:
+                    raise ValidationError(
+                        "Cannot upload manifest until tabular data files exist in filestore"
+                    )
+            elif dataset_kind_enum == DatasetKind.GEOJSON:
+                validation_request.data = self.filestore_service.get_geojson_validation_source(
+                    dataset_id,
+                    bucket_type,
+                )
+
+            validation_result = self.validation_service.validate(validation_request)
             if validation_result.status == "fail":
                 raise HTTPException(
                     status_code=400,
                     detail={
-                        "message": "Manifest validation failed",
+                        "message": "Manifest and stored data validation failed",
                         "findings": [
                             finding.model_dump() for finding in validation_result.findings
                         ],

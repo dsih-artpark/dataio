@@ -4,7 +4,7 @@ import io
 import logging
 import os
 
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 
 os.environ.setdefault("DB_HOST", "localhost")
 os.environ.setdefault("DB_PORT", "5432")
@@ -15,7 +15,7 @@ os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
 from dataio.api.models import VersionType
 from dataio.api.services.admin_dataset_service import AdminDatasetService
-from dataio.validate.reports.models import ValidationResult
+from dataio.validate.reports.models import Finding, ValidationResult
 
 
 def test_upsert_dataset_manifest_updates_filestore_and_db(monkeypatch):
@@ -32,6 +32,13 @@ def test_upsert_dataset_manifest_updates_filestore_and_db(monkeypatch):
                 "manifest_yaml": manifest_yaml,
                 "manifest_json": manifest_json,
             }
+
+        def get_tabular_validation_sources(self, dataset_id, version_type):
+            recorded["validation_sources"] = {
+                "dataset_id": dataset_id,
+                "bucket_type": version_type.value,
+            }
+            return {"sample": "year\n2024\n"}
 
     class ValidatorStub:
         def validate(self, request):
@@ -91,4 +98,73 @@ datasetTables:
     assert result["message"] == "Manifest uploaded successfully"
     assert recorded["filestore"]["dataset_id"] == "TS0001DS0001"
     assert recorded["db"]["updated_by"] == "admin@example.com"
-    assert recorded["request"].validate_data is False
+    assert recorded["request"].validate_data is True
+    assert recorded["request"].data_files == {"sample": "year\n2024\n"}
+
+
+def test_upsert_dataset_manifest_rejects_when_stored_data_fails(monkeypatch):
+    service = object.__new__(AdminDatasetService)
+    service.logger = logging.getLogger(__name__)
+
+    class FilestoreStub:
+        def get_tabular_validation_sources(self, _dataset_id, _version_type):
+            return {"sample": "year\nnot-a-year\n"}
+
+    class ValidatorStub:
+        def validate(self, request):
+            result = ValidationResult(dataset_kind=request.dataset_kind.value)
+            result.add_finding(
+                Finding(
+                    severity="error",
+                    code="type_validation_failed",
+                    message="Stored data does not match manifest",
+                    table="sample",
+                    field="year",
+                )
+            )
+            return result
+
+    service.filestore_service = FilestoreStub()
+    service.validation_service = ValidatorStub()
+
+    monkeypatch.setattr(
+        "dataio.api.services.admin_dataset_service.database.check_if_dataset_exists",
+        lambda _dataset_id: True,
+    )
+
+    upload = UploadFile(
+        filename="manifest.yaml",
+        file=io.BytesIO(
+            b"""
+metadataSpecVersion: v2
+datasetTitle: Sample Manifest
+datasetSlug: sample-manifest
+datasetDescription: Example
+source: Test
+category: {ID: TS, name: Test}
+collection: {ID: TS0001, name: Tests}
+datasetKind: tabular
+datasetTables:
+  sample:
+    dataDictionary:
+      year:
+        type: date
+        format: YYYY
+        nullable: false
+"""
+        ),
+    )
+
+    try:
+        service.upsert_dataset_manifest(
+            "TS0001DS0001",
+            VersionType.STANDARDISED,
+            upload,
+            "admin@example.com",
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert exc.detail["message"] == "Manifest and stored data validation failed"
+        assert exc.detail["findings"][0]["code"] == "type_validation_failed"
+    else:
+        raise AssertionError("Expected HTTPException to be raised")

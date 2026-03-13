@@ -1,0 +1,31 @@
+---
+import ManifestManager from '../../components/admin/ManifestManager';
+import DashboardLayout from '../../layouts/DashboardLayout.astro';
+---
+
+<DashboardLayout title="Manifests">
+  <div class="space-y-6">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">Manifest Management</h1>
+      <p class="mt-1 text-gray-600">
+        Review canonical manifests, upload validated replacements, and validate candidate data before publication.
+      </p>
+    </div>
+
+    <ManifestManager client:load />
+  </div>
+</DashboardLayout>
+
+<script>
+  import { initAuth, requireAuth, isAdmin } from '../../lib/auth';
+
+  if (!requireAuth()) {
+    // Not authenticated, redirecting
+  } else {
+    initAuth().then(() => {
+      if (!isAdmin()) {
+        window.location.replace('/datasets');
+      }
+    });
+  }
+</script>

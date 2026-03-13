@@ -1,21 +1,26 @@
 """
-Web admin service for user and group management.
+Web admin service for user, group, and dataset administration.
 
 Provides functionality for admin users to manage users, groups,
-and permissions through the web interface.
+permissions, manifests, and validation through the web interface.
 """
 
 import logging
-from typing import Optional, List
+from pathlib import Path
+from typing import List, Optional
 
 from fastapi import HTTPException
+import yaml
 
 from dataio.api.database.config import Session as DBSession
-from dataio.api.database.models import User, UserGroup, UserPermission
+from dataio.api.database.enums import VersionType
+from dataio.api.database.models import Dataset, User, UserGroup, UserPermission
 from dataio.api.services.base_service import BaseService
+from dataio.api.services.admin_dataset_service import AdminDatasetService
 from dataio.api.services.email_service import EmailService
 from dataio.api.auth.permissions import is_admin
 from dataio.api.auth.security import record_auth_event
+from dataio.validate import DataIOValidationService, DatasetKind, ValidationRequest
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +31,8 @@ class WebAdminService(BaseService):
     def __init__(self):
         super().__init__()
         self.email_service = EmailService()
+        self.admin_dataset_service = AdminDatasetService()
+        self.validation_service = DataIOValidationService()
 
     def _require_admin(self, user: User) -> None:
         """Verify user has admin privileges."""
@@ -859,6 +866,97 @@ class WebAdminService(BaseService):
             }
         finally:
             session.close()
+
+    def get_dataset_manifest(
+        self,
+        admin_user: User,
+        dataset_id: str,
+        bucket_type: VersionType,
+    ) -> dict:
+        """Get the canonical manifest for a dataset/version."""
+        self._require_admin(admin_user)
+
+        manifest = self.admin_dataset_service.get_dataset_manifest(dataset_id, bucket_type)
+
+        session = DBSession()
+        try:
+            dataset = session.query(Dataset).filter(Dataset.ds_id == dataset_id).first()
+            if dataset is None:
+                raise HTTPException(status_code=404, detail="Dataset not found")
+
+            return {
+                **manifest,
+                "dataset_id": dataset_id,
+                "bucket_type": bucket_type.value,
+                "manifest_updated_at": (
+                    dataset.manifest_updated_at.isoformat()
+                    if dataset.manifest_updated_at
+                    else None
+                ),
+                "manifest_updated_by": dataset.manifest_updated_by,
+            }
+        finally:
+            session.close()
+
+    def upsert_dataset_manifest(
+        self,
+        admin_user: User,
+        dataset_id: str,
+        bucket_type: VersionType,
+        manifest_file,
+    ) -> dict:
+        """Validate and persist the canonical manifest for a dataset/version."""
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.upsert_dataset_manifest(
+            dataset_id,
+            bucket_type,
+            manifest_file,
+            admin_user.email,
+        )
+
+    def validate_dataset(
+        self,
+        admin_user: User,
+        dataset_kind: DatasetKind,
+        manifest_file,
+        data_file=None,
+        table_name: str | None = None,
+        strict: bool = False,
+        extra_column_policy: str = "warn",
+    ) -> dict:
+        """Run admin validation for a candidate manifest and optional data file."""
+        self._require_admin(admin_user)
+
+        manifest_text = manifest_file.file.read().decode("utf-8")
+        if dataset_kind == DatasetKind.TABULAR:
+            try:
+                parsed_manifest = yaml.safe_load(manifest_text) or {}
+            except yaml.YAMLError:
+                parsed_manifest = {}
+
+            if data_file is not None and table_name is None and isinstance(parsed_manifest, dict):
+                dataset_tables = parsed_manifest.get("datasetTables", {})
+                if len(dataset_tables) == 1:
+                    table_name = next(iter(dataset_tables))
+
+        request = ValidationRequest(
+            dataset_kind=dataset_kind,
+            manifest_source=manifest_text,
+            data=None,
+            strict=strict,
+            validate_data=data_file is not None,
+            extra_column_policy=extra_column_policy,
+        )
+
+        if data_file is not None:
+            data_text = data_file.file.read().decode("utf-8")
+            if dataset_kind == DatasetKind.TABULAR:
+                resolved_table_name = table_name or Path(data_file.filename or "table.csv").stem
+                request.data_files = {resolved_table_name: data_text}
+            else:
+                request.data = data_text
+
+        return self.validation_service.validate(request).model_dump()
 
     # Group Management
 

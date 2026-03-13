@@ -11,19 +11,30 @@ Provides endpoints for:
 import logging
 import os
 import secrets
-from typing import Optional, List
 from datetime import datetime
+from typing import List, Optional
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr
 
+from dataio.api.database.enums import VersionType
 from dataio.api.database.models import User
 from dataio.api.auth.jwt import REFRESH_COOKIE_NAME, get_current_web_user
 from dataio.api.services.web_auth_service import WebAuthService
-from dataio.api.services.web_user_service import WebUserService
 from dataio.api.services.web_admin_service import WebAdminService
+from dataio.api.services.web_user_service import WebUserService
+from dataio.validate import DatasetKind
 
 logger = logging.getLogger(__name__)
 
@@ -1210,6 +1221,74 @@ async def admin_list_datasets(
     """
     return admin_service.list_datasets_for_permissions(
         user, search=search, limit=limit, offset=offset
+    )
+
+
+@web_router.get("/admin/datasets/{dataset_id}/{bucket_type}/manifest", tags=["web-admin/datasets"])
+async def admin_get_dataset_manifest(
+    dataset_id: str,
+    bucket_type: VersionType,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Get the canonical manifest for a dataset/version."""
+    return admin_service.get_dataset_manifest(user, dataset_id, bucket_type)
+
+
+@web_router.put("/admin/datasets/{dataset_id}/{bucket_type}/manifest", tags=["web-admin/datasets"])
+async def admin_upsert_dataset_manifest(
+    dataset_id: str,
+    bucket_type: VersionType,
+    manifest_file: UploadFile = File(...),
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Validate and persist the canonical manifest for a dataset/version."""
+    return admin_service.upsert_dataset_manifest(
+        user,
+        dataset_id,
+        bucket_type,
+        manifest_file,
+    )
+
+
+@web_router.post("/admin/validate/tabular", tags=["web-admin/validate"])
+async def admin_validate_tabular(
+    manifest_file: UploadFile = File(...),
+    table_file: UploadFile | None = File(None),
+    table_name: str | None = Form(None),
+    strict: bool = Form(False),
+    extra_column_policy: str = Form("warn"),
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Validate a tabular manifest and optional data file."""
+    return admin_service.validate_dataset(
+        user,
+        dataset_kind=DatasetKind.TABULAR,
+        manifest_file=manifest_file,
+        data_file=table_file,
+        table_name=table_name,
+        strict=strict,
+        extra_column_policy=extra_column_policy,
+    )
+
+
+@web_router.post("/admin/validate/geojson", tags=["web-admin/validate"])
+async def admin_validate_geojson(
+    manifest_file: UploadFile = File(...),
+    geojson_file: UploadFile | None = File(None),
+    strict: bool = Form(False),
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Validate a GeoJSON manifest and optional GeoJSON payload."""
+    return admin_service.validate_dataset(
+        user,
+        dataset_kind=DatasetKind.GEOJSON,
+        manifest_file=manifest_file,
+        data_file=geojson_file,
+        strict=strict,
     )
 
 

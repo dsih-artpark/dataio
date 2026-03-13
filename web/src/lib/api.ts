@@ -3,17 +3,30 @@
  */
 
 import type {
+  AdminDatasetSummary,
+  AdminManifestRecord,
   DatasetDetail,
+  DataOwnersResponse,
   DatasetsResponse,
   CollectionsResponse,
-  DataOwnersResponse,
   DatasetDownloadUrls,
+  ValidationResult,
 } from './types';
 
 const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
 interface ApiError {
-  detail: string;
+  detail: string | { message?: string };
+}
+
+export class ApiRequestError extends Error {
+  detailData?: unknown;
+
+  constructor(message: string, detailData?: unknown) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.detailData = detailData;
+  }
 }
 
 interface AuthProviders {
@@ -64,10 +77,13 @@ class ApiClient {
     options: RequestInit = {},
     requireAuth = true
   ): Promise<T> {
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    };
+    const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+    const headers: HeadersInit = isFormData
+      ? { ...options.headers }
+      : {
+          'Content-Type': 'application/json',
+          ...options.headers,
+        };
 
     if (requireAuth && this.accessToken) {
       (headers as Record<string, string>)['Authorization'] = `Bearer ${this.accessToken}`;
@@ -92,7 +108,11 @@ class ApiClient {
         });
         if (!retryResponse.ok) {
           const error = await retryResponse.json() as ApiError;
-          throw new Error(error.detail || 'Request failed');
+          const message =
+            typeof error.detail === 'string'
+              ? error.detail
+              : error.detail?.message || 'Request failed';
+          throw new ApiRequestError(message, error.detail);
         }
         return retryResponse.json();
       } else {
@@ -107,7 +127,11 @@ class ApiClient {
 
     if (!response.ok) {
       const error = await response.json() as ApiError;
-      throw new Error(error.detail || 'Request failed');
+      const message =
+        typeof error.detail === 'string'
+          ? error.detail
+          : error.detail?.message || 'Request failed';
+      throw new ApiRequestError(message, error.detail);
     }
 
     return response.json();
@@ -679,11 +703,83 @@ class ApiClient {
 
     const query = searchParams.toString();
     return this.request<{
-      datasets: { ds_id: string; title: string; access_level: string | null }[];
+      datasets: AdminDatasetSummary[];
       total: number;
       limit: number;
       offset: number;
     }>(`/admin/datasets${query ? `?${query}` : ''}`);
+  }
+
+  async adminGetManifest(datasetId: string, bucketType: string) {
+    return this.request<AdminManifestRecord>(
+      `/admin/datasets/${encodeURIComponent(datasetId)}/${encodeURIComponent(bucketType)}/manifest`
+    );
+  }
+
+  async adminUploadManifest(datasetId: string, bucketType: string, manifestFile: File) {
+    const formData = new FormData();
+    formData.append('manifest_file', manifestFile);
+
+    return this.request<{
+      message: string;
+      dataset_id: string;
+      bucket_type: string;
+      manifest_json: Record<string, unknown>;
+    }>(
+      `/admin/datasets/${encodeURIComponent(datasetId)}/${encodeURIComponent(bucketType)}/manifest`,
+      {
+        method: 'PUT',
+        body: formData,
+      }
+    );
+  }
+
+  async adminValidateTabular(params: {
+    manifestFile: File;
+    tableFile?: File | null;
+    tableName?: string;
+    strict?: boolean;
+    extraColumnPolicy?: 'warn' | 'error' | 'ignore';
+  }) {
+    const formData = new FormData();
+    formData.append('manifest_file', params.manifestFile);
+    if (params.tableFile) {
+      formData.append('table_file', params.tableFile);
+    }
+    if (params.tableName) {
+      formData.append('table_name', params.tableName);
+    }
+    if (params.strict) {
+      formData.append('strict', 'true');
+    }
+    if (params.extraColumnPolicy) {
+      formData.append('extra_column_policy', params.extraColumnPolicy);
+    }
+
+    return this.request<ValidationResult>('/admin/validate/tabular', {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  async adminValidateGeojson(params: {
+    manifestFile: File;
+    geojsonFile?: File | null;
+    strict?: boolean;
+  }) {
+    const formData = new FormData();
+    formData.append('manifest_file', params.manifestFile);
+    if (params.geojsonFile) {
+      formData.append('geojson_file', params.geojsonFile);
+    }
+    if (params.strict) {
+      formData.append('strict', 'true');
+    }
+
+    return this.request<ValidationResult>('/admin/validate/geojson', {
+      method: 'POST',
+      body: formData,
+    });
   }
 }
 

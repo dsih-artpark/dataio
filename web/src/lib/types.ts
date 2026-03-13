@@ -43,6 +43,10 @@ export interface DatasetDetail {
   readme_md?: string | null;
   data_dictionary_json?: string | null;
   documentation_synced_at?: string | null;
+  manifest_yaml?: string | null;
+  manifest_json?: Record<string, unknown> | null;
+  manifest_updated_at?: string | null;
+  manifest_updated_by?: string | null;
 }
 
 export interface RawDataset {
@@ -144,4 +148,47 @@ export interface DatasetDownloadUrls {
   }[];
   readme_md: string | null;
   data_dictionary_json: string | null;
+}
+
+export interface AdminDatasetSummary {
+  ds_id: string;
+  title: string;
+  access_level: string | null;
+}
+
+export interface AdminManifestRecord {
+  dataset_id: string;
+  bucket_type: string;
+  manifest_yaml: string | null;
+  manifest_json: Record<string, unknown> | null;
+  has_manifest: boolean;
+  manifest_updated_at: string | null;
+  manifest_updated_by: string | null;
+}
+
+export interface ValidationFinding {
+  severity: string;
+  code: string;
+  message: string;
+  path?: string | null;
+  table?: string | null;
+  row?: number | null;
+  field?: string | null;
+  rule_id?: string | null;
+  hint?: string | null;
+}
+
+export interface ValidationResult {
+  status: 'pass' | 'warn' | 'fail';
+  dataset_kind: string;
+  metadata_spec_version?: string | null;
+  summary: {
+    errors: number;
+    warnings: number;
+    infos: number;
+    rows_checked: number;
+    tables_checked: number;
+  };
+  findings: ValidationFinding[];
+  inferred: Record<string, unknown>;
 }

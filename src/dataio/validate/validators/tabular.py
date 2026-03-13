@@ -11,6 +11,17 @@ from dataio.validate.validators.types import validate_field_value
 
 
 class TabularValidator(ValidatorPlugin):
+    @staticmethod
+    def _get_table_source(
+        table_name: str,
+        manifest: DatasetManifest,
+        request: ValidationRequest,
+    ) -> tuple[str | None, bool]:
+        inline_source = request.data_files.get(table_name)
+        if inline_source is not None:
+            return inline_source, True
+        return manifest.datasetTables[table_name].path, False
+
     def supports(self, request: ValidationRequest) -> bool:
         return request.dataset_kind == DatasetKind.TABULAR
 
@@ -22,8 +33,12 @@ class TabularValidator(ValidatorPlugin):
         result: ValidationResult,
     ) -> None:
         for table_name, table in manifest.datasetTables.items():
-            data_path = request.data_files.get(table_name) or table.path
-            if table.required and not data_path:
+            data_source, is_inline_source = self._get_table_source(
+                table_name,
+                manifest,
+                request,
+            )
+            if table.required and not data_source:
                 result.add_finding(
                     Finding(
                         severity="error",
@@ -35,19 +50,23 @@ class TabularValidator(ValidatorPlugin):
                     )
                 )
                 continue
-            if data_path and not Path(data_path).exists():
+            if (
+                data_source
+                and not is_inline_source
+                and not Path(data_source).exists()
+            ):
                 result.add_finding(
                     Finding(
                         severity="error",
                         code="missing_table_file",
-                        message=f"Table file '{data_path}' does not exist.",
+                        message=f"Table file '{data_source}' does not exist.",
                         table=table_name,
                         path=f"datasetTables.{table_name}.path",
                         rule_id="required_table_file",
                     )
                 )
                 continue
-            if data_path:
+            if data_source:
                 result.summary.tables_checked += 1
 
     def validate_metadata(
@@ -66,12 +85,18 @@ class TabularValidator(ValidatorPlugin):
         result: ValidationResult,
     ) -> None:
         for table_name, table in manifest.datasetTables.items():
-            data_path = request.data_files.get(table_name) or table.path
-            if not data_path or not Path(data_path).exists():
+            data_source, is_inline_source = self._get_table_source(
+                table_name,
+                manifest,
+                request,
+            )
+            if not data_source:
+                continue
+            if not is_inline_source and not Path(data_source).exists():
                 continue
 
             max_rows = None if request.full_scan else request.max_rows
-            rows = load_tabular_rows(data_path, max_rows=max_rows)
+            rows = load_tabular_rows(data_source, max_rows=max_rows)
             if not rows:
                 continue
 

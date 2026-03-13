@@ -42,6 +42,14 @@ class FilestoreService(BaseService):
     def _manifest_json_key(self, dataset_id: str, version_type: VersionType) -> str:
         return f"{self._get_prefix_for_dataset(dataset_id, version_type)}/manifest.json"
 
+    def _list_dataset_objects(self, dataset_id: str, version_type: VersionType) -> list[str]:
+        prefix = self._get_prefix_for_dataset(dataset_id, version_type)
+        return [
+            obj.key
+            for obj in self.bucket.objects.filter(Prefix=prefix)
+            if not obj.key.endswith("/")
+        ]
+
     def _get_metadata_object(self, dataset_id: str, version_type: VersionType):
         prefix = self._get_prefix_for_dataset(dataset_id, version_type)
         try:
@@ -152,17 +160,57 @@ class FilestoreService(BaseService):
             "has_manifest": manifest_yaml is not None or manifest_json is not None,
         }
 
+    def get_tabular_validation_sources(
+        self,
+        dataset_id: str,
+        version_type: VersionType,
+    ) -> dict[str, str]:
+        table_sources: dict[str, str] = {}
+        for key in self._list_dataset_objects(dataset_id, version_type):
+            file_name = Path(key).name
+            if file_name in {"metadata.json", "manifest.yaml", "manifest.json"}:
+                continue
+            if Path(file_name).suffix.lower() != ".csv":
+                continue
+
+            table_sources[Path(file_name).stem] = (
+                self.bucket.Object(key).get()["Body"].read().decode("utf-8")
+            )
+        return table_sources
+
+    def get_geojson_validation_source(
+        self,
+        dataset_id: str,
+        version_type: VersionType,
+    ) -> str:
+        candidate_keys = []
+        for key in self._list_dataset_objects(dataset_id, version_type):
+            file_name = Path(key).name
+            if file_name in {"metadata.json", "manifest.yaml", "manifest.json"}:
+                continue
+            if Path(file_name).suffix.lower() not in {".geojson", ".json"}:
+                continue
+            candidate_keys.append(key)
+
+        if not candidate_keys:
+            raise ValidationError("No stored GeoJSON data found for dataset")
+        if len(candidate_keys) > 1:
+            raise ValidationError(
+                "Multiple stored GeoJSON files found; unable to determine canonical source"
+            )
+
+        return self.bucket.Object(candidate_keys[0]).get()["Body"].read().decode("utf-8")
+
     def list_files_in_s3(self, dataset_id: str, version_type: VersionType):
         """
         List files in S3 bucket with metadata.
         """
         try:
-            prefix = self._get_prefix_for_dataset(dataset_id, version_type)
             metadata_object = self._get_metadata_object(dataset_id, version_type)
 
             files_list = [
-                obj.key.split("/")[-1]
-                for obj in self.bucket.objects.filter(Prefix=prefix)
+                Path(key).name
+                for key in self._list_dataset_objects(dataset_id, version_type)
             ]
             self.logger.info(
                 "Found %s files in S3 for %s/%s: %s",

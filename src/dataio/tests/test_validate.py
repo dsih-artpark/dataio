@@ -92,6 +92,21 @@ def test_valid_tabular_manifest_and_data_pass(tmp_path):
     assert result.summary.errors == 0
 
 
+def test_valid_tabular_manifest_and_inline_data_pass(tmp_path):
+    csv_path = tmp_path / "livestock.csv"
+    csv_text = "state.ID,year,species,count\nstate_29,2024,cattle,10\n"
+    csv_path.write_text(csv_text, encoding="utf-8")
+    manifest = VALID_TABULAR_MANIFEST.replace("REPLACEME", str(csv_path))
+
+    result = DataIOValidator().validate_tabular(
+        manifest=manifest,
+        data_files={"livestock": csv_text},
+    )
+
+    assert result.status == "pass"
+    assert result.summary.errors == 0
+
+
 def test_invalid_field_contract_fails():
     manifest = """
 metadataSpecVersion: v2

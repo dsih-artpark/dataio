@@ -11,6 +11,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { name: 'Users', href: '/admin/users', icon: 'users', adminOnly: true },
   { name: 'Groups', href: '/admin/groups', icon: 'users-cog', adminOnly: true },
+  { name: 'Manifests', href: '/admin/manifests', icon: 'database', adminOnly: true },
 ];
 
 const icons: Record<string, JSX.Element> = {

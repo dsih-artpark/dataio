@@ -1,14 +1,24 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 from pathlib import Path
 from typing import Any
 
 
-def load_tabular_rows(path: str, max_rows: int | None = None) -> list[dict[str, Any]]:
+def load_tabular_rows(source: str | bytes, max_rows: int | None = None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    with Path(path).open("r", encoding="utf-8", newline="") as handle:
+    if isinstance(source, bytes):
+        handle = io.StringIO(source.decode("utf-8"))
+    else:
+        path = Path(source)
+        if path.exists():
+            handle = path.open("r", encoding="utf-8", newline="")
+        else:
+            handle = io.StringIO(source)
+
+    with handle:
         reader = csv.DictReader(handle)
         for index, row in enumerate(reader):
             rows.append(dict(row))

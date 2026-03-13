@@ -13,6 +13,21 @@ Legacy `metadata.json` table metadata is deprecated and should not be used for n
 
 ## Admin API
 
+Session-authenticated web admin routes are also available for the platform UI:
+
+```text
+GET /api/v1/web/admin/datasets/{dataset_id}/{bucket_type}/manifest
+PUT /api/v1/web/admin/datasets/{dataset_id}/{bucket_type}/manifest
+POST /api/v1/web/admin/validate/tabular
+POST /api/v1/web/admin/validate/geojson
+```
+
+These routes power the admin manifest management UI, where administrators can:
+
+- view the canonical manifest stored for a dataset
+- upload a replacement `manifest.yaml`
+- validate a candidate manifest with optional tabular or GeoJSON data before promotion
+
 Write manifest:
 
 ```text
@@ -28,8 +43,11 @@ GET /api/v1/admin/datasets/{dataset_id}/{bucket_type}/manifest
 The write path:
 
 1. validates the uploaded manifest
-2. writes `manifest.yaml` and `manifest.json` to filestore
-3. updates the dataset manifest cache in the database in the same request
+2. validates the dataset's existing stored data against that manifest
+3. writes `manifest.yaml` and `manifest.json` to filestore only if both checks pass
+4. updates the dataset manifest cache in the database in the same request
+
+A canonical manifest upload is rejected when the already stored dataset files do not meet the manifest standard.
 
 ## Python SDK
 

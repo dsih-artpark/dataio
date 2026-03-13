@@ -57,6 +57,7 @@ jobs:
             cd dataio
             mkdir logs
             uv sync --group docs --group api
+            uv run all-migrations
             uv run sphinx-build -b html docs/source docs/build
             sudo supervisorctl restart dataio-app
 

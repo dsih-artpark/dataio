@@ -9,14 +9,18 @@ Provides endpoints for:
 """
 
 import logging
+import os
+import secrets
 from typing import Optional, List
 from datetime import datetime
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr
 
 from dataio.api.database.models import User
-from dataio.api.auth.jwt import get_current_web_user
+from dataio.api.auth.jwt import REFRESH_COOKIE_NAME, get_current_web_user
 from dataio.api.services.web_auth_service import WebAuthService
 from dataio.api.services.web_user_service import WebUserService
 from dataio.api.services.web_admin_service import WebAdminService
@@ -41,11 +45,11 @@ class LoginVerifyRequest(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    refresh_token: Optional[str] = None
 
 
 class LogoutRequest(BaseModel):
-    refresh_token: str
+    refresh_token: Optional[str] = None
 
 
 class PasskeyRegisterRequest(BaseModel):
@@ -54,8 +58,12 @@ class PasskeyRegisterRequest(BaseModel):
 
 
 class PasskeyAuthRequest(BaseModel):
-    email: EmailStr
+    email: Optional[EmailStr] = None
     credential: dict
+
+
+class PasskeyOptionsRequest(BaseModel):
+    email: Optional[EmailStr] = None
 
 
 class UpdateProfileRequest(BaseModel):
@@ -106,6 +114,17 @@ class AcceptInvitationRequest(BaseModel):
     token: str
 
 
+class OAuthCallbackRequest(BaseModel):
+    code: str
+    state: str
+
+
+class AuthProvidersResponse(BaseModel):
+    google: bool
+    github: bool
+    passkey: bool
+
+
 # =============================================================================
 # Helper Functions
 # =============================================================================
@@ -115,7 +134,34 @@ def get_client_info(request: Request) -> tuple[Optional[str], Optional[str]]:
     """Extract user agent and IP address from request."""
     user_agent = request.headers.get("user-agent")
     ip_address = request.client.host if request.client else None
+
+    if os.getenv("TRUST_PROXY_HEADERS", "false").lower() == "true":
+        forwarded_for = request.headers.get("x-forwarded-for")
+        real_ip = request.headers.get("x-real-ip")
+        cf_ip = request.headers.get("cf-connecting-ip")
+        if cf_ip:
+            ip_address = cf_ip.strip()
+        elif real_ip:
+            ip_address = real_ip.strip()
+        elif forwarded_for:
+            ip_address = forwarded_for.split(",")[0].strip()
     return user_agent, ip_address
+
+
+def set_refresh_cookie(response: Response, refresh_token: str) -> None:
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value=refresh_token,
+        httponly=True,
+        secure=os.getenv("COOKIE_SECURE", "false").lower() == "true",
+        samesite=os.getenv("COOKIE_SAMESITE", "lax"),
+        max_age=7 * 24 * 60 * 60,
+        path="/",
+    )
+
+
+def clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(key=REFRESH_COOKIE_NAME, path="/")
 
 
 # =============================================================================
@@ -123,9 +169,24 @@ def get_client_info(request: Request) -> tuple[Optional[str], Optional[str]]:
 # =============================================================================
 
 
+@web_router.get("/auth/providers", tags=["auth"], response_model=AuthProvidersResponse)
+async def get_auth_providers():
+    """Return which login providers are configured and should be shown in the UI."""
+    return {
+        "google": bool(
+            os.getenv("GOOGLE_OAUTH_CLIENT_ID") and os.getenv("GOOGLE_OAUTH_CLIENT_SECRET")
+        ),
+        "github": bool(
+            os.getenv("GITHUB_OAUTH_CLIENT_ID") and os.getenv("GITHUB_OAUTH_CLIENT_SECRET")
+        ),
+        "passkey": True,
+    }
+
+
 @web_router.post("/auth/login/initiate", tags=["auth"])
 async def initiate_login(
     body: LoginInitiateRequest,
+    request: Request,
     auth_service: WebAuthService = Depends(WebAuthService),
 ):
     """
@@ -133,13 +194,19 @@ async def initiate_login(
 
     No authentication required.
     """
-    return auth_service.initiate_login(body.email)
+    user_agent, ip_address = get_client_info(request)
+    return auth_service.initiate_login(
+        body.email,
+        user_agent=user_agent,
+        ip_address=ip_address,
+    )
 
 
 @web_router.post("/auth/login/verify", tags=["auth"])
 async def verify_login(
     body: LoginVerifyRequest,
     request: Request,
+    response: Response,
     auth_service: WebAuthService = Depends(WebAuthService),
 ):
     """
@@ -149,18 +216,22 @@ async def verify_login(
     Also indicates if passkey setup is needed.
     """
     user_agent, ip_address = get_client_info(request)
-    return auth_service.verify_login(
+    result = auth_service.verify_login(
         email=body.email,
         code=body.code,
         user_agent=user_agent,
         ip_address=ip_address,
     )
+    if result.get("refresh_token"):
+        set_refresh_cookie(response, result["refresh_token"])
+    return {k: v for k, v in result.items() if k != "refresh_token"}
 
 
 @web_router.post("/auth/refresh", tags=["auth"])
 async def refresh_tokens(
     body: RefreshRequest,
     request: Request,
+    response: Response,
     auth_service: WebAuthService = Depends(WebAuthService),
 ):
     """
@@ -169,27 +240,43 @@ async def refresh_tokens(
     Returns new access token and refresh token.
     """
     user_agent, ip_address = get_client_info(request)
-    return auth_service.refresh_tokens(
-        refresh_token=body.refresh_token,
+    refresh_token = body.refresh_token or request.cookies.get(REFRESH_COOKIE_NAME)
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="Missing refresh token")
+    result = auth_service.refresh_tokens(
+        refresh_token=refresh_token,
         user_agent=user_agent,
         ip_address=ip_address,
     )
+    if result.get("refresh_token"):
+        set_refresh_cookie(response, result["refresh_token"])
+    return {k: v for k, v in result.items() if k != "refresh_token"}
 
 
 @web_router.post("/auth/logout", tags=["auth"])
 async def logout(
-    body: LogoutRequest,
+    body: Optional[LogoutRequest] = None,
+    request: Request = None,
+    response: Response = None,
     auth_service: WebAuthService = Depends(WebAuthService),
 ):
     """
     Logout by revoking the current session.
     """
-    return auth_service.logout(body.refresh_token)
+    refresh_token = (body.refresh_token if body else None) or (
+        request.cookies.get(REFRESH_COOKIE_NAME) if request else None
+    )
+    if refresh_token:
+        auth_service.logout(refresh_token)
+    if response:
+        clear_refresh_cookie(response)
+    return {"logged_out": True}
 
 
 @web_router.post("/auth/logout-all", tags=["auth"])
 async def logout_all(
     user: User = Depends(get_current_web_user),
+    response: Response = None,
     auth_service: WebAuthService = Depends(WebAuthService),
 ):
     """
@@ -197,6 +284,8 @@ async def logout_all(
 
     Requires authentication.
     """
+    if response:
+        clear_refresh_cookie(response)
     return auth_service.logout_all_sessions(user.email)
 
 
@@ -208,6 +297,7 @@ async def logout_all(
 @web_router.post("/auth/register/initiate", tags=["auth"])
 async def initiate_registration(
     body: RegisterInitiateRequest,
+    request: Request,
     auth_service: WebAuthService = Depends(WebAuthService),
 ):
     """
@@ -218,13 +308,19 @@ async def initiate_registration(
 
     No authentication required.
     """
-    return auth_service.initiate_registration(body.email)
+    user_agent, ip_address = get_client_info(request)
+    return auth_service.initiate_registration(
+        body.email,
+        user_agent=user_agent,
+        ip_address=ip_address,
+    )
 
 
 @web_router.post("/auth/register/verify", tags=["auth"])
 async def verify_registration(
     body: RegisterVerifyRequest,
     request: Request,
+    response: Response,
     auth_service: WebAuthService = Depends(WebAuthService),
 ):
     """
@@ -235,13 +331,85 @@ async def verify_registration(
     No authentication required.
     """
     user_agent, ip_address = get_client_info(request)
-    return auth_service.verify_registration(
+    result = auth_service.verify_registration(
         email=body.email,
         code=body.code,
         magic_token=body.magic_token,
         user_agent=user_agent,
         ip_address=ip_address,
     )
+    if result.get("refresh_token"):
+        set_refresh_cookie(response, result["refresh_token"])
+    return {k: v for k, v in result.items() if k != "refresh_token"}
+
+
+@web_router.get("/auth/oauth/{provider}/start", tags=["auth"])
+async def start_oauth(
+    provider: str,
+    request: Request,
+    auth_service: WebAuthService = Depends(WebAuthService),
+):
+    state = secrets.token_urlsafe(24)
+    redirect_url = auth_service.get_oauth_authorize_url(provider, state)
+    response = RedirectResponse(url=redirect_url, status_code=302)
+    response.set_cookie(
+        key=f"oauth_state_{provider}",
+        value=state,
+        httponly=True,
+        secure=os.getenv("COOKIE_SECURE", "false").lower() == "true",
+        samesite="lax",
+        max_age=600,
+        path="/",
+    )
+    return response
+
+
+@web_router.get("/auth/oauth/{provider}/callback", tags=["auth"])
+async def oauth_callback(
+    provider: str,
+    code: str,
+    state: str,
+    request: Request,
+    auth_service: WebAuthService = Depends(WebAuthService),
+):
+    expected_state = request.cookies.get(f"oauth_state_{provider}")
+    if not expected_state or expected_state != state:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+
+    user_agent, ip_address = get_client_info(request)
+    if provider == "google":
+        result = auth_service.complete_google_oauth(
+            code=code,
+            user_agent=user_agent,
+            ip_address=ip_address,
+        )
+    elif provider == "github":
+        result = auth_service.complete_github_oauth(
+            code=code,
+            user_agent=user_agent,
+            ip_address=ip_address,
+        )
+    else:
+        raise HTTPException(status_code=404, detail="Unsupported OAuth provider")
+
+    params = {}
+    if result.get("refresh_token"):
+        params["oauth"] = "success"
+    if result.get("needs_passkey"):
+        params["needs_passkey"] = "true"
+    if result.get("verification_status"):
+        params["verification_status"] = result["verification_status"]
+    if result.get("verification_message"):
+        params["verification_message"] = result["verification_message"]
+    redirect_target = f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/login"
+    if params:
+        redirect_target = f"{redirect_target}#{urlencode(params)}"
+
+    response = RedirectResponse(url=redirect_target, status_code=302)
+    response.delete_cookie(key=f"oauth_state_{provider}", path="/")
+    if result.get("refresh_token"):
+        set_refresh_cookie(response, result["refresh_token"])
+    return response
 
 
 # =============================================================================
@@ -253,6 +421,7 @@ async def verify_registration(
 async def accept_invitation(
     body: AcceptInvitationRequest,
     request: Request,
+    response: Response,
     auth_service: WebAuthService = Depends(WebAuthService),
 ):
     """
@@ -264,11 +433,14 @@ async def accept_invitation(
     No authentication required.
     """
     user_agent, ip_address = get_client_info(request)
-    return auth_service.accept_invitation(
+    result = auth_service.accept_invitation(
         token=body.token,
         user_agent=user_agent,
         ip_address=ip_address,
     )
+    if result.get("refresh_token"):
+        set_refresh_cookie(response, result["refresh_token"])
+    return {k: v for k, v in result.items() if k != "refresh_token"}
 
 
 # =============================================================================
@@ -344,7 +516,8 @@ async def verify_passkey_registration(
 
 @web_router.post("/auth/passkey/login/options", tags=["passkey"])
 async def get_passkey_login_options(
-    body: LoginInitiateRequest,
+    body: PasskeyOptionsRequest,
+    request: Request,
     auth_service: WebAuthService = Depends(WebAuthService),
 ):
     """
@@ -352,13 +525,19 @@ async def get_passkey_login_options(
 
     No authentication required.
     """
-    return auth_service.get_passkey_authentication_options(body.email)
+    user_agent, ip_address = get_client_info(request)
+    return auth_service.get_passkey_authentication_options(
+        body.email,
+        user_agent=user_agent,
+        ip_address=ip_address,
+    )
 
 
 @web_router.post("/auth/passkey/login/verify", tags=["passkey"])
 async def verify_passkey_login(
     body: PasskeyAuthRequest,
     request: Request,
+    response: Response,
     auth_service: WebAuthService = Depends(WebAuthService),
 ):
     """
@@ -367,12 +546,15 @@ async def verify_passkey_login(
     Returns access token, refresh token, and user info.
     """
     user_agent, ip_address = get_client_info(request)
-    return auth_service.verify_passkey_authentication(
+    result = auth_service.verify_passkey_authentication(
         email=body.email,
         credential=body.credential,
         user_agent=user_agent,
         ip_address=ip_address,
     )
+    if result.get("refresh_token"):
+        set_refresh_cookie(response, result["refresh_token"])
+    return {k: v for k, v in result.items() if k != "refresh_token"}
 
 
 @web_router.get("/passkeys", tags=["passkey"])

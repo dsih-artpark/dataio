@@ -40,6 +40,7 @@ WEBAUTHN_ORIGIN = os.getenv("WEBAUTHN_ORIGIN", "http://localhost:3000")
 WEBAUTHN_CHALLENGE_EXPIRY_MINUTES = int(
     os.getenv("WEBAUTHN_CHALLENGE_EXPIRY_MINUTES", "5")
 )
+DISCOVERABLE_PASSKEY_USER = "__discoverable_passkey__"
 
 
 def _store_challenge(user_email: str, challenge: bytes, purpose: str) -> None:
@@ -152,7 +153,9 @@ def get_registration_options(user_email: str) -> dict:
             exclude_credentials=exclude_credentials,
             authenticator_selection=AuthenticatorSelectionCriteria(
                 authenticator_attachment=AuthenticatorAttachment.PLATFORM,
-                resident_key=ResidentKeyRequirement.PREFERRED,
+                # Require discoverable credentials so the sign-in screen can
+                # support passkey auth without asking for an email first.
+                resident_key=ResidentKeyRequirement.REQUIRED,
                 user_verification=UserVerificationRequirement.PREFERRED,
             ),
         )
@@ -241,7 +244,7 @@ def verify_registration(
         session.close()
 
 
-def get_authentication_options(user_email: str) -> dict:
+def get_authentication_options(user_email: Optional[str] = None) -> dict:
     """
     Generate WebAuthn authentication options for a user.
 
@@ -255,17 +258,21 @@ def get_authentication_options(user_email: str) -> dict:
         ValueError: If user has no registered passkeys
     """
     # Get user's credentials
-    credentials = _get_user_credentials(user_email)
-    if not credentials:
-        raise ValueError("No passkeys registered for this account")
+    allow_credentials = None
+    challenge_user = DISCOVERABLE_PASSKEY_USER
+    if user_email:
+        credentials = _get_user_credentials(user_email)
+        if not credentials:
+            raise ValueError("No passkeys registered for this account")
 
-    allow_credentials = [
-        PublicKeyCredentialDescriptor(
-            id=base64url_to_bytes(cred.credential_id),
-            transports=[AuthenticatorTransport(t) for t in (cred.transports or [])],
-        )
-        for cred in credentials
-    ]
+        allow_credentials = [
+            PublicKeyCredentialDescriptor(
+                id=base64url_to_bytes(cred.credential_id),
+                transports=[AuthenticatorTransport(t) for t in (cred.transports or [])],
+            )
+            for cred in credentials
+        ]
+        challenge_user = user_email
 
     # Generate options
     options = generate_authentication_options(
@@ -275,13 +282,13 @@ def get_authentication_options(user_email: str) -> dict:
     )
 
     # Store challenge for verification
-    _store_challenge(user_email, options.challenge, "authentication")
+    _store_challenge(challenge_user, options.challenge, "authentication")
 
-    logger.info(f"Generated authentication options for user: {user_email}")
+    logger.info(f"Generated authentication options for user: {user_email or 'discoverable'}")
     return options_to_json(options)
 
 
-def verify_authentication(user_email: str, credential: dict) -> WebAuthnCredential:
+def verify_authentication(user_email: Optional[str], credential: dict) -> WebAuthnCredential:
     """
     Verify a WebAuthn authentication response.
 
@@ -298,27 +305,28 @@ def verify_authentication(user_email: str, credential: dict) -> WebAuthnCredenti
     session = DBSession()
     try:
         # Get the stored challenge
-        expected_challenge = _get_challenge(user_email, "authentication")
-        if not expected_challenge:
-            raise ValueError("No valid challenge found. Please restart authentication.")
-
         # Get the credential ID from the response
         credential_id = credential.get("id") or credential.get("rawId")
         if not credential_id:
             raise ValueError("Missing credential ID")
 
         # Find the stored credential
-        db_credential = (
-            session.query(WebAuthnCredential)
-            .filter(
-                WebAuthnCredential.user_email == user_email,
-                WebAuthnCredential.credential_id == credential_id,
-            )
-            .first()
+        query = session.query(WebAuthnCredential).filter(
+            WebAuthnCredential.credential_id == credential_id,
         )
+        if user_email:
+            query = query.filter(WebAuthnCredential.user_email == user_email)
+        db_credential = query.first()
 
         if not db_credential:
             raise ValueError("Credential not found")
+
+        expected_challenge = _get_challenge(
+            user_email or DISCOVERABLE_PASSKEY_USER,
+            "authentication",
+        )
+        if not expected_challenge:
+            raise ValueError("No valid challenge found. Please restart authentication.")
 
         # Verify the authentication response
         verification = verify_authentication_response(
@@ -334,6 +342,14 @@ def verify_authentication(user_email: str, credential: dict) -> WebAuthnCredenti
         db_credential.sign_count = verification.new_sign_count
         db_credential.last_used_at = datetime.now(timezone.utc)
         session.commit()
+        session.refresh(db_credential)
+
+        # Load the scalar fields we need after the session closes and detach the
+        # instance so callers can safely read them without triggering lazy loads.
+        _ = db_credential.user_email
+        _ = db_credential.sign_count
+        _ = db_credential.last_used_at
+        session.expunge(db_credential)
 
         logger.info(f"Passkey authentication successful for user: {user_email}")
         return db_credential

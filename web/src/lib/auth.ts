@@ -14,8 +14,8 @@ interface User {
 
 // Reactive state for auth
 export const currentUser = signal<User | null>(null);
-// Start as true only if there might be tokens to check
-export const isLoading = signal(typeof window !== 'undefined' && !!localStorage.getItem('access_token'));
+// Start as true because session restoration may happen from the refresh cookie.
+export const isLoading = signal(typeof window !== 'undefined');
 
 // Promise to track in-flight auth initialization (prevents race conditions)
 let initAuthPromise: Promise<void> | null = null;
@@ -46,6 +46,10 @@ export async function initAuth(): Promise<void> {
 
 async function _doInitAuth(): Promise<void> {
   isLoading.value = true;
+
+  if (!api.isAuthenticated()) {
+    await api.restoreSession();
+  }
 
   if (api.isAuthenticated()) {
     try {
@@ -81,12 +85,16 @@ export function resetAuthState(): void {
 export async function loginWithOTP(email: string, code: string): Promise<{
   user: User;
   needsPasskey: boolean;
+  verificationStatus?: string;
+  verificationMessage?: string | null;
 }> {
   const response = await api.verifyLogin(email, code);
-  currentUser.value = response.user;
+  currentUser.value = response.access_token ? response.user : null;
   return {
     user: response.user,
     needsPasskey: response.needs_passkey,
+    verificationStatus: response.verification_status,
+    verificationMessage: response.verification_message,
   };
 }
 
@@ -113,8 +121,6 @@ export function requireAuth(): boolean {
   if (typeof window === 'undefined') return true;
 
   if (!api.isAuthenticated()) {
-    // Use replace to avoid back-button loops
-    window.location.replace('/login');
     return false;
   }
   return true;
@@ -128,19 +134,14 @@ export function requireAuth(): boolean {
 export async function redirectIfAuthenticated(): Promise<boolean> {
   if (typeof window === 'undefined') return true;
 
-  // If there are tokens, wait for auth to complete before deciding
-  if (api.isAuthenticated()) {
-    try {
-      await initAuth();
-      // If user is now set, redirect
-      if (currentUser.value) {
-        window.location.replace('/datasets');
-        return false;
-      }
-    } catch {
-      // Auth failed, stay on page
-      return true;
+  try {
+    await initAuth();
+    if (currentUser.value) {
+      window.location.replace('/datasets');
+      return false;
     }
+  } catch {
+    return true;
   }
   return true;
 }

@@ -8,6 +8,8 @@ for session-based authentication in the web interface.
 import os
 import uuid
 import logging
+import hmac
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -18,6 +20,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dataio.api.database.config import Session as DBSession
 from dataio.api.database.models import User, Session
 from dataio.api.auth.exceptions import AuthenticationError
+from dataio.api.auth.security import ensure_user_can_authenticate, record_auth_event
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +34,7 @@ if not JWT_SECRET_KEY:
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
 JWT_REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+REFRESH_COOKIE_NAME = os.getenv("REFRESH_COOKIE_NAME", "dataio_refresh_token")
 
 
 class TokenPayload:
@@ -107,6 +111,16 @@ def create_refresh_token(
     return token, jti, expire
 
 
+def hash_refresh_token_jti(jti: str) -> str:
+    """Hash a refresh-token JTI for storage."""
+    digest = hmac.new(
+        JWT_SECRET_KEY.encode("utf-8"),
+        jti.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"sha256${digest}"
+
+
 def verify_token(token: str) -> TokenPayload:
     """
     Verify and decode a JWT token.
@@ -170,8 +184,17 @@ def get_current_web_user(
             user = session.query(User).filter(User.email == payload.sub).first()
             if not user:
                 raise AuthenticationError("User not found")
-            if user.is_group:
-                raise AuthenticationError("Groups cannot authenticate")
+            try:
+                ensure_user_can_authenticate(user)
+            except HTTPException as exc:
+                record_auth_event(
+                    event_type="access_token.rejected",
+                    outcome="blocked",
+                    actor_email=user.email,
+                    target_email=user.email,
+                    details={"reason": exc.detail},
+                )
+                raise AuthenticationError(str(exc.detail))
 
             # Force load all attributes before expunging from session
             # This ensures is_admin and other fields are accessible after session closes
@@ -222,6 +245,7 @@ def create_session(
     user_email: str,
     refresh_token: str,
     expires_at: datetime,
+    refresh_token_jti: Optional[str] = None,
     user_agent: Optional[str] = None,
     ip_address: Optional[str] = None,
 ) -> Session:
@@ -247,7 +271,9 @@ def create_session(
     try:
         db_session = Session(
             user_email=user_email,
-            refresh_token=refresh_token,
+            refresh_token=None if refresh_token_jti else refresh_token,
+            refresh_token_jti_hash=hash_refresh_token_jti(refresh_token_jti)
+            if refresh_token_jti else None,
             expires_at=expires_at,
             user_agent=user_agent,
             ip_address=ip_address,
@@ -277,9 +303,17 @@ def revoke_session(refresh_token: str) -> bool:
     """
     session = DBSession()
     try:
+        payload = verify_token(refresh_token)
+        if payload.type != "refresh" or not payload.jti:
+            return False
         db_session = (
             session.query(Session)
-            .filter(Session.refresh_token == refresh_token)
+            .filter(
+                (
+                    (Session.refresh_token_jti_hash == hash_refresh_token_jti(payload.jti))
+                    | (Session.refresh_token == refresh_token)
+                )
+            )
             .first()
         )
         if db_session:
@@ -287,6 +321,8 @@ def revoke_session(refresh_token: str) -> bool:
             session.commit()
             logger.info(f"Revoked session for user: {db_session.user_email}")
             return True
+        return False
+    except AuthenticationError:
         return False
     except Exception as e:
         session.rollback()
@@ -343,6 +379,9 @@ def validate_refresh_token(refresh_token: str) -> Optional[Session]:
         if payload.type != "refresh":
             logger.warning("Token is not a refresh token")
             return None
+        if not payload.jti:
+            logger.warning("Refresh token missing jti")
+            return None
 
         # Check if session exists and is not revoked
         session = DBSession()
@@ -350,7 +389,10 @@ def validate_refresh_token(refresh_token: str) -> Optional[Session]:
             db_session = (
                 session.query(Session)
                 .filter(
-                    Session.refresh_token == refresh_token,
+                    (
+                        (Session.refresh_token_jti_hash == hash_refresh_token_jti(payload.jti))
+                        | (Session.refresh_token == refresh_token)
+                    ),
                     Session.revoked_at.is_(None),
                     Session.expires_at > datetime.now(timezone.utc),
                 )

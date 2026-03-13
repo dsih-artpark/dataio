@@ -1,3 +1,4 @@
+-- Legacy untracked rollback kept for reference only.
 -- Rollback Migration 008: Registration and User Verification
 
 -- Drop magic link tokens table

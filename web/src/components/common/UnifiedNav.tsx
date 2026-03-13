@@ -14,15 +14,9 @@ export default function UnifiedNav({ variant = 'default' }: UnifiedNavProps) {
   const isAuthenticated = !!user;
 
   useEffect(() => {
-    // Only initialize if there are tokens to check
-    if (api.isAuthenticated()) {
-      initAuth().catch(() => {
-        // Auth failed, user will remain null
-      });
-    } else {
-      // No tokens, immediately mark as not loading
+    initAuth().catch(() => {
       authLoading.value = false;
-    }
+    });
   }, []);
 
   const handleLogout = async () => {
@@ -182,11 +176,8 @@ export default function UnifiedNav({ variant = 'default' }: UnifiedNavProps) {
               </div>
             ) : (
               <div class="flex items-center gap-2">
-                <a href="/login" class="text-gray-600 hover:text-gray-900 text-sm font-medium px-3 py-2">
+                <a href="/login" class="btn-primary text-sm px-4 py-2">
                   Sign In
-                </a>
-                <a href="/register" class="btn-primary text-sm px-4 py-2">
-                  Register
                 </a>
               </div>
             )}

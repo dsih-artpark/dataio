@@ -1,3 +1,4 @@
+-- Legacy untracked migration candidate kept for reference only.
 -- Migration 008: Registration and User Verification
 -- Adds support for self-registration with email verification and admin approval
 

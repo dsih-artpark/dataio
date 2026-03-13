@@ -69,18 +69,19 @@ def test_upsert_dataset_manifest_updates_filestore_and_db(monkeypatch):
     manifest_text = """
 metadataSpecVersion: v2
 datasetTitle: Sample Manifest
-datasetSlug: sample-manifest
+datasetSlug: ts0001ds0001-sample-manifest
 datasetDescription: Example
 source: Test
 category: {ID: TS, name: Test}
 collection: {ID: TS0001, name: Tests}
+datasetID: TS0001DS0001
 datasetKind: tabular
 datasetTables:
   sample:
     dataDictionary:
       year:
         type: date
-        format: YYYY
+        format: "%Y"
         nullable: false
 """
 
@@ -138,18 +139,19 @@ def test_upsert_dataset_manifest_rejects_when_stored_data_fails(monkeypatch):
             b"""
 metadataSpecVersion: v2
 datasetTitle: Sample Manifest
-datasetSlug: sample-manifest
+datasetSlug: ts0001ds0001-sample-manifest
 datasetDescription: Example
 source: Test
 category: {ID: TS, name: Test}
 collection: {ID: TS0001, name: Tests}
+datasetID: TS0001DS0111
 datasetKind: tabular
 datasetTables:
   sample:
     dataDictionary:
       year:
         type: date
-        format: YYYY
+        format: "%Y"
         nullable: false
 """
         ),

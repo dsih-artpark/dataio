@@ -36,6 +36,20 @@ class WebUserService(BaseService):
         super().__init__()
         self.email_service = EmailService()
 
+    def _get_accessible_dataset(self, user: User, dataset_id: str) -> Dataset:
+        dataset = database.get_dataset(dataset_id)
+        if not dataset:
+            raise HTTPException(status_code=404, detail="Dataset not found")
+
+        user_permissions = determine_user_permissions(user)
+        if not user.is_admin:
+            accessible = database.get_datasets(limit=10000, user_permissions=user_permissions)
+            accessible_ids = {item.ds_id for item in accessible}
+            if dataset_id not in accessible_ids:
+                raise HTTPException(status_code=403, detail="Access denied to this dataset")
+
+        return dataset
+
     def get_current_user_profile(self, user: User) -> dict:
         """
         Get the current user's profile.
@@ -362,20 +376,10 @@ class WebUserService(BaseService):
         """
         session = DBSession()
         try:
-            dataset = database.get_dataset(dataset_id)
-            if not dataset:
-                raise HTTPException(status_code=404, detail="Dataset not found")
-
-            # Check permissions - verify user can access this dataset
-            user_permissions = determine_user_permissions(user)
-            if not user.is_admin:
-                # Get accessible datasets for this user and check if requested dataset is included
-                accessible = database.get_datasets(limit=10000, user_permissions=user_permissions)
-                accessible_ids = {d.ds_id for d in accessible}
-                if dataset_id not in accessible_ids:
-                    raise HTTPException(status_code=403, detail="Access denied to this dataset")
+            dataset = self._get_accessible_dataset(user, dataset_id)
 
             # Determine user's access level for this dataset
+            user_permissions = determine_user_permissions(user)
             can_download = dataset.access_level and dataset.access_level.value == "DOWNLOAD"
             if not can_download and not user.is_admin:
                 # Check if user has explicit download permission
@@ -421,6 +425,10 @@ class WebUserService(BaseService):
                 "data_dictionary_json": dataset.data_dictionary_json if hasattr(dataset, 'data_dictionary_json') else None,
                 "manifest_yaml": dataset.manifest_yaml if hasattr(dataset, 'manifest_yaml') else None,
                 "manifest_json": dataset.manifest_json if hasattr(dataset, 'manifest_json') else None,
+                "has_manifest": bool(
+                    (dataset.manifest_yaml if hasattr(dataset, 'manifest_yaml') else None)
+                    or (dataset.manifest_json if hasattr(dataset, 'manifest_json') else None)
+                ),
                 "manifest_updated_at": dataset.manifest_updated_at.isoformat() if hasattr(dataset, 'manifest_updated_at') and dataset.manifest_updated_at else None,
                 "manifest_updated_by": dataset.manifest_updated_by if hasattr(dataset, 'manifest_updated_by') else None,
                 "documentation_synced_at": dataset.documentation_synced_at.isoformat() if hasattr(dataset, 'documentation_synced_at') and dataset.documentation_synced_at else None,
@@ -430,6 +438,38 @@ class WebUserService(BaseService):
         except Exception as e:
             self.logger.error(f"Failed to get dataset: {str(e)}")
             raise HTTPException(status_code=500, detail="Failed to get dataset")
+        finally:
+            session.close()
+
+    def get_dataset_manifest(self, user: User, dataset_id: str) -> dict:
+        """
+        Get the canonical manifest for a standardised dataset the user can view.
+        """
+        from dataio.api.models import VersionType
+        from dataio.api.services.filestore_service import FilestoreService
+
+        session = DBSession()
+        try:
+            dataset = self._get_accessible_dataset(user, dataset_id)
+            manifest = FilestoreService().get_manifest(dataset_id, VersionType.STANDARDISED)
+            if not manifest.get("has_manifest"):
+                raise HTTPException(status_code=404, detail="Manifest not found")
+
+            return {
+                "dataset_id": dataset_id,
+                "bucket_type": VersionType.STANDARDISED.value,
+                **manifest,
+                "manifest_updated_at": (
+                    dataset.manifest_updated_at.isoformat()
+                    if hasattr(dataset, "manifest_updated_at") and dataset.manifest_updated_at
+                    else None
+                ),
+                "manifest_updated_by": (
+                    dataset.manifest_updated_by
+                    if hasattr(dataset, "manifest_updated_by")
+                    else None
+                ),
+            }
         finally:
             session.close()
 
@@ -717,6 +757,10 @@ class WebUserService(BaseService):
                 "data_dictionary_json": dataset.data_dictionary_json if hasattr(dataset, 'data_dictionary_json') else None,
                 "manifest_yaml": dataset.manifest_yaml if hasattr(dataset, 'manifest_yaml') else None,
                 "manifest_json": dataset.manifest_json if hasattr(dataset, 'manifest_json') else None,
+                "has_manifest": bool(
+                    (dataset.manifest_yaml if hasattr(dataset, 'manifest_yaml') else None)
+                    or (dataset.manifest_json if hasattr(dataset, 'manifest_json') else None)
+                ),
                 "manifest_updated_at": dataset.manifest_updated_at.isoformat() if hasattr(dataset, 'manifest_updated_at') and dataset.manifest_updated_at else None,
                 "manifest_updated_by": dataset.manifest_updated_by if hasattr(dataset, 'manifest_updated_by') else None,
                 "documentation_synced_at": dataset.documentation_synced_at.isoformat() if hasattr(dataset, 'documentation_synced_at') and dataset.documentation_synced_at else None,

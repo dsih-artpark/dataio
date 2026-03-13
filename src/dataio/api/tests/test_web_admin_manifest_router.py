@@ -68,7 +68,7 @@ def test_web_admin_validate_tabular_endpoint():
             manifest_file,
             data_file=None,
             table_name=None,
-            strict=False,
+            deep_check=False,
             extra_column_policy="warn",
         ):
             recorded["user"] = user.email
@@ -76,7 +76,7 @@ def test_web_admin_validate_tabular_endpoint():
             recorded["manifest_name"] = manifest_file.filename
             recorded["data_name"] = data_file.filename if data_file else None
             recorded["table_name"] = table_name
-            recorded["strict"] = strict
+            recorded["deep_check"] = deep_check
             recorded["extra_column_policy"] = extra_column_policy
             return {
                 "status": "pass",
@@ -111,7 +111,7 @@ def test_web_admin_validate_tabular_endpoint():
         },
         data={
             "table_name": "sample",
-            "strict": "true",
+            "deep_check": "true",
             "extra_column_policy": "warn",
         },
     )
@@ -121,6 +121,6 @@ def test_web_admin_validate_tabular_endpoint():
     assert recorded["dataset_kind"] == "tabular"
     assert recorded["data_name"] == "sample.csv"
     assert recorded["table_name"] == "sample"
-    assert recorded["strict"] is True
+    assert recorded["deep_check"] is True
 
     app.dependency_overrides.clear()

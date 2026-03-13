@@ -27,7 +27,7 @@ def apply_cross_field_rules(manifest: DatasetManifest, result: ValidationResult)
         for name, field in all_fields
     )
     has_temporal_year_field = any(
-        field.type in {"date", "dateTime"} and field.format and "YYYY" in field.format
+        field.type in {"date", "dateTime"} and field.format and "%Y" in field.format
         for _, field in all_fields
     )
     if has_region_field and not has_temporal_year_field:
@@ -42,8 +42,8 @@ def apply_cross_field_rules(manifest: DatasetManifest, result: ValidationResult)
                 path="datasetTables",
                 rule_id="region_requires_year",
                 hint=(
-                    "Add a date/dateTime field using YYYY, YYYY-MM, YYYY-MM-DD, "
-                    "or ISO 8601 dateTime."
+                    "Add a date/dateTime field using a strftime format that includes %Y, "
+                    "for example %Y or %Y-%m-%d."
                 ),
             )
         )

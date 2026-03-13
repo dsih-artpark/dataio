@@ -1,18 +1,18 @@
 ---
-import ManifestUpdateManager from '../../components/admin/ManifestUpdateManager';
+import ManifestValidationManager from '../../components/admin/ManifestValidationManager';
 import DashboardLayout from '../../layouts/DashboardLayout.astro';
 ---
 
-<DashboardLayout title="Manifests">
+<DashboardLayout title="Manifest Validation">
   <div class="space-y-6">
     <div>
-      <h1 class="text-2xl font-bold text-gray-900">Update Manifest</h1>
+      <h1 class="text-2xl font-bold text-gray-900">Manifest Validation</h1>
       <p class="mt-1 text-gray-600">
-        Review the canonical manifest for the standardised dataset and upload a validated replacement.
+        Validate a candidate manifest and optional dataset file before you update the canonical standardised manifest.
       </p>
     </div>
 
-    <ManifestUpdateManager client:load />
+    <ManifestValidationManager client:load />
   </div>
 </DashboardLayout>
 

@@ -6,6 +6,7 @@ import type {
   AdminDatasetSummary,
   AdminManifestRecord,
   DatasetDetail,
+  DatasetManifestRecord,
   DataOwnersResponse,
   DatasetsResponse,
   CollectionsResponse,
@@ -424,6 +425,10 @@ class ApiClient {
     return this.request<DatasetDetail>(`/datasets/${datasetId}`);
   }
 
+  async getDatasetManifest(datasetId: string): Promise<DatasetManifestRecord> {
+    return this.request<DatasetManifestRecord>(`/datasets/${datasetId}/manifest`);
+  }
+
   async getDatasetDownloadUrls(datasetId: string): Promise<DatasetDownloadUrls> {
     return this.request<DatasetDownloadUrls>(`/datasets/${datasetId}/download-urls`);
   }
@@ -738,7 +743,7 @@ class ApiClient {
     manifestFile: File;
     tableFile?: File | null;
     tableName?: string;
-    strict?: boolean;
+    deepCheck?: boolean;
     extraColumnPolicy?: 'warn' | 'error' | 'ignore';
   }) {
     const formData = new FormData();
@@ -749,8 +754,8 @@ class ApiClient {
     if (params.tableName) {
       formData.append('table_name', params.tableName);
     }
-    if (params.strict) {
-      formData.append('strict', 'true');
+    if (params.deepCheck) {
+      formData.append('deep_check', 'true');
     }
     if (params.extraColumnPolicy) {
       formData.append('extra_column_policy', params.extraColumnPolicy);
@@ -765,15 +770,15 @@ class ApiClient {
   async adminValidateGeojson(params: {
     manifestFile: File;
     geojsonFile?: File | null;
-    strict?: boolean;
+    deepCheck?: boolean;
   }) {
     const formData = new FormData();
     formData.append('manifest_file', params.manifestFile);
     if (params.geojsonFile) {
       formData.append('geojson_file', params.geojsonFile);
     }
-    if (params.strict) {
-      formData.append('strict', 'true');
+    if (params.deepCheck) {
+      formData.append('deep_check', 'true');
     }
 
     return this.request<ValidationResult>('/admin/validate/geojson', {

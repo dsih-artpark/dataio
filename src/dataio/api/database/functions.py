@@ -88,6 +88,21 @@ def get_dataset(dataset_id: str):
         session.close()
 
 
+def get_collection_by_identifier(collection_id: str):
+    session = Session()
+    try:
+        return (
+            session.query(Collection)
+            .filter(Collection.collection_id == collection_id)
+            .first()
+        )
+    except Exception as e:
+        logger.error(f"Error getting collection by identifier: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
 def update_dataset_manifest_cache(
     dataset_id: str,
     *,

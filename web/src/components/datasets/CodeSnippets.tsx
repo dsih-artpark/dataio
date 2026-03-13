@@ -187,14 +187,7 @@ $ curl -H "X-API-Key: $API_KEY" -O \\
       setCopied(id);
       setTimeout(() => setCopied(null), 2000);
     } catch {
-      const textarea = document.createElement('textarea');
-      textarea.value = cleanText;
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
-      setCopied(id);
-      setTimeout(() => setCopied(null), 2000);
+      window.prompt('Copy this snippet:', cleanText);
     }
   };
 

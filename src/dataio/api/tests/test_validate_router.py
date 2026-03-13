@@ -24,11 +24,12 @@ def test_validate_tabular_endpoint(tmp_path):
         f"""
 metadataSpecVersion: v2
 datasetTitle: Sample
-datasetSlug: sample-dataset
+datasetSlug: ts0001ds0001-sample-dataset
 datasetDescription: Example
 source: Test
 category: {{ID: TS, name: Test}}
 collection: {{ID: TS0001, name: Tests}}
+datasetID: TS0001DS0001
 datasetKind: tabular
 datasetTables:
   sample:
@@ -36,7 +37,7 @@ datasetTables:
     dataDictionary:
       year:
         type: date
-        format: YYYY
+        format: "%Y"
         nullable: false
       value:
         type: int

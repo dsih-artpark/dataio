@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from pydantic import ValidationError
 
-from dataio.validate.contracts.models import DatasetKind, ValidationRequest
+from dataio.validate.contracts.models import (
+    DatasetKind,
+    DatasetManifest,
+    ValidationRequest,
+)
 from dataio.validate.loaders.data import load_geojson_data
 from dataio.validate.loaders.schema import load_manifest
 from dataio.validate.registry.plugins import get_validator_plugin
@@ -12,6 +18,14 @@ from dataio.validate.validators.types import validate_declared_types
 
 
 class DataIOValidationService:
+    def __init__(
+        self,
+        *,
+        platform_manifest_checker: Callable[[DatasetManifest, ValidationResult], None]
+        | None = None,
+    ) -> None:
+        self.platform_manifest_checker = platform_manifest_checker
+
     def validate(self, request: ValidationRequest) -> ValidationResult:
         result = ValidationResult(dataset_kind=request.dataset_kind.value)
         try:
@@ -31,6 +45,10 @@ class DataIOValidationService:
         result.metadata_spec_version = manifest.metadataSpecVersion
         result.inferred["dataset_title"] = manifest.datasetTitle
         validate_metadata_contract(manifest, result)
+        if (
+            request.deep_check or request.strict
+        ) and self.platform_manifest_checker is not None:
+            self.platform_manifest_checker(manifest, result)
         validate_declared_types(manifest, result)
 
         plugin = get_validator_plugin(request.dataset_kind)

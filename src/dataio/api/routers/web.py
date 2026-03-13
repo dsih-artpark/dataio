@@ -795,6 +795,20 @@ async def get_dataset(
     return user_service.get_dataset(user, dataset_id)
 
 
+@web_router.get("/datasets/{dataset_id}/manifest", tags=["datasets"])
+async def get_dataset_manifest(
+    dataset_id: str,
+    user: User = Depends(get_current_web_user),
+    user_service: WebUserService = Depends(WebUserService),
+):
+    """
+    Get the canonical manifest for a standardised dataset the user can view.
+
+    Requires authentication and dataset view access.
+    """
+    return user_service.get_dataset_manifest(user, dataset_id)
+
+
 @web_router.get("/datasets/{dataset_id}/download-urls", tags=["datasets"])
 async def get_dataset_download_urls(
     dataset_id: str,
@@ -1257,7 +1271,7 @@ async def admin_validate_tabular(
     manifest_file: UploadFile = File(...),
     table_file: UploadFile | None = File(None),
     table_name: str | None = Form(None),
-    strict: bool = Form(False),
+    deep_check: bool = Form(False),
     extra_column_policy: str = Form("warn"),
     user: User = Depends(get_current_web_user),
     admin_service: WebAdminService = Depends(WebAdminService),
@@ -1269,7 +1283,7 @@ async def admin_validate_tabular(
         manifest_file=manifest_file,
         data_file=table_file,
         table_name=table_name,
-        strict=strict,
+        deep_check=deep_check,
         extra_column_policy=extra_column_policy,
     )
 
@@ -1278,7 +1292,7 @@ async def admin_validate_tabular(
 async def admin_validate_geojson(
     manifest_file: UploadFile = File(...),
     geojson_file: UploadFile | None = File(None),
-    strict: bool = Form(False),
+    deep_check: bool = Form(False),
     user: User = Depends(get_current_web_user),
     admin_service: WebAdminService = Depends(WebAdminService),
 ):
@@ -1288,7 +1302,7 @@ async def admin_validate_geojson(
         dataset_kind=DatasetKind.GEOJSON,
         manifest_file=manifest_file,
         data_file=geojson_file,
-        strict=strict,
+        deep_check=deep_check,
     )
 
 

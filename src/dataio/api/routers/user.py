@@ -60,6 +60,16 @@ async def get_dataset_table_list(
     return user_service.get_dataset_table_list(dataset_id, bucket_type, user)
 
 
+@user_router.get("/datasets/{dataset_id}/manifest")
+async def get_dataset_manifest(
+    dataset_id: str,
+    user: User = Depends(get_user),
+    user_service: UserService = Depends(UserService),
+):
+    logger.info(f"DATASET_MANIFEST_REQUEST: {user.email} for dataset {dataset_id}")
+    return user_service.get_dataset_manifest(dataset_id, user)
+
+
 @user_router.get("/shapefiles")
 async def get_shapefiles_list(
     user: User = Depends(get_user), user_service: UserService = Depends(UserService)

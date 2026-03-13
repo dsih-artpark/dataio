@@ -3,15 +3,27 @@ import { currentUser } from '../../lib/auth';
 
 interface NavItem {
   name: string;
-  href: string;
   icon: string;
   adminOnly?: boolean;
+  href?: string;
+  children?: {
+    name: string;
+    href: string;
+  }[];
 }
 
 const navItems: NavItem[] = [
   { name: 'Users', href: '/admin/users', icon: 'users', adminOnly: true },
   { name: 'Groups', href: '/admin/groups', icon: 'users-cog', adminOnly: true },
-  { name: 'Manifests', href: '/admin/manifests', icon: 'database', adminOnly: true },
+  {
+    name: 'Manifest',
+    icon: 'database',
+    adminOnly: true,
+    children: [
+      { name: 'Update', href: '/admin/manifests' },
+      { name: 'Validate', href: '/admin/manifest-validation' },
+    ],
+  },
 ];
 
 const icons: Record<string, JSX.Element> = {
@@ -70,22 +82,63 @@ export default function Sidebar() {
         <nav class="flex-1 flex flex-col bg-white border-r border-gray-200 pt-5 pb-4 overflow-y-auto">
           <div class="flex-1 px-3 space-y-1">
             {filteredItems.map((item) => {
-              const isActive = currentPath === item.href || currentPath.startsWith(item.href + '/');
+              const isActive = item.href
+                ? currentPath === item.href || currentPath.startsWith(item.href + '/')
+                : item.children?.some(
+                    (child) =>
+                      currentPath === child.href || currentPath.startsWith(child.href + '/')
+                  );
               return (
-                <a
-                  key={item.name}
-                  href={item.href}
-                  class={`group flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-                    isActive
-                      ? 'bg-primary-50 text-primary-700'
-                      : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
-                  }`}
-                >
-                  <span class={`mr-3 ${isActive ? 'text-primary-600' : 'text-gray-400 group-hover:text-gray-500'}`}>
-                    {icons[item.icon]}
-                  </span>
-                  {item.name}
-                </a>
+                <div key={item.name}>
+                  {item.href ? (
+                    <a
+                      href={item.href}
+                      class={`group flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                        isActive
+                          ? 'bg-primary-50 text-primary-700'
+                          : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
+                      }`}
+                    >
+                      <span class={`mr-3 ${isActive ? 'text-primary-600' : 'text-gray-400 group-hover:text-gray-500'}`}>
+                        {icons[item.icon]}
+                      </span>
+                      {item.name}
+                    </a>
+                  ) : (
+                    <div
+                      class={`flex items-center px-3 py-2 text-sm font-semibold rounded-lg ${
+                        isActive ? 'text-primary-700' : 'text-gray-700'
+                      }`}
+                    >
+                      <span class={`mr-3 ${isActive ? 'text-primary-600' : 'text-gray-400'}`}>
+                        {icons[item.icon]}
+                      </span>
+                      {item.name}
+                    </div>
+                  )}
+
+                  {item.children ? (
+                    <div class="ml-11 mt-1 space-y-1">
+                      {item.children.map((child) => {
+                        const childActive =
+                          currentPath === child.href || currentPath.startsWith(child.href + '/');
+                        return (
+                          <a
+                            key={child.href}
+                            href={child.href}
+                            class={`block rounded-lg px-3 py-2 text-sm transition-colors ${
+                              childActive
+                                ? 'bg-primary-50 font-medium text-primary-700'
+                                : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                            }`}
+                          >
+                            {child.name}
+                          </a>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
               );
             })}
           </div>

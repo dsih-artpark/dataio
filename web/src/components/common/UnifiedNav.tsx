@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'preact/hooks';
 import { currentUser, logout, initAuth, isLoading as authLoading } from '../../lib/auth';
-import { api } from '../../lib/api';
 
 interface UnifiedNavProps {
   variant?: 'default' | 'transparent';

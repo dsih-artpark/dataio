@@ -7,23 +7,39 @@ from pathlib import Path
 from typing import Any
 
 
+def _looks_like_existing_path(source: str) -> bool:
+    try:
+        return Path(source).exists()
+    except OSError:
+        # Inline payloads can be much longer than filesystem path limits.
+        return False
+
+
 def load_tabular_rows(source: str | bytes, max_rows: int | None = None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if isinstance(source, bytes):
-        handle = io.StringIO(source.decode("utf-8"))
-    else:
-        path = Path(source)
-        if path.exists():
-            handle = path.open("r", encoding="utf-8", newline="")
-        else:
-            handle = io.StringIO(source)
+        with io.StringIO(source.decode("utf-8")) as handle:
+            reader = csv.DictReader(handle)
+            for index, row in enumerate(reader):
+                rows.append(dict(row))
+                if max_rows is not None and index + 1 >= max_rows:
+                    break
+        return rows
 
-    with handle:
-        reader = csv.DictReader(handle)
-        for index, row in enumerate(reader):
-            rows.append(dict(row))
-            if max_rows is not None and index + 1 >= max_rows:
-                break
+    if _looks_like_existing_path(source):
+        with Path(source).open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            for index, row in enumerate(reader):
+                rows.append(dict(row))
+                if max_rows is not None and index + 1 >= max_rows:
+                    break
+    else:
+        with io.StringIO(source) as handle:
+            reader = csv.DictReader(handle)
+            for index, row in enumerate(reader):
+                rows.append(dict(row))
+                if max_rows is not None and index + 1 >= max_rows:
+                    break
     return rows
 
 
@@ -32,7 +48,6 @@ def load_geojson_data(source: str | bytes | dict[str, Any]) -> dict[str, Any]:
         return source
     if isinstance(source, bytes):
         return json.loads(source.decode("utf-8"))
-    path = Path(source)
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
+    if _looks_like_existing_path(source):
+        return json.loads(Path(source).read_text(encoding="utf-8"))
     return json.loads(source)

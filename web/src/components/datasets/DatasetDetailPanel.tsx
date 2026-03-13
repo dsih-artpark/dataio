@@ -1,5 +1,10 @@
 import { useState, useMemo, useEffect } from 'preact/hooks';
-import type { DatasetDetail, MetadataJson, TableMetadata } from '../../lib/types';
+import type {
+  DatasetDetail,
+  DatasetManifestRecord,
+  MetadataJson,
+  TableMetadata,
+} from '../../lib/types';
 import CodeSnippets from './CodeSnippets';
 import { marked } from 'marked';
 import JSZip from 'jszip';
@@ -12,7 +17,7 @@ interface DatasetDetailPanelProps {
   isAuthenticated?: boolean;
 }
 
-type TabId = 'about' | 'metadata' | 'readme' | 'code';
+type TabId = 'about' | 'manifest' | 'metadata' | 'readme' | 'code';
 
 export default function DatasetDetailPanel({
   dataset,
@@ -25,6 +30,11 @@ export default function DatasetDetailPanel({
   const [metadataFormat, setMetadataFormat] = useState<'json' | 'yaml'>('json');
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [manifestRecord, setManifestRecord] = useState<DatasetManifestRecord | null>(null);
+  const [manifestLoading, setManifestLoading] = useState(false);
+  const [manifestError, setManifestError] = useState<string | null>(null);
+
+  const hasManifest = Boolean(dataset?.has_manifest);
 
   // Parse the metadata JSON
   const parsedMetadata = useMemo<MetadataJson | null>(() => {
@@ -54,6 +64,49 @@ export default function DatasetDetailPanel({
     }
   }, [tableNames]);
 
+  useEffect(() => {
+    setManifestRecord(null);
+    setManifestLoading(false);
+    setManifestError(null);
+    if (activeTab === 'manifest' && !hasManifest) {
+      setActiveTab('about');
+    }
+  }, [dataset?.ds_id, hasManifest]);
+
+  useEffect(() => {
+    if (!dataset || !isAuthenticated || !hasManifest || activeTab !== 'manifest') {
+      return;
+    }
+    if (manifestRecord || manifestLoading) {
+      return;
+    }
+
+    let cancelled = false;
+    setManifestLoading(true);
+    setManifestError(null);
+
+    api.getDatasetManifest(dataset.ds_id)
+      .then((response) => {
+        if (!cancelled) {
+          setManifestRecord(response);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setManifestError(err instanceof Error ? err.message : 'Failed to load manifest');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setManifestLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, dataset, hasManifest, isAuthenticated, manifestLoading, manifestRecord]);
+
   // Parse README markdown
   const renderedReadme = useMemo(() => {
     if (!dataset?.readme_md) return null;
@@ -76,7 +129,13 @@ export default function DatasetDetailPanel({
       { id: 'about', label: 'About', icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
     ];
 
-    if (parsedMetadata?.tables && Object.keys(parsedMetadata.tables).length > 0) {
+    if (hasManifest && isAuthenticated) {
+      result.push({
+        id: 'manifest',
+        label: 'Manifest',
+        icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
+      });
+    } else if (parsedMetadata?.tables && Object.keys(parsedMetadata.tables).length > 0) {
       result.push({ id: 'metadata', label: 'Data Dictionary', icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' });
     }
 
@@ -87,7 +146,7 @@ export default function DatasetDetailPanel({
     result.push({ id: 'code', label: 'Code Snippets', icon: 'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4' });
 
     return result;
-  }, [parsedMetadata, dataset?.readme_md]);
+  }, [hasManifest, isAuthenticated, parsedMetadata, dataset?.readme_md]);
 
   const formatDateRange = (startDate?: string, endDate?: string) => {
     if (!startDate && !endDate) return '—';
@@ -683,6 +742,41 @@ export default function DatasetDetailPanel({
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'manifest' && (
+          <div class="space-y-4">
+            <div class="flex items-center justify-between">
+              <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Canonical Manifest</h3>
+              {manifestRecord?.manifest_updated_at && (
+                <p class="text-xs text-gray-500">
+                  Updated {new Date(manifestRecord.manifest_updated_at).toLocaleString()}
+                  {manifestRecord.manifest_updated_by ? ` by ${manifestRecord.manifest_updated_by}` : ''}
+                </p>
+              )}
+            </div>
+
+            {manifestLoading && (
+              <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+                Loading manifest...
+              </div>
+            )}
+
+            {manifestError && (
+              <div class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                {manifestError}
+              </div>
+            )}
+
+            {!manifestLoading && !manifestError && manifestRecord?.manifest_yaml && (
+              <div class="rounded-xl border border-gray-200 overflow-hidden">
+                <div class="border-b border-gray-200 bg-gray-50 px-4 py-2">
+                  <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">manifest.yaml</span>
+                </div>
+                <pre class="overflow-x-auto bg-white p-4 text-xs leading-6 text-gray-800"><code>{manifestRecord.manifest_yaml}</code></pre>
               </div>
             )}
           </div>

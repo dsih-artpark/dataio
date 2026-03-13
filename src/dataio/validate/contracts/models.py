@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -33,6 +34,21 @@ class ManifestField(BaseModel):
             raise ValueError("enum fields must define allowedValues or enumRef")
         if self.type in {"date", "dateTime"} and not self.format:
             raise ValueError(f"{self.type} fields must define format")
+        if self.type in {"date", "dateTime"} and self.format:
+            if "%" not in self.format:
+                raise ValueError(
+                    f"{self.type} format must use strftime directives like %Y or %Y-%m-%d"
+                )
+            sample = datetime(2024, 3, 13, 12, 30, 45, tzinfo=UTC)
+            try:
+                rendered = sample.strftime(self.format)
+                datetime.strptime(rendered, self.format)
+            except ValueError as exc:
+                raise ValueError(
+                    f"{self.type} format must be a valid strftime format"
+                ) from exc
+        if self.type == "dateTime" and self.format and "%z" not in self.format:
+            raise ValueError("dateTime formats must include timezone information via %z")
         return self
 
 
@@ -94,6 +110,7 @@ class ValidationRequest(BaseModel):
     data_files: dict[str, str] = Field(default_factory=dict)
     enabled_specs: list[str] = Field(default_factory=list)
     strict: bool = False
+    deep_check: bool = False
     validate_data: bool = True
     full_scan: bool = True
     max_rows: int | None = None

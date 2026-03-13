@@ -45,6 +45,7 @@ export interface DatasetDetail {
   documentation_synced_at?: string | null;
   manifest_yaml?: string | null;
   manifest_json?: Record<string, unknown> | null;
+  has_manifest?: boolean;
   manifest_updated_at?: string | null;
   manifest_updated_by?: string | null;
 }
@@ -157,6 +158,16 @@ export interface AdminDatasetSummary {
 }
 
 export interface AdminManifestRecord {
+  dataset_id: string;
+  bucket_type: string;
+  manifest_yaml: string | null;
+  manifest_json: Record<string, unknown> | null;
+  has_manifest: boolean;
+  manifest_updated_at: string | null;
+  manifest_updated_by: string | null;
+}
+
+export interface DatasetManifestRecord {
   dataset_id: string;
   bucket_type: string;
   manifest_yaml: string | null;

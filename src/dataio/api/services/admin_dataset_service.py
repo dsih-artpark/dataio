@@ -14,6 +14,9 @@ from dataio.api.models import (
 )
 from dataio.api.services.base_service import BaseService
 from dataio.api.services.filestore_service import FilestoreService, ValidationError
+from dataio.api.services.platform_manifest_validation_service import (
+    apply_platform_manifest_checks,
+)
 from dataio.validate import DataIOValidationService, DatasetKind, ValidationRequest
 
 
@@ -23,7 +26,9 @@ class AdminDatasetService(BaseService):
     def __init__(self):
         super().__init__()
         self.filestore_service = FilestoreService()
-        self.validation_service = DataIOValidationService()
+        self.validation_service = DataIOValidationService(
+            platform_manifest_checker=apply_platform_manifest_checks
+        )
 
     def create_raw_dataset(self, raw_dataset: RawDatasetCreate):
         """

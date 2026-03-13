@@ -56,32 +56,19 @@ def validate_region_name(value: Any, _: ManifestField) -> bool:
 
 def validate_date(value: Any, field: ManifestField) -> bool:
     text = str(value)
-    patterns = {
-        "YYYY": r"^\d{4}$",
-        "YYYY-MM": r"^\d{4}-\d{2}$",
-        "YYYY-MM-DD": r"^\d{4}-\d{2}-\d{2}$",
-    }
-    pattern = patterns.get(field.format or "")
-    if pattern is None or re.match(pattern, text) is None:
-        return False
     try:
-        if field.format == "YYYY":
-            datetime.strptime(text, "%Y")
-        elif field.format == "YYYY-MM":
-            datetime.strptime(text, "%Y-%m")
-        elif field.format == "YYYY-MM-DD":
-            datetime.strptime(text, "%Y-%m-%d")
+        datetime.strptime(text, field.format or "")
     except ValueError:
         return False
     return True
 
 
-def validate_datetime(value: Any, _: ManifestField) -> bool:
+def validate_datetime(value: Any, field: ManifestField) -> bool:
     try:
-        datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        parsed = datetime.strptime(str(value), field.format or "")
     except ValueError:
         return False
-    return True
+    return parsed.tzinfo is not None
 
 
 def _validate_numeric_bounds(value: float, field: ManifestField) -> bool:

@@ -20,6 +20,9 @@ from dataio.api.services.admin_dataset_service import AdminDatasetService
 from dataio.api.services.email_service import EmailService
 from dataio.api.auth.permissions import is_admin
 from dataio.api.auth.security import record_auth_event
+from dataio.api.services.platform_manifest_validation_service import (
+    apply_platform_manifest_checks,
+)
 from dataio.validate import DataIOValidationService, DatasetKind, ValidationRequest
 
 logger = logging.getLogger(__name__)
@@ -32,7 +35,9 @@ class WebAdminService(BaseService):
         super().__init__()
         self.email_service = EmailService()
         self.admin_dataset_service = AdminDatasetService()
-        self.validation_service = DataIOValidationService()
+        self.validation_service = DataIOValidationService(
+            platform_manifest_checker=apply_platform_manifest_checks
+        )
 
     def _require_admin(self, user: User) -> None:
         """Verify user has admin privileges."""
@@ -921,7 +926,7 @@ class WebAdminService(BaseService):
         manifest_file,
         data_file=None,
         table_name: str | None = None,
-        strict: bool = False,
+        deep_check: bool = False,
         extra_column_policy: str = "warn",
     ) -> dict:
         """Run admin validation for a candidate manifest and optional data file."""
@@ -943,7 +948,7 @@ class WebAdminService(BaseService):
             dataset_kind=dataset_kind,
             manifest_source=manifest_text,
             data=None,
-            strict=strict,
+            deep_check=deep_check,
             validate_data=data_file is not None,
             extra_column_policy=extra_column_policy,
         )

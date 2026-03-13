@@ -190,7 +190,8 @@ class Session(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_email = Column(Text, ForeignKey("users.email", ondelete="CASCADE"), nullable=False)
-    refresh_token = Column(Text, nullable=False, unique=True)
+    refresh_token = Column(Text, nullable=True, unique=True)
+    refresh_token_jti_hash = Column(Text, nullable=True, unique=True)
     user_agent = Column(Text, nullable=True)
     ip_address = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
@@ -199,6 +200,54 @@ class Session(Base):
 
     # Relationship
     user = relationship("User", backref="sessions")
+
+
+class AuthRateLimit(Base):
+    """Rate-limit counters for authentication and security-sensitive actions."""
+
+    __tablename__ = "auth_rate_limits"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    action = Column(Text, nullable=False)
+    subject = Column(Text, nullable=False)
+    attempt_count = Column(Integer, nullable=False, default=0)
+    window_started_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    blocked_until = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class AuthAuditLog(Base):
+    """Append-only audit log for authentication and authorization events."""
+
+    __tablename__ = "auth_audit_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_type = Column(Text, nullable=False)
+    outcome = Column(Text, nullable=False)
+    actor_email = Column(Text, nullable=True)
+    target_email = Column(Text, nullable=True)
+    ip_address = Column(Text, nullable=True)
+    user_agent = Column(Text, nullable=True)
+    details = Column(JSONB, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class OAuthIdentity(Base):
+    """OAuth identities linked to DataIO users."""
+
+    __tablename__ = "oauth_identities"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    provider = Column(Text, nullable=False)
+    provider_user_id = Column(Text, nullable=False)
+    user_email = Column(Text, ForeignKey("users.email", ondelete="CASCADE"), nullable=False)
+    provider_email = Column(Text, nullable=True)
+    provider_email_verified = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_login_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", backref="oauth_identities")
 
 
 class OTPToken(Base):

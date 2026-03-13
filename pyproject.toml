@@ -60,6 +60,7 @@ api = [
 ]
 [project.scripts]
 dataio = "dataio.cli.cli:app"
+all-migrations = "dataio.db.migration_runner:main"
 
 [build-system]
 requires = ["hatchling"]

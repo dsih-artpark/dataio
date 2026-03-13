@@ -19,6 +19,7 @@ from dataio.api.database.models import User, UserAPIKey, Dataset, Collection, Da
 from dataio.api.services.base_service import BaseService
 from dataio.api.services.email_service import EmailService
 from dataio.api.auth.permissions import determine_user_permissions
+from dataio.api.auth.security import record_auth_event
 from dataio.api.database import functions as database
 
 logger = logging.getLogger(__name__)
@@ -189,6 +190,13 @@ class WebUserService(BaseService):
             except Exception as email_error:
                 self.logger.warning(f"Failed to send API key notification email: {str(email_error)}")
 
+            record_auth_event(
+                event_type="api_key.create",
+                outcome="success",
+                actor_email=user.email,
+                target_email=user.email,
+                details={"name": name},
+            )
             return {
                 "id": str(api_key.id),
                 "name": api_key.name,
@@ -235,6 +243,13 @@ class WebUserService(BaseService):
             session.commit()
 
             self.logger.info(f"Revoked API key '{api_key.name}' for user: {user.email}")
+            record_auth_event(
+                event_type="api_key.revoke",
+                outcome="success",
+                actor_email=user.email,
+                target_email=user.email,
+                details={"key_id": key_id, "name": api_key.name},
+            )
             return {"revoked": True}
         except HTTPException:
             raise

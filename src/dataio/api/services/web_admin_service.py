@@ -15,6 +15,7 @@ from dataio.api.database.models import User, UserGroup, UserPermission
 from dataio.api.services.base_service import BaseService
 from dataio.api.services.email_service import EmailService
 from dataio.api.auth.permissions import is_admin
+from dataio.api.auth.security import record_auth_event
 
 logger = logging.getLogger(__name__)
 
@@ -234,6 +235,12 @@ class WebAdminService(BaseService):
                 )
 
             self.logger.info(f"User invited: {email} by {admin_user.email}")
+            record_auth_event(
+                event_type="invitation.send",
+                outcome="success",
+                actor_email=admin_user.email,
+                target_email=email,
+            )
             return {"invited": True, "email": email}
 
         except HTTPException:
@@ -299,6 +306,12 @@ class WebAdminService(BaseService):
                 )
 
             self.logger.info(f"Invitation resent: {email} by {admin_user.email}")
+            record_auth_event(
+                event_type="invitation.resend",
+                outcome="success",
+                actor_email=admin_user.email,
+                target_email=email,
+            )
             return {"resent": True, "email": email}
 
         except HTTPException:
@@ -397,6 +410,12 @@ class WebAdminService(BaseService):
             session.commit()
 
             self.logger.info(f"User suspended: {email} by {admin_user.email}")
+            record_auth_event(
+                event_type="admin.user_suspend",
+                outcome="success",
+                actor_email=admin_user.email,
+                target_email=email,
+            )
             return {"suspended": True, "email": email}
         except HTTPException:
             raise
@@ -438,6 +457,12 @@ class WebAdminService(BaseService):
             session.commit()
 
             self.logger.info(f"User unsuspended: {email} by {admin_user.email}")
+            record_auth_event(
+                event_type="admin.user_unsuspend",
+                outcome="success",
+                actor_email=admin_user.email,
+                target_email=email,
+            )
             return {"unsuspended": True, "email": email}
         except HTTPException:
             raise

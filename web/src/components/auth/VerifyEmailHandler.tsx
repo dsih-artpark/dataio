@@ -24,7 +24,7 @@ export default function VerifyEmailHandler() {
 
       try {
         const response = await api.verifyRegistration(email, undefined, token);
-        currentUser.value = response.user;
+        currentUser.value = response.access_token ? response.user : null;
 
         if (response.verification_status === 'pending') {
           setPendingMessage(response.verification_message || 'Your account is pending admin approval.');

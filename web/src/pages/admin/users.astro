@@ -17,17 +17,16 @@ import AdminUsersTabs from '../../components/admin/AdminUsersTabs';
 </DashboardLayout>
 
 <script>
-  import { initAuth, requireAuth, isAdmin } from '../../lib/auth';
+  import { currentUser, initAuth, isAdmin } from '../../lib/auth';
 
-  // Check auth immediately
-  if (!requireAuth()) {
-    // Not authenticated, redirecting
-  } else {
-    // Initialize auth and check admin status
-    initAuth().then(() => {
-      if (!isAdmin()) {
-        window.location.replace('/datasets');
-      }
-    });
-  }
+  initAuth().then(() => {
+    if (!currentUser.value) {
+      window.location.replace('/login');
+      return;
+    }
+
+    if (!isAdmin()) {
+      window.location.replace('/datasets');
+    }
+  });
 </script>

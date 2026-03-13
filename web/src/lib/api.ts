@@ -18,32 +18,26 @@ interface ApiError {
 
 class ApiClient {
   private accessToken: string | null = null;
-  private refreshToken: string | null = null;
   private refreshPromise: Promise<boolean> | null = null;
 
   constructor() {
-    // Load tokens from localStorage on init
+    // Load tokens from sessionStorage on init
     if (typeof window !== 'undefined') {
-      this.accessToken = localStorage.getItem('access_token');
-      this.refreshToken = localStorage.getItem('refresh_token');
+      this.accessToken = sessionStorage.getItem('access_token');
     }
   }
 
-  setTokens(accessToken: string, refreshToken: string) {
+  setTokens(accessToken: string) {
     this.accessToken = accessToken;
-    this.refreshToken = refreshToken;
     if (typeof window !== 'undefined') {
-      localStorage.setItem('access_token', accessToken);
-      localStorage.setItem('refresh_token', refreshToken);
+      sessionStorage.setItem('access_token', accessToken);
     }
   }
 
   clearTokens() {
     this.accessToken = null;
-    this.refreshToken = null;
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
+      sessionStorage.removeItem('access_token');
     }
   }
 
@@ -52,7 +46,7 @@ class ApiClient {
   }
 
   getRefreshToken(): string | null {
-    return this.refreshToken;
+    return null;
   }
 
   isAuthenticated(): boolean {
@@ -76,10 +70,11 @@ class ApiClient {
     const response = await fetch(`${API_URL}/web${endpoint}`, {
       ...options,
       headers,
+      credentials: 'include',
     });
 
     // Handle 401 - try to refresh token
-    if (response.status === 401 && requireAuth && this.refreshToken) {
+    if (response.status === 401 && requireAuth) {
       const refreshed = await this.refreshAccessToken();
       if (refreshed) {
         // Retry request with new token
@@ -87,6 +82,7 @@ class ApiClient {
         const retryResponse = await fetch(`${API_URL}/web${endpoint}`, {
           ...options,
           headers,
+          credentials: 'include',
         });
         if (!retryResponse.ok) {
           const error = await retryResponse.json() as ApiError;
@@ -125,20 +121,26 @@ class ApiClient {
     }
   }
 
-  private async _doRefreshToken(): Promise<boolean> {
-    if (!this.refreshToken) return false;
+  async restoreSession(): Promise<boolean> {
+    if (this.accessToken) {
+      return true;
+    }
+    return this.refreshAccessToken();
+  }
 
+  private async _doRefreshToken(): Promise<boolean> {
     try {
       const response = await fetch(`${API_URL}/web/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: this.refreshToken }),
+        credentials: 'include',
+        body: JSON.stringify({}),
       });
 
       if (!response.ok) return false;
 
       const data = await response.json();
-      this.setTokens(data.access_token, data.refresh_token);
+      this.setTokens(data.access_token);
       return true;
     } catch {
       return false;
@@ -157,7 +159,6 @@ class ApiClient {
   async verifyLogin(email: string, code: string) {
     const data = await this.request<{
       access_token: string;
-      refresh_token: string;
       user: {
         email: string;
         display_name: string | null;
@@ -165,12 +166,18 @@ class ApiClient {
         email_verified: boolean;
       };
       needs_passkey: boolean;
+      verification_status?: string;
+      verification_message?: string | null;
     }>(
       '/auth/login/verify',
       { method: 'POST', body: JSON.stringify({ email, code }) },
       false
     );
-    this.setTokens(data.access_token, data.refresh_token);
+    if (data.access_token) {
+      this.setTokens(data.access_token);
+    } else {
+      this.clearTokens();
+    }
     return data;
   }
 
@@ -185,8 +192,8 @@ class ApiClient {
 
   async verifyRegistration(email: string, code?: string, magicToken?: string) {
     const data = await this.request<{
-      access_token: string;
-      refresh_token: string;
+      access_token?: string;
+      refresh_token?: string;
       user: {
         email: string;
         display_name: string | null;
@@ -201,14 +208,17 @@ class ApiClient {
       { method: 'POST', body: JSON.stringify({ email, code, magic_token: magicToken }) },
       false
     );
-    this.setTokens(data.access_token, data.refresh_token);
+    if (data.access_token) {
+      this.setTokens(data.access_token);
+    } else {
+      this.clearTokens();
+    }
     return data;
   }
 
   async acceptInvitation(token: string) {
     const data = await this.request<{
       access_token: string;
-      refresh_token: string;
       user: {
         email: string;
         display_name: string | null;
@@ -221,21 +231,19 @@ class ApiClient {
       { method: 'POST', body: JSON.stringify({ token }) },
       false
     );
-    this.setTokens(data.access_token, data.refresh_token);
+    this.setTokens(data.access_token);
     return data;
   }
 
   async logout() {
-    if (this.refreshToken) {
-      try {
-        await this.request(
-          '/auth/logout',
-          { method: 'POST', body: JSON.stringify({ refresh_token: this.refreshToken }) },
-          false
-        );
-      } catch {
-        // Ignore logout errors
-      }
+    try {
+      await this.request(
+        '/auth/logout',
+        { method: 'POST', body: JSON.stringify({}) },
+        false
+      );
+    } catch {
+      // Ignore logout errors
     }
     this.clearTokens();
   }
@@ -257,7 +265,7 @@ class ApiClient {
     );
   }
 
-  async getPasskeyLoginOptions(email: string) {
+  async getPasskeyLoginOptions(email?: string) {
     return this.request<{ options: string }>(
       '/auth/passkey/login/options',
       { method: 'POST', body: JSON.stringify({ email }) },
@@ -265,18 +273,21 @@ class ApiClient {
     );
   }
 
-  async verifyPasskeyLogin(email: string, credential: object) {
+  async verifyPasskeyLogin(email: string | undefined, credential: object) {
     const data = await this.request<{
       access_token: string;
-      refresh_token: string;
       user: object;
     }>(
       '/auth/passkey/login/verify',
       { method: 'POST', body: JSON.stringify({ email, credential }) },
       false
     );
-    this.setTokens(data.access_token, data.refresh_token);
+    this.setTokens(data.access_token);
     return data;
+  }
+
+  startOAuth(provider: 'google' | 'github') {
+    window.location.href = `${API_URL}/web/auth/oauth/${provider}/start`;
   }
 
   async listPasskeys() {

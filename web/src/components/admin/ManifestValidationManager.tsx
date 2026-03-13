@@ -91,7 +91,7 @@ function buildLineReviews(manifestText: string, findings: ValidationFinding[]): 
     return {
       lineNumber: index + 1,
       text,
-      findings: [],
+      findings: [] as ValidationFinding[],
       paths,
     };
   });

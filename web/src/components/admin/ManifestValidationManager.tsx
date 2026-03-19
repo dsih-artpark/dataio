@@ -377,96 +377,110 @@ export default function ManifestValidationManager() {
           </p>
         </div>
 
-        <form class="mt-5 space-y-3" onSubmit={handleValidation}>
-          <div class="flex flex-wrap items-end gap-3">
-            <button
-              type="button"
-              onClick={() => setShowRules((value) => !value)}
-              class="inline-flex h-11 items-center rounded-xl border border-slate-300 bg-slate-50 px-4 text-sm font-medium text-slate-800 transition hover:bg-white"
-            >
-              {showRules ? 'Hide rulebook' : 'Rules & allowed values'}
-            </button>
-
-            <div class="min-w-[22rem] flex-1 rounded-2xl border border-slate-200 bg-slate-50 p-3">
-              <span class="mb-2 block text-xs font-medium uppercase tracking-wide text-slate-500">
-                Candidate manifest
-              </span>
-              <div class="flex items-center gap-3">
-                <input
-                  type="file"
-                  accept=".yaml,.yml"
-                  onChange={(e) => {
-                    const input = e.currentTarget as HTMLInputElement;
-                    handleManifestChange(input.files?.[0] ?? null);
-                  }}
-                  class="block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 file:mr-4 file:rounded-lg file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white"
-                />
-                {manifestFile ? (
-                  <button
-                    type="button"
-                    onClick={() => handleManifestChange(null)}
-                    class="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 transition hover:bg-white"
-                  >
-                    Clear
-                  </button>
-                ) : null}
-              </div>
-              <div class="mt-2 truncate text-sm text-slate-600">
-                {manifestFile?.name || 'No manifest selected'}
-              </div>
+        <form class="mt-5 space-y-4" onSubmit={handleValidation}>
+          {/* Row 1: File upload */}
+          <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <span class="mb-3 block text-xs font-medium uppercase tracking-wide text-slate-500">
+              Candidate manifest
+            </span>
+            <div class="flex items-center gap-3">
+              <input
+                type="file"
+                accept=".yaml,.yml"
+                onChange={(e) => {
+                  const input = e.currentTarget as HTMLInputElement;
+                  handleManifestChange(input.files?.[0] ?? null);
+                }}
+                class="block flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 file:mr-4 file:rounded-lg file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white"
+              />
+              {manifestFile ? (
+                <button
+                  type="button"
+                  onClick={() => handleManifestChange(null)}
+                  class="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100"
+                >
+                  Clear
+                </button>
+              ) : null}
             </div>
+            {manifestFile ? (
+              <div class="mt-2 truncate text-sm text-slate-600">
+                Selected: {manifestFile.name}
+              </div>
+            ) : null}
+          </div>
 
-            <div class="min-w-[11rem] rounded-2xl border border-slate-200 bg-slate-50 p-3">
+          {/* Row 2: Options grid */}
+          <div class="grid items-center gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <span class="mb-2 block text-xs font-medium uppercase tracking-wide text-slate-500">
                 Dataset kind
               </span>
               <select
                 value={datasetKind}
                 onChange={(e) => setDatasetKind((e.currentTarget as HTMLSelectElement).value as DatasetKind)}
-                class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-200"
               >
                 <option value="tabular">Tabular</option>
                 <option value="geojson">GeoJSON</option>
               </select>
             </div>
 
-            <div class="min-w-[21rem] rounded-2xl border border-slate-200 bg-slate-50 p-3">
-              <div class="grid gap-2 sm:grid-cols-3">
-                <label class="flex items-start gap-2 text-sm text-slate-700">
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <span class="mb-2 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                Validation options
+              </span>
+              <div class="flex flex-col gap-2">
+                <label class="flex items-center gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox"
                     checked={deepCheck}
                     onChange={(e) => setDeepCheck((e.currentTarget as HTMLInputElement).checked)}
-                    class="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
+                    class="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
                   />
                   <span>Deep check</span>
                 </label>
-                <label class="flex items-start gap-2 text-sm text-slate-700">
+                <label class="flex items-center gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox"
                     checked={showVerboseSuccess}
                     onChange={(e) => setShowVerboseSuccess((e.currentTarget as HTMLInputElement).checked)}
-                    class="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
+                    class="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
                   />
                   <span>Verbose success</span>
-                </label>
-                <label class="flex items-start gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={showIssueRowsOnly}
-                    onChange={(e) => setShowIssueRowsOnly((e.currentTarget as HTMLInputElement).checked)}
-                    class="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
-                  />
-                  <span>Issue rows only</span>
                 </label>
               </div>
             </div>
 
-            <div class="ml-auto">
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <span class="mb-2 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                Display options
+              </span>
+              <div class="flex flex-col gap-2">
+                <label class="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={showIssueRowsOnly}
+                    onChange={(e) => setShowIssueRowsOnly((e.currentTarget as HTMLInputElement).checked)}
+                    class="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
+                  />
+                  <span>Issue rows only</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowRules((value) => !value)}
+                  class="mt-1 inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 transition hover:bg-slate-100"
+                >
+                  {showRules ? 'Hide rules' : 'Show rules'}
+                </button>
+              </div>
+            </div>
+
+            <div class="flex h-full items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <button
                 type="submit"
                 disabled={!manifestFile || validating}
-                class="h-11 rounded-xl bg-slate-900 px-5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                class="h-11 w-full rounded-xl bg-slate-900 px-5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {validating ? 'Validating...' : 'Run Validation'}
               </button>

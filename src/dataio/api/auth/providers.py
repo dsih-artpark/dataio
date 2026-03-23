@@ -1,7 +1,7 @@
 import os
 from datetime import datetime, timezone
 
-from fastapi import Security
+from fastapi import Request, Security
 from fastapi.security import APIKeyHeader
 from dataio.api.models import User
 from dataio.api.database.models import User as DBUser, UserAPIKey
@@ -103,7 +103,7 @@ def check_api_key(api_key: str) -> User:
         session.close()
 
 
-def get_user(api_key_header: str = Security(api_key_header)) -> User:
+def get_user(request: Request, api_key_header: str = Security(api_key_header)) -> User:
     """
     Validate API key and return authenticated user.
 
@@ -120,7 +120,8 @@ def get_user(api_key_header: str = Security(api_key_header)) -> User:
         raise AuthenticationError("Missing API key")
     user = check_api_key(api_key_header)
     if user:
+        if getattr(user, "_legacy_key_used", False):
+            request.state.legacy_api_key_authenticated = True
         return user
     raise AuthenticationError("Invalid API key")
-
 

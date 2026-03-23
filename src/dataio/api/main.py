@@ -40,9 +40,8 @@ class LegacyAPIKeyDeprecationMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
 
-        # Check if a legacy API key was used (key without dio_ prefix)
-        api_key = request.headers.get("X-API-Key", "")
-        if api_key and not api_key.startswith(API_KEY_PREFIX):
+        # Add deprecation headers only when a legacy key authenticated successfully.
+        if getattr(request.state, "legacy_api_key_authenticated", False):
             # Add deprecation headers per RFC 8594
             response.headers["Deprecation"] = "true"
             response.headers["Sunset"] = "2025-12-31T23:59:59Z"

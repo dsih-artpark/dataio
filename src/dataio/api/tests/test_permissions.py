@@ -139,10 +139,20 @@ class TestAuthenticationEdgeCases:
         # Invalid API key should return 401
         result = api_call("/api/v1/datasets", "invalid_key")
         assert result["status_code"] == 401
+        assert result["response"].headers.get("Deprecation") is None
 
         # Missing API key should return 401
         response = client.get("/api/v1/datasets")
         assert response.status_code == 401
+
+    def test_legacy_key_returns_deprecation_headers_only_on_success(self):
+        """Valid legacy keys should authenticate and carry deprecation headers."""
+        api_keys = load_test_api_keys()
+        result = api_call("/api/v1/datasets", api_keys[TEST_USERS["admin"]])
+
+        assert result["status_code"] == 200
+        assert result["response"].headers.get("Deprecation") == "true"
+        assert result["response"].headers.get("X-Deprecation-Notice") is not None
 
     def test_admin_endpoints_require_admin(self):
         """Test admin endpoints require admin privileges."""

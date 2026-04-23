@@ -1,5 +1,8 @@
 # dataio-artpark
 
+> [!IMPORTANT]
+> This README is outdated and yet to be updated.
+
 Dataio is a Postgres and FASTAPI based Dataset Management System (DMS) for users to access and manage datasets distributed by the Data Science Innovation Hub, ARTPARK. The scaffolding can be used to build a similar system for your own datasets.
 
 You can find the documentation for the project [here](https://dataio.artpark.ai), and we're also on PyPI [here](https://pypi.org/project/dataio-artpark/).

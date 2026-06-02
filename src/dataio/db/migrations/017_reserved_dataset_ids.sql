@@ -1,3 +1,5 @@
+BEGIN;
+
 CREATE TABLE IF NOT EXISTS reserved_dataset_ids (
     id SERIAL PRIMARY KEY,
     ds_id TEXT NOT NULL UNIQUE,
@@ -9,3 +11,7 @@ CREATE TABLE IF NOT EXISTS reserved_dataset_ids (
 
 CREATE INDEX IF NOT EXISTS idx_reserved_dataset_ids_collection_id
     ON reserved_dataset_ids(collection_id);
+
+SELECT add_migration(17, '017_reserved_dataset_ids');
+
+COMMIT;

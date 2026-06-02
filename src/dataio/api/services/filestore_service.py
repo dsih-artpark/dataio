@@ -50,6 +50,19 @@ class FilestoreService(BaseService):
             if not obj.key.endswith("/")
         ]
 
+    def _move_dataset_objects(
+        self,
+        old_dataset_id: str,
+        new_dataset_id: str,
+        version_type: VersionType,
+    ) -> None:
+        old_prefix = self._get_prefix_for_dataset(old_dataset_id, version_type)
+        new_prefix = self._get_prefix_for_dataset(new_dataset_id, version_type)
+        for key in self._list_dataset_objects(old_dataset_id, version_type):
+            new_key = key.replace(old_prefix, new_prefix, 1)
+            self.bucket.copy({"Bucket": self.bucket.name, "Key": key}, new_key)
+            self.bucket.delete_objects(Delete={"Objects": [{"Key": key}]})
+
     def _get_metadata_object(self, dataset_id: str, version_type: VersionType):
         prefix = self._get_prefix_for_dataset(dataset_id, version_type)
         try:
@@ -275,6 +288,18 @@ class FilestoreService(BaseService):
         except Exception as e:
             self.logger.error(f"Failed to delete file: {e!s}")
             raise e
+
+    def rename_dataset(self, old_dataset_id: str, new_dataset_id: str) -> None:
+        for version_type in (VersionType.STANDARDISED, VersionType.PREPROCESSED):
+            self._move_dataset_objects(old_dataset_id, new_dataset_id, version_type)
+
+    def delete_dataset(self, dataset_id: str) -> None:
+        keys_to_delete = []
+        for version_type in (VersionType.STANDARDISED, VersionType.PREPROCESSED):
+            for key in self._list_dataset_objects(dataset_id, version_type):
+                keys_to_delete.append({"Key": key})
+        if keys_to_delete:
+            self.bucket.delete_objects(Delete={"Objects": keys_to_delete})
 
     def _get_download_link(
         self, dataset_id: str, version_type: VersionType, file_name: str

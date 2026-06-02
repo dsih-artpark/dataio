@@ -22,11 +22,7 @@ import UnifiedAccountSettings from '../../components/account/UnifiedAccountSetti
 </SettingsLayout>
 
 <script>
-  import { currentUser, initAuth } from '../../lib/auth';
+  import { requireAuthenticatedPage } from '../../lib/auth';
 
-  initAuth().then(() => {
-    if (!currentUser.value) {
-      window.location.replace('/login');
-    }
-  });
+  requireAuthenticatedPage();
 </script>

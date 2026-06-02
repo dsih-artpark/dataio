@@ -124,3 +124,182 @@ def test_web_admin_validate_tabular_endpoint():
     assert recorded["deep_check"] is True
 
     app.dependency_overrides.clear()
+
+
+def test_web_admin_suggest_dataset_id():
+    recorded = {}
+
+    class WebAdminServiceStub:
+        def suggest_next_dataset_id(self, user, collection_id):
+            recorded["user"] = user.email
+            recorded["collection_id"] = collection_id
+            return {
+                "collection_id": collection_id,
+                "suggested_dataset_id": f"{collection_id}DS0042",
+            }
+
+    app.dependency_overrides[get_current_web_user] = lambda: SimpleNamespace(
+        email="admin@example.com",
+        is_admin=True,
+    )
+    app.dependency_overrides[WebAdminService] = lambda: WebAdminServiceStub()
+
+    response = client.get("/api/v1/web/admin/datasets/suggest-id?collection_id=TS0001")
+
+    assert response.status_code == 200
+    assert response.json()["suggested_dataset_id"] == "TS0001DS0042"
+    assert recorded["collection_id"] == "TS0001"
+
+    app.dependency_overrides.clear()
+
+
+def test_web_admin_documentation_sync_endpoint():
+    recorded = {}
+
+    class WebAdminServiceStub:
+        def sync_dataset_documentation(self, user, dataset_id=None, only_outdated=True, force=False):
+            recorded["user"] = user.email
+            recorded["dataset_id"] = dataset_id
+            recorded["only_outdated"] = only_outdated
+            recorded["force"] = force
+            return {
+                "datasets": [
+                    {
+                        "ds_id": dataset_id or "TS0001DS0001",
+                        "changed_fields": ["manifest_yaml"],
+                        "needs_update": True,
+                        "updated": True,
+                    }
+                ],
+                "total": 1,
+                "updated": 1,
+            }
+
+    app.dependency_overrides[get_current_web_user] = lambda: SimpleNamespace(
+        email="admin@example.com",
+        is_admin=True,
+    )
+    app.dependency_overrides[WebAdminService] = lambda: WebAdminServiceStub()
+
+    response = client.post(
+        "/api/v1/web/admin/documentation-sync",
+        json={
+            "dataset_id": "TS0001DS0001",
+            "only_outdated": True,
+            "force": False,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["updated"] == 1
+    assert recorded["dataset_id"] == "TS0001DS0001"
+    assert recorded["only_outdated"] is True
+    assert recorded["force"] is False
+
+    app.dependency_overrides.clear()
+
+
+def test_web_admin_dataset_import_preview_endpoint():
+    recorded = {}
+
+    class WebAdminServiceStub:
+        def preview_dataset_package_import(
+            self,
+            user,
+            info_file,
+            metadata_file,
+            csv_files=None,
+            dataset_override=None,
+            raw_dataset_override=None,
+        ):
+            recorded["user"] = user.email
+            recorded["info_name"] = info_file.filename
+            recorded["metadata_name"] = metadata_file.filename
+            recorded["csv_count"] = len(csv_files or [])
+            recorded["dataset_override"] = dataset_override
+            return {
+                "dataset": {
+                    "ds_id": "CUSTOM-ID",
+                    "title": "Preview Dataset",
+                    "collection_id": "TS0001",
+                    "data_owner_name": "ARTPARK",
+                    "description": None,
+                    "spatial_coverage_region_id": None,
+                    "spatial_resolution": None,
+                    "temporal_coverage_start_date": None,
+                    "temporal_coverage_end_date": None,
+                    "temporal_resolution": None,
+                    "access_level": "NONE",
+                    "additional_metadata": None,
+                    "tags": [],
+                    "raw_dataset_ids": ["CUSTOM-ID-raw-001"],
+                },
+                "raw_dataset": {
+                    "rds_id": "CUSTOM-ID-raw-001",
+                    "title": "Raw data for Preview Dataset",
+                    "source": "Manual upload",
+                },
+                "tables": [],
+                "manifest_yaml": "datasetKind: tabular\n",
+                "findings": [],
+                "suggested_dataset_id": "TS0001DS0042",
+                "can_import": True,
+            }
+
+    app.dependency_overrides[get_current_web_user] = lambda: SimpleNamespace(
+        email="admin@example.com",
+        is_admin=True,
+    )
+    app.dependency_overrides[WebAdminService] = lambda: WebAdminServiceStub()
+
+    response = client.post(
+        "/api/v1/web/admin/datasets/import/preview",
+        files={
+            "info_file": ("info.yml", io.BytesIO(b"title: Preview Dataset\n"), "application/x-yaml"),
+            "metadata_file": ("metadata.yml", io.BytesIO(b"tables: {}\n"), "application/x-yaml"),
+            "csv_files": ("sample.csv", io.BytesIO(b"year,value\n2024,1\n"), "text/csv"),
+        },
+        data={
+            "dataset_override_json": '{"ds_id":"CUSTOM-ID"}',
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["dataset"]["ds_id"] == "CUSTOM-ID"
+    assert recorded["csv_count"] == 1
+    assert recorded["dataset_override"]["ds_id"] == "CUSTOM-ID"
+
+    app.dependency_overrides.clear()
+
+
+def test_web_admin_dataset_delete_verify_endpoint():
+    recorded = {}
+
+    class WebAdminServiceStub:
+        def verify_dataset_deletion(self, user, dataset_id, code, confirmation_dataset_id):
+            recorded["user"] = user.email
+            recorded["dataset_id"] = dataset_id
+            recorded["code"] = code
+            recorded["confirmation_dataset_id"] = confirmation_dataset_id
+            return {"deleted": True, "dataset_id": dataset_id}
+
+    app.dependency_overrides[get_current_web_user] = lambda: SimpleNamespace(
+        email="admin@example.com",
+        is_admin=True,
+    )
+    app.dependency_overrides[WebAdminService] = lambda: WebAdminServiceStub()
+
+    response = client.post(
+        "/api/v1/web/admin/datasets/TS0001DS0001/delete/verify",
+        json={
+            "code": "123456",
+            "confirmation_dataset_id": "TS0001DS0001",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["deleted"] is True
+    assert recorded["dataset_id"] == "TS0001DS0001"
+    assert recorded["confirmation_dataset_id"] == "TS0001DS0001"
+
+    app.dependency_overrides.clear()

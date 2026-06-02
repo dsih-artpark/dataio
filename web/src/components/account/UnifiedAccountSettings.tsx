@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api } from '../../lib/api';
-import { currentUser } from '../../lib/auth';
+import { currentUser, redirectToPath } from '../../lib/auth';
 import PasskeyPrompt from '../auth/PasskeyPrompt';
 import { isWebAuthnSupported } from '../../lib/webauthn';
 import DeleteAccountModal from './DeleteAccountModal';
@@ -142,6 +142,12 @@ export default function UnifiedAccountSettings() {
   const handlePasskeySetupComplete = () => {
     setShowPasskeySetup(false);
     fetchPasskeys();
+    const params = new URLSearchParams(window.location.search);
+    const next = params.get('next');
+    if (next && next.startsWith('/') && !next.startsWith('//') && next !== '/account') {
+      redirectToPath(next, false);
+      return;
+    }
     window.history.replaceState({}, '', '/account');
   };
 

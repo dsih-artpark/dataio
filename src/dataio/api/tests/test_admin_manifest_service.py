@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+from types import SimpleNamespace
 
 from fastapi import HTTPException, UploadFile
 
@@ -16,6 +17,8 @@ os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 from dataio.api.models import VersionType
 from dataio.api.services.admin_dataset_service import AdminDatasetService
 from dataio.validate.reports.models import Finding, ValidationResult
+from dataio.api.database import functions as database_functions
+from dataio.api.models import DatasetUpdate
 
 
 def test_upsert_dataset_manifest_updates_filestore_and_db(monkeypatch):
@@ -47,6 +50,7 @@ def test_upsert_dataset_manifest_updates_filestore_and_db(monkeypatch):
 
     service.filestore_service = FilestoreStub()
     service.validation_service = ValidatorStub()
+    service.refresh_dataset_documentation_cache = lambda _dataset_id: recorded.setdefault("refreshed", True)
 
     monkeypatch.setattr(
         "dataio.api.services.admin_dataset_service.database.check_if_dataset_exists",
@@ -170,3 +174,95 @@ datasetTables:
         assert exc.detail["findings"][0]["code"] == "type_validation_failed"
     else:
         raise AssertionError("Expected HTTPException to be raised")
+
+
+def test_check_dataset_documentation_sync_requires_dataset_id():
+    service = object.__new__(AdminDatasetService)
+    service.logger = logging.getLogger(__name__)
+    service.filestore_service = SimpleNamespace(bucket="test-bucket")
+
+    class SessionStub:
+        def rollback(self):
+            return None
+
+        def close(self):
+            return None
+
+    service.db_session_factory = lambda: SessionStub()
+
+    try:
+        service.check_dataset_documentation_sync()
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert "Dataset ID is required" in str(exc.detail)
+    else:
+        raise AssertionError("Expected HTTPException to be raised")
+
+
+def test_sync_dataset_documentation_requires_dataset_id():
+    service = object.__new__(AdminDatasetService)
+    service.logger = logging.getLogger(__name__)
+    service.filestore_service = SimpleNamespace(bucket="test-bucket")
+
+    class SessionStub:
+        def rollback(self):
+            return None
+
+        def close(self):
+            return None
+
+    service.db_session_factory = lambda: SessionStub()
+
+    try:
+        service.sync_dataset_documentation()
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert "Dataset ID is required" in str(exc.detail)
+    else:
+        raise AssertionError("Expected HTTPException to be raised")
+
+
+def test_update_dataset_rejects_duplicate_dataset_id(monkeypatch):
+    dataset = SimpleNamespace(
+        ds_id="TS0001DS0001",
+        collection=SimpleNamespace(collection_id="TS0001"),
+        raw_datasets=[],
+        tags=[],
+    )
+
+    class QueryStub:
+        def __init__(self, result):
+            self.result = result
+
+        def options(self, *_args, **_kwargs):
+            return self
+
+        def filter(self, *_args, **_kwargs):
+            return self
+
+        def first(self):
+            return self.result
+
+    class SessionStub:
+        def query(self, *_args, **_kwargs):
+            return QueryStub(dataset)
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(database_functions, "Session", lambda: SessionStub())
+    monkeypatch.setattr(
+        database_functions,
+        "check_if_dataset_exists",
+        lambda dataset_id: dataset_id == "CUSTOM-ID-2",
+    )
+
+    try:
+        database_functions.update_dataset(
+            "TS0001DS0001",
+            DatasetUpdate(ds_id="CUSTOM-ID-2"),
+        )
+    except ValueError as exc:
+        assert str(exc) == "Dataset with ID CUSTOM-ID-2 already exists"
+    else:
+        raise AssertionError("Expected ValueError to be raised")

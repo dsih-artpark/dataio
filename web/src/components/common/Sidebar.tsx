@@ -15,13 +15,13 @@ interface NavItem {
 const navItems: NavItem[] = [
   { name: 'Users', href: '/admin/users', icon: 'users', adminOnly: true },
   { name: 'Groups', href: '/admin/groups', icon: 'users-cog', adminOnly: true },
+  { name: 'Manage Datasets', href: '/admin/datasets', icon: 'database', adminOnly: true },
   {
-    name: 'Manifest',
+    name: 'Validation',
     icon: 'database',
     adminOnly: true,
     children: [
-      { name: 'Update', href: '/admin/manifests' },
-      { name: 'Validate', href: '/admin/manifest-validation' },
+      { name: 'Manifest', href: '/admin/manifest-validation' },
     ],
   },
 ];

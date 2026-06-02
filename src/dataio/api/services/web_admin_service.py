@@ -6,15 +6,22 @@ permissions, manifests, and validation through the web interface.
 """
 
 import logging
+import json
+import re
+from io import BytesIO
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 import yaml
 
+from dataio.api.database import functions as database
 from dataio.api.database.config import Session as DBSession
 from dataio.api.database.enums import VersionType
-from dataio.api.database.models import Dataset, User, UserGroup, UserPermission
+from dataio.api.models import DatasetCreate, DatasetUpdate, RawDatasetCreate, RawDatasetUpdate, TableMetadata
+from dataio.api.database.models import Collection, DataOwner, Dataset, User, UserGroup, UserPermission
+from dataio.api.auth.otp import create_otp, verify_otp
+from dataio.api.auth.security import enforce_rate_limit
 from dataio.api.services.base_service import BaseService
 from dataio.api.services.admin_dataset_service import AdminDatasetService
 from dataio.api.services.email_service import EmailService
@@ -47,6 +54,242 @@ class WebAdminService(BaseService):
         if not is_admin_result:
             logger.warning(f"_require_admin - denying access for user: {getattr(user, 'email', 'N/A')}")
             raise HTTPException(status_code=403, detail="Admin privileges required")
+
+    def _slugify(self, value: str) -> str:
+        slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+        return slug or "dataset"
+
+    def _build_manifest_field(self, field_name: str, field_spec: dict) -> dict:
+        field_type = field_spec.get("type")
+        manifest_field = {
+            "description": field_spec.get("description"),
+            "comments": field_spec.get("comments"),
+            "nullable": field_spec.get("nullable", True),
+        }
+        if field_type == "year":
+            manifest_field["type"] = "date"
+            manifest_field["format"] = "%Y"
+        elif field_type == "enum":
+            manifest_field["type"] = "enum"
+            manifest_field["allowedValues"] = field_spec.get("enum") or field_spec.get("allowedValues") or []
+        elif field_type in {"string", "boolean", "int", "float", "regionID", "regionName", "date", "dateTime"}:
+            manifest_field["type"] = field_type
+            if field_spec.get("format"):
+                manifest_field["format"] = field_spec["format"]
+        else:
+            if field_name == "year":
+                manifest_field["type"] = "date"
+                manifest_field["format"] = "%Y"
+            elif field_name.endswith(".ID"):
+                manifest_field["type"] = "regionID"
+            elif field_name.endswith(".name"):
+                manifest_field["type"] = "regionName"
+            else:
+                manifest_field["type"] = "string"
+        if field_spec.get("range") is not None:
+            manifest_field["range"] = field_spec["range"]
+        if field_spec.get("min") is not None:
+            manifest_field["min"] = field_spec["min"]
+        if field_spec.get("max") is not None:
+            manifest_field["max"] = field_spec["max"]
+        return manifest_field
+
+    def _parse_dataset_package(
+        self,
+        info_text: str,
+        metadata_text: str,
+        *,
+        csv_files: Optional[List] = None,
+        dataset_override: Optional[dict] = None,
+        raw_dataset_override: Optional[dict] = None,
+    ) -> dict:
+        try:
+            info = yaml.safe_load(info_text) or {}
+        except yaml.YAMLError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid info.yml: {exc}") from exc
+        try:
+            metadata = yaml.safe_load(metadata_text) or {}
+        except yaml.YAMLError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid metadata.yml: {exc}") from exc
+
+        dataset_override = dataset_override or {}
+        raw_dataset_override = raw_dataset_override or {}
+        csv_files = csv_files or []
+
+        session = DBSession()
+        try:
+            collection_id = dataset_override.get("collection_id") or info.get("collection_id") or ""
+            collection = None
+            if collection_id:
+                collection = (
+                    session.query(Collection)
+                    .filter(Collection.collection_id == collection_id)
+                    .first()
+                )
+            suggested_dataset_id = (
+                database.suggest_next_dataset_id(collection_id) if collection_id and collection else ""
+            )
+            dataset_payload = {
+                "ds_id": dataset_override.get("ds_id") or info.get("ds_id") or suggested_dataset_id,
+                "title": dataset_override.get("title") or info.get("title") or "",
+                "collection_id": collection_id,
+                "data_owner_name": dataset_override.get("data_owner_name") or info.get("data_owner_name") or "",
+                "description": dataset_override.get("description") if "description" in dataset_override else info.get("description"),
+                "spatial_coverage_region_id": dataset_override.get("spatial_coverage_region_id") if "spatial_coverage_region_id" in dataset_override else info.get("spatial_coverage_region_id"),
+                "spatial_resolution": dataset_override.get("spatial_resolution") or info.get("spatial_resolution"),
+                "temporal_coverage_start_date": dataset_override.get("temporal_coverage_start_date") if "temporal_coverage_start_date" in dataset_override else info.get("temporal_coverage_start_date"),
+                "temporal_coverage_end_date": dataset_override.get("temporal_coverage_end_date") if "temporal_coverage_end_date" in dataset_override else info.get("temporal_coverage_end_date"),
+                "temporal_resolution": dataset_override.get("temporal_resolution") or info.get("temporal_resolution"),
+                "access_level": dataset_override.get("access_level") or info.get("access_level") or "NONE",
+                "additional_metadata": dataset_override.get("additional_metadata") if "additional_metadata" in dataset_override else info.get("additional_metadata"),
+                "tags": dataset_override.get("tags") if "tags" in dataset_override else info.get("tags", []),
+            }
+
+            raw_info = info.get("raw_dataset", {}) or {}
+            raw_payload = {
+                "rds_id": raw_dataset_override.get("rds_id") or raw_info.get("rds_id") or (
+                    f"{dataset_payload['ds_id']}-raw-001" if dataset_payload["ds_id"] else ""
+                ),
+                "title": raw_dataset_override.get("title") or raw_info.get("title") or (
+                    f"Raw data for {dataset_payload['title']}" if dataset_payload["title"] else "Raw dataset"
+                ),
+                "source": raw_dataset_override.get("source") or raw_info.get("source") or "Manual upload",
+            }
+
+            tables = metadata.get("tables", {}) or {}
+            table_uploads = []
+            manifest_tables = {}
+            custom_findings = []
+            csv_by_stem = {Path(file.filename or "").stem: file for file in csv_files if file.filename}
+            matched_csv_stems = set()
+            inline_data_files = {}
+
+            for table_key, table_definition in tables.items():
+                info_block = table_definition.get("info", {}) or {}
+                table_name = info_block.get("table_name") or table_key
+                data_dictionary = table_definition.get("data_dictionary", {}) or {}
+                table_metadata = {
+                    "table_name": table_name,
+                    "description": info_block.get("about") or table_definition.get("description"),
+                    "source": info_block.get("source"),
+                    "data_dictionary": {
+                        field_name: {
+                            "description": field_spec.get("description"),
+                            "comments": field_spec.get("comments"),
+                            "access": field_spec.get("access", True),
+                        }
+                        for field_name, field_spec in data_dictionary.items()
+                        if isinstance(field_spec, dict)
+                    },
+                }
+                table_uploads.append(
+                    {
+                        "table_name": table_name,
+                        "description": table_metadata["description"],
+                        "source": table_metadata["source"],
+                        "table_metadata": table_metadata,
+                    }
+                )
+                manifest_tables[table_name] = {
+                    "description": table_metadata["description"],
+                    "path": f"{table_name}.csv",
+                    "dataDictionary": {
+                        field_name: self._build_manifest_field(field_name, field_spec)
+                        for field_name, field_spec in data_dictionary.items()
+                        if isinstance(field_spec, dict)
+                    },
+                }
+                matched_file = csv_by_stem.get(table_name)
+                if matched_file is None:
+                    custom_findings.append(
+                        {
+                            "severity": "warning",
+                            "code": "missing_csv_upload",
+                            "message": f"No CSV uploaded yet for table '{table_name}'.",
+                            "table": table_name,
+                            "path": f"tables.{table_name}",
+                        }
+                    )
+                    continue
+                matched_csv_stems.add(table_name)
+                matched_file.file.seek(0)
+                inline_data_files[table_name] = matched_file.file.read().decode("utf-8")
+                matched_file.file.seek(0)
+
+            for stem in sorted(set(csv_by_stem.keys()) - matched_csv_stems):
+                custom_findings.append(
+                    {
+                        "severity": "warning",
+                        "code": "unmatched_csv_upload",
+                        "message": f"Uploaded CSV '{stem}' is not declared in metadata.yml.",
+                        "table": stem,
+                        "path": f"tables.{stem}",
+                    }
+                )
+
+            if not dataset_payload["title"]:
+                custom_findings.append({"severity": "error", "code": "missing_title", "message": "Dataset title is required.", "path": "info.title"})
+            if not dataset_payload["data_owner_name"]:
+                custom_findings.append({"severity": "error", "code": "missing_data_owner", "message": "Data owner name is required.", "path": "info.data_owner_name"})
+            elif session.query(DataOwner).filter(DataOwner.name == dataset_payload["data_owner_name"]).first() is None:
+                custom_findings.append({"severity": "error", "code": "unknown_data_owner", "message": f"Data owner '{dataset_payload['data_owner_name']}' does not exist.", "path": "info.data_owner_name"})
+            if not dataset_payload["collection_id"]:
+                custom_findings.append({"severity": "error", "code": "missing_collection", "message": "Collection ID is required.", "path": "info.collection_id"})
+            elif collection is None:
+                custom_findings.append({"severity": "error", "code": "unknown_collection", "message": f"Collection '{dataset_payload['collection_id']}' does not exist.", "path": "info.collection_id"})
+            if not dataset_payload["ds_id"]:
+                custom_findings.append({"severity": "error", "code": "missing_dataset_id", "message": "Dataset ID is required.", "path": "info.ds_id"})
+            elif (
+                session.query(Dataset).filter(Dataset.ds_id == dataset_payload["ds_id"]).first() is not None
+                and dataset_override.get("existing_dataset_id") != dataset_payload["ds_id"]
+            ):
+                custom_findings.append({"severity": "error", "code": "duplicate_dataset_id", "message": f"Dataset ID '{dataset_payload['ds_id']}' already exists.", "path": "info.ds_id"})
+            if not raw_payload["rds_id"]:
+                custom_findings.append({"severity": "error", "code": "missing_raw_dataset_id", "message": "Raw dataset ID is required.", "path": "info.raw_dataset.rds_id"})
+
+            manifest_payload = {
+                "metadataSpecVersion": "v2",
+                "datasetTitle": dataset_payload["title"] or "Untitled dataset",
+                "datasetSlug": self._slugify(f"{dataset_payload['ds_id']} {dataset_payload['title']}"),
+                "datasetDescription": dataset_payload["description"] or dataset_payload["title"] or "Dataset import",
+                "source": raw_payload["source"],
+                "category": {
+                    "ID": collection.category_id if collection else "UNKNOWN",
+                    "name": collection.category_name if collection else "Unknown category",
+                },
+                "collection": {
+                    "ID": dataset_payload["collection_id"] or "UNKNOWN",
+                    "name": collection.collection_name if collection else (dataset_payload["collection_id"] or "Unknown collection"),
+                },
+                "datasetID": dataset_payload["ds_id"] or None,
+                "datasetKind": "tabular",
+                "datasetTables": manifest_tables,
+            }
+            manifest_text = yaml.safe_dump(manifest_payload, sort_keys=False)
+
+            validation_request = ValidationRequest(
+                dataset_kind=DatasetKind.TABULAR,
+                manifest_source=manifest_text,
+                data_files=inline_data_files,
+                validate_data=bool(inline_data_files),
+            )
+            validation_result = self.validation_service.validate(validation_request).model_dump()
+            findings = custom_findings + validation_result["findings"]
+            can_import = bool(inline_data_files) and not any(
+                finding.get("severity") == "error" for finding in findings
+            )
+
+            return {
+                "dataset": {**dataset_payload, "raw_dataset_ids": [raw_payload["rds_id"]] if raw_payload["rds_id"] else []},
+                "raw_dataset": raw_payload,
+                "tables": table_uploads,
+                "manifest_yaml": manifest_text,
+                "findings": findings,
+                "suggested_dataset_id": suggested_dataset_id or None,
+                "can_import": can_import,
+            }
+        finally:
+            session.close()
 
     # User Management
 
@@ -871,6 +1114,309 @@ class WebAdminService(BaseService):
             }
         finally:
             session.close()
+
+    def get_dataset_detail(self, admin_user: User, dataset_id: str) -> dict:
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.get_dataset_admin_detail(dataset_id)
+
+    def create_raw_dataset(self, admin_user: User, raw_dataset: RawDatasetCreate):
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.create_raw_dataset(raw_dataset)
+
+    def update_raw_dataset(
+        self,
+        admin_user: User,
+        raw_dataset_id: str,
+        raw_dataset: RawDatasetUpdate,
+    ):
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.update_raw_dataset(raw_dataset_id, raw_dataset)
+
+    def list_raw_datasets(
+        self,
+        admin_user: User,
+        search: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.list_raw_datasets(search=search, limit=limit, offset=offset)
+
+    def create_dataset(self, admin_user: User, dataset: DatasetCreate):
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.create_dataset(dataset)
+
+    def update_dataset(self, admin_user: User, dataset_id: str, dataset: DatasetUpdate):
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.update_dataset(dataset_id, dataset)
+
+    def suggest_next_dataset_id(self, admin_user: User, collection_id: str) -> dict:
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.suggest_next_dataset_id(collection_id)
+
+    def list_reserved_dataset_ids(
+        self,
+        admin_user: User,
+        search: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict:
+        self._require_admin(admin_user)
+        rows, total = database.list_reserved_dataset_ids(search=search, limit=limit, offset=offset)
+        return {
+            "reservations": [
+                {
+                    "ds_id": row.ds_id,
+                    "collection_id": row.collection_id,
+                    "note": row.note,
+                    "reserved_by": row.reserved_by,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                }
+                for row in rows
+            ],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
+    def reserve_dataset_id(
+        self,
+        admin_user: User,
+        ds_id: str,
+        collection_id: Optional[str] = None,
+        note: Optional[str] = None,
+    ) -> dict:
+        self._require_admin(admin_user)
+        reservation = database.create_reserved_dataset_id(ds_id, collection_id, note, admin_user.email)
+        return {
+            "ds_id": reservation.ds_id,
+            "collection_id": reservation.collection_id,
+            "note": reservation.note,
+            "reserved_by": reservation.reserved_by,
+            "created_at": reservation.created_at.isoformat() if reservation.created_at else None,
+        }
+
+    def delete_reserved_dataset_id(self, admin_user: User, ds_id: str) -> dict:
+        self._require_admin(admin_user)
+        database.delete_reserved_dataset_id(ds_id)
+        return {"deleted": True, "ds_id": ds_id}
+
+    def preview_dataset_package_import(
+        self,
+        admin_user: User,
+        info_file,
+        metadata_file,
+        csv_files: Optional[List] = None,
+        dataset_override: Optional[dict] = None,
+        raw_dataset_override: Optional[dict] = None,
+    ) -> dict:
+        self._require_admin(admin_user)
+        info_text = info_file.file.read().decode("utf-8")
+        metadata_text = metadata_file.file.read().decode("utf-8")
+        info_file.file.seek(0)
+        metadata_file.file.seek(0)
+        return self._parse_dataset_package(
+            info_text,
+            metadata_text,
+            csv_files=csv_files,
+            dataset_override=dataset_override,
+            raw_dataset_override=raw_dataset_override,
+        )
+
+    def import_dataset_package(
+        self,
+        admin_user: User,
+        info_file,
+        metadata_file,
+        csv_files: List,
+        dataset_override: Optional[dict] = None,
+        raw_dataset_override: Optional[dict] = None,
+        bucket_type: VersionType = VersionType.STANDARDISED,
+    ) -> dict:
+        self._require_admin(admin_user)
+        preview = self.preview_dataset_package_import(
+            admin_user,
+            info_file,
+            metadata_file,
+            csv_files=csv_files,
+            dataset_override=dataset_override,
+            raw_dataset_override=raw_dataset_override,
+        )
+        if not preview["can_import"]:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Package validation failed",
+                    "findings": preview["findings"],
+                },
+            )
+
+        raw_dataset_payload = preview["raw_dataset"]
+        existing_raw = database.get_raw_dataset_by_identifier(raw_dataset_payload["rds_id"])
+        if existing_raw:
+            self.admin_dataset_service.update_raw_dataset(
+                raw_dataset_payload["rds_id"],
+                RawDatasetUpdate(
+                    title=raw_dataset_payload["title"],
+                    source=raw_dataset_payload["source"],
+                ),
+            )
+        else:
+            self.admin_dataset_service.create_raw_dataset(
+                RawDatasetCreate(**raw_dataset_payload)
+            )
+
+        dataset_payload = dict(preview["dataset"])
+        dataset_payload["raw_dataset_ids"] = [raw_dataset_payload["rds_id"]]
+        self.admin_dataset_service.create_dataset(DatasetCreate(**dataset_payload))
+
+        table_files = {Path(file.filename or "").stem: file for file in csv_files if file.filename}
+        uploaded_tables = []
+        for table in preview["tables"]:
+            table_file = table_files.get(table["table_name"])
+            if table_file is None:
+                continue
+            table_file.file.seek(0)
+            metadata_upload = UploadFile(
+                filename="table-metadata.json",
+                file=BytesIO(json.dumps(table["table_metadata"]).encode("utf-8")),
+            )
+            self.admin_dataset_service.create_dataset_table(
+                dataset_payload["ds_id"],
+                bucket_type,
+                table_file,
+                metadata_upload,
+            )
+            uploaded_tables.append(table["table_name"])
+
+        manifest_upload = UploadFile(
+            filename="manifest.yaml",
+            file=BytesIO(preview["manifest_yaml"].encode("utf-8")),
+        )
+        self.admin_dataset_service.upsert_dataset_manifest(
+            dataset_payload["ds_id"],
+            bucket_type,
+            manifest_upload,
+            admin_user.email,
+        )
+
+        return {
+            "dataset_id": dataset_payload["ds_id"],
+            "bucket_type": bucket_type.value,
+            "uploaded_tables": uploaded_tables,
+            "manifest_uploaded": True,
+        }
+
+    def initiate_dataset_deletion(self, admin_user: User, dataset_id: str) -> dict:
+        self._require_admin(admin_user)
+        if not database.check_if_dataset_exists(dataset_id):
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        enforce_rate_limit("dataset_delete_initiate", f"{admin_user.email}:{dataset_id}", limit=3)
+        try:
+            otp_code, _ = create_otp(admin_user.email, purpose=f"dataset_deletion:{dataset_id}")
+        except ValueError as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
+
+        subject = f"Confirm deletion of dataset {dataset_id}"
+        text_body = (
+            f"You requested deletion of dataset {dataset_id}.\n\n"
+            f"Enter this verification code to confirm deletion:\n\n{otp_code}\n\n"
+            "If you did not request this action, ignore this email."
+        )
+        html_body = (
+            f"<p>You requested deletion of dataset <strong>{dataset_id}</strong>.</p>"
+            f"<p>Enter this verification code to confirm deletion:</p>"
+            f"<p style='font-size: 32px; font-weight: bold; letter-spacing: 8px;'>{otp_code}</p>"
+            "<p>If you did not request this action, ignore this email.</p>"
+        )
+        if not self.email_service.send_email(admin_user.email, subject, html_body, text_body):
+            raise HTTPException(status_code=500, detail="Failed to send verification email. Please try again.")
+        record_auth_event(
+            event_type="dataset.delete_initiate",
+            outcome="success",
+            actor_email=admin_user.email,
+            target_email=admin_user.email,
+            details={"dataset_id": dataset_id},
+        )
+        return {"sent": True, "message": "Verification code sent. Check your email to confirm dataset deletion."}
+
+    def verify_dataset_deletion(
+        self,
+        admin_user: User,
+        dataset_id: str,
+        code: str,
+        confirmation_dataset_id: str,
+    ) -> dict:
+        self._require_admin(admin_user)
+        if confirmation_dataset_id != dataset_id:
+            raise HTTPException(status_code=400, detail="Confirmation dataset ID does not match the selected dataset")
+        enforce_rate_limit("dataset_delete_verify", f"{admin_user.email}:{dataset_id}", limit=5)
+        if not verify_otp(admin_user.email, code, purpose=f"dataset_deletion:{dataset_id}"):
+            record_auth_event(
+                event_type="dataset.delete_verify",
+                outcome="failed",
+                actor_email=admin_user.email,
+                target_email=admin_user.email,
+                details={"dataset_id": dataset_id, "reason": "invalid_otp"},
+            )
+            raise HTTPException(status_code=401, detail="Invalid or expired verification code")
+        result = self.admin_dataset_service.delete_dataset(dataset_id)
+        record_auth_event(
+            event_type="dataset.delete_verify",
+            outcome="success",
+            actor_email=admin_user.email,
+            target_email=admin_user.email,
+            details={"dataset_id": dataset_id},
+        )
+        return result
+
+    def list_dataset_tables(
+        self,
+        admin_user: User,
+        dataset_id: str,
+        bucket_type: VersionType,
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.list_dataset_tables(dataset_id, bucket_type)
+
+    def create_dataset_table(
+        self,
+        admin_user: User,
+        dataset_id: str,
+        bucket_type: VersionType,
+        file,
+        table_metadata_file,
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.create_dataset_table(
+            dataset_id,
+            bucket_type,
+            file,
+            table_metadata_file,
+        )
+
+    def check_dataset_documentation_sync(
+        self,
+        admin_user: User,
+        dataset_id: str | None = None,
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.check_dataset_documentation_sync(dataset_id)
+
+    def sync_dataset_documentation(
+        self,
+        admin_user: User,
+        dataset_id: str | None = None,
+        *,
+        only_outdated: bool = True,
+        force: bool = False,
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.sync_dataset_documentation(
+            dataset_id,
+            only_outdated=only_outdated,
+            force=force,
+        )
 
     def get_dataset_manifest(
         self,

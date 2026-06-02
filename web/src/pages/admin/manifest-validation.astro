@@ -17,15 +17,7 @@ import DashboardLayout from '../../layouts/DashboardLayout.astro';
 </DashboardLayout>
 
 <script>
-  import { initAuth, requireAuth, isAdmin } from '../../lib/auth';
+  import { requireAuthenticatedPage } from '../../lib/auth';
 
-  if (!requireAuth()) {
-    // Not authenticated, redirecting
-  } else {
-    initAuth().then(() => {
-      if (!isAdmin()) {
-        window.location.replace('/datasets');
-      }
-    });
-  }
+  requireAuthenticatedPage({ adminOnly: true });
 </script>

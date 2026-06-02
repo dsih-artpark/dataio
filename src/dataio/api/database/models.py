@@ -103,6 +103,17 @@ class Dataset(Base):
     tags = relationship("Tag", secondary="dataset_tags")
 
 
+class ReservedDatasetID(Base):
+    __tablename__ = "reserved_dataset_ids"
+
+    id = Column(Integer, primary_key=True)
+    ds_id = Column(Text, nullable=False, unique=True)
+    collection_id = Column(Text, nullable=True)
+    note = Column(Text, nullable=True)
+    reserved_by = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 class DatasetRawDataset(Base):
     __tablename__ = "dataset_raw_datasets"
 

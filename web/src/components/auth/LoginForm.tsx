@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api } from '../../lib/api';
-import { loginWithOTP } from '../../lib/auth';
+import {
+  consumePostLoginRedirect,
+  getPostLoginRedirect,
+  loginWithOTP,
+  redirectToPath,
+  setPostLoginRedirect,
+} from '../../lib/auth';
 import { isWebAuthnSupported, authenticateWithPasskey } from '../../lib/webauthn';
 import OTPInput from './OTPInput';
 
@@ -64,6 +70,11 @@ export default function LoginForm() {
     const needsPasskey = hash.get('needs_passkey') === 'true';
     const verificationStatus = hash.get('verification_status');
     const verificationMessage = hash.get('verification_message');
+    const nextTarget = hash.get('next');
+
+    if (nextTarget) {
+      setPostLoginRedirect(nextTarget);
+    }
 
     if (verificationStatus === 'pending') {
       setPendingMessage(
@@ -85,7 +96,7 @@ export default function LoginForm() {
           if (needsPasskey && isWebAuthnSupported()) {
             setStep('passkey-prompt');
           } else {
-            window.location.href = '/datasets';
+            redirectToPath(consumePostLoginRedirect(), false);
           }
         })
         .catch((err) => {
@@ -128,7 +139,7 @@ export default function LoginForm() {
       if (response.needsPasskey && isWebAuthnSupported()) {
         setStep('passkey-prompt');
       } else {
-        window.location.href = '/datasets';
+        redirectToPath(consumePostLoginRedirect(), false);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid code');
@@ -142,7 +153,7 @@ export default function LoginForm() {
 
     try {
       await authenticateWithPasskey(email || undefined);
-      window.location.href = '/datasets';
+      redirectToPath(consumePostLoginRedirect(), false);
     } catch (err) {
       const fallbackMessage = email
         ? 'Passkey login failed. Please try again.'
@@ -153,7 +164,8 @@ export default function LoginForm() {
   };
 
   const handleSetupPasskey = () => {
-    window.location.href = '/account?setup-passkey=true';
+    const target = consumePostLoginRedirect();
+    redirectToPath(`/account?setup-passkey=true&next=${encodeURIComponent(target)}`, false);
   };
 
   if (step === 'pending') {
@@ -247,7 +259,7 @@ export default function LoginForm() {
       <div class="space-y-3">
         {authProviders.google && (
           <button
-            onClick={() => api.startOAuth('google')}
+            onClick={() => api.startOAuth('google', getPostLoginRedirect())}
             disabled={loading}
             class="btn-secondary w-full flex items-center justify-center gap-3"
           >
@@ -257,7 +269,7 @@ export default function LoginForm() {
         )}
         {authProviders.github && (
           <button
-            onClick={() => api.startOAuth('github')}
+            onClick={() => api.startOAuth('github', getPostLoginRedirect())}
             disabled={loading}
             class="btn-secondary w-full flex items-center justify-center gap-3"
           >

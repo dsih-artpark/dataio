@@ -9,6 +9,7 @@ Provides endpoints for:
 """
 
 import logging
+import json
 import os
 import secrets
 from datetime import datetime
@@ -31,6 +32,7 @@ from pydantic import BaseModel, EmailStr
 from dataio.api.database.enums import VersionType
 from dataio.api.database.models import User
 from dataio.api.auth.jwt import REFRESH_COOKIE_NAME, get_current_web_user
+from dataio.api.models import DatasetCreate, DatasetUpdate, RawDatasetCreate, RawDatasetUpdate
 from dataio.api.services.web_auth_service import WebAuthService
 from dataio.api.services.web_admin_service import WebAdminService
 from dataio.api.services.web_user_service import WebUserService
@@ -119,6 +121,17 @@ class RegisterVerifyRequest(BaseModel):
 
 class AccountDeleteVerifyRequest(BaseModel):
     code: str
+
+
+class DatasetDeleteVerifyRequest(BaseModel):
+    code: str
+    confirmation_dataset_id: str
+
+
+class ReserveDatasetIdRequest(BaseModel):
+    ds_id: str
+    collection_id: Optional[str] = None
+    note: Optional[str] = None
 
 
 class AcceptInvitationRequest(BaseModel):
@@ -409,6 +422,7 @@ async def verify_registration(
 async def start_oauth(
     provider: str,
     request: Request,
+    next: Optional[str] = None,
     auth_service: WebAuthService = Depends(WebAuthService),
 ):
     state = secrets.token_urlsafe(24)
@@ -417,6 +431,16 @@ async def start_oauth(
     response.set_cookie(
         key=f"oauth_state_{provider}",
         value=state,
+        httponly=True,
+        secure=os.getenv("COOKIE_SECURE", "false").lower() == "true",
+        samesite="lax",
+        max_age=600,
+        path="/",
+    )
+    safe_next = next if next and next.startswith("/") and not next.startswith("//") else "/datasets"
+    response.set_cookie(
+        key=f"oauth_next_{provider}",
+        value=safe_next,
         httponly=True,
         secure=os.getenv("COOKIE_SECURE", "false").lower() == "true",
         samesite="lax",
@@ -454,21 +478,31 @@ async def oauth_callback(
     else:
         raise HTTPException(status_code=404, detail="Unsupported OAuth provider")
 
+    next_target = request.cookies.get(f"oauth_next_{provider}") or "/datasets"
+    if not next_target.startswith("/") or next_target.startswith("//"):
+        next_target = "/datasets"
+
     params = {}
-    if result.get("refresh_token"):
-        params["oauth"] = "success"
     if result.get("needs_passkey"):
         params["needs_passkey"] = "true"
     if result.get("verification_status"):
         params["verification_status"] = result["verification_status"]
     if result.get("verification_message"):
         params["verification_message"] = result["verification_message"]
-    redirect_target = f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/login"
-    if params:
-        redirect_target = f"{redirect_target}#{urlencode(params)}"
+
+    frontend_base = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+    if result.get("needs_passkey") or result.get("verification_status") == "pending":
+        params["oauth"] = "success"
+        params["next"] = next_target
+        redirect_target = f"{frontend_base}/login"
+        if params:
+            redirect_target = f"{redirect_target}#{urlencode(params)}"
+    else:
+        redirect_target = f"{frontend_base}{next_target}"
 
     response = RedirectResponse(url=redirect_target, status_code=302)
     response.delete_cookie(key=f"oauth_state_{provider}", path="/")
+    response.delete_cookie(key=f"oauth_next_{provider}", path="/")
     if result.get("refresh_token"):
         set_refresh_cookie(response, result["refresh_token"])
     return response
@@ -1223,6 +1257,12 @@ class SetPermissionRequest(BaseModel):
     permission: str  # 'VIEW', 'DOWNLOAD', or 'NONE'
 
 
+class DocumentationSyncRequest(BaseModel):
+    dataset_id: Optional[str] = None
+    only_outdated: bool = True
+    force: bool = False
+
+
 @web_router.post("/admin/users/{email}/permissions", tags=["web-admin/users"])
 async def admin_set_user_permission(
     email: str,
@@ -1289,6 +1329,216 @@ async def admin_list_datasets(
     )
 
 
+@web_router.get("/admin/datasets/suggest-id", tags=["web-admin/datasets"])
+async def admin_suggest_dataset_id(
+    collection_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Suggest the next sequential dataset ID for a collection."""
+    return admin_service.suggest_next_dataset_id(user, collection_id)
+
+
+@web_router.get("/admin/dataset-id-reservations", tags=["web-admin/datasets"])
+async def admin_list_reserved_dataset_ids(
+    search: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """List reserved dataset IDs."""
+    return admin_service.list_reserved_dataset_ids(user, search=search, limit=limit, offset=offset)
+
+
+@web_router.post("/admin/dataset-id-reservations", tags=["web-admin/datasets"])
+async def admin_reserve_dataset_id(
+    body: ReserveDatasetIdRequest,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Reserve a dataset ID for future use."""
+    return admin_service.reserve_dataset_id(user, body.ds_id, body.collection_id, body.note)
+
+
+@web_router.delete("/admin/dataset-id-reservations/{dataset_id}", tags=["web-admin/datasets"])
+async def admin_delete_reserved_dataset_id(
+    dataset_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Remove a dataset ID reservation."""
+    return admin_service.delete_reserved_dataset_id(user, dataset_id)
+
+
+@web_router.get("/admin/datasets/{dataset_id}", tags=["web-admin/datasets"])
+async def admin_get_dataset_detail(
+    dataset_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Get detailed dataset information for admin editing."""
+    return admin_service.get_dataset_detail(user, dataset_id)
+
+
+@web_router.post("/admin/datasets", tags=["web-admin/datasets"])
+async def admin_create_dataset(
+    body: DatasetCreate,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Create a dataset."""
+    return admin_service.create_dataset(user, body)
+
+
+@web_router.put("/admin/datasets/{dataset_id}", tags=["web-admin/datasets"])
+async def admin_update_dataset(
+    dataset_id: str,
+    body: DatasetUpdate,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Update dataset metadata and raw dataset links."""
+    return admin_service.update_dataset(user, dataset_id, body)
+
+
+@web_router.post("/admin/datasets/import/preview", tags=["web-admin/datasets"])
+async def admin_preview_dataset_import(
+    info_file: UploadFile = File(...),
+    metadata_file: UploadFile = File(...),
+    csv_files: List[UploadFile] = File(default=[]),
+    dataset_override_json: Optional[str] = Form(default=None),
+    raw_dataset_override_json: Optional[str] = Form(default=None),
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Preview a dataset package import from info.yml, metadata.yml, and optional CSV files."""
+    dataset_override = json.loads(dataset_override_json) if dataset_override_json else None
+    raw_dataset_override = json.loads(raw_dataset_override_json) if raw_dataset_override_json else None
+    return admin_service.preview_dataset_package_import(
+        user,
+        info_file,
+        metadata_file,
+        csv_files=csv_files,
+        dataset_override=dataset_override,
+        raw_dataset_override=raw_dataset_override,
+    )
+
+
+@web_router.post("/admin/datasets/import/apply", tags=["web-admin/datasets"])
+async def admin_apply_dataset_import(
+    info_file: UploadFile = File(...),
+    metadata_file: UploadFile = File(...),
+    csv_files: List[UploadFile] = File(...),
+    dataset_override_json: Optional[str] = Form(default=None),
+    raw_dataset_override_json: Optional[str] = Form(default=None),
+    bucket_type: VersionType = Form(default=VersionType.STANDARDISED),
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Create a dataset from an uploaded package and upload the referenced CSV tables."""
+    dataset_override = json.loads(dataset_override_json) if dataset_override_json else None
+    raw_dataset_override = json.loads(raw_dataset_override_json) if raw_dataset_override_json else None
+    return admin_service.import_dataset_package(
+        user,
+        info_file,
+        metadata_file,
+        csv_files=csv_files,
+        dataset_override=dataset_override,
+        raw_dataset_override=raw_dataset_override,
+        bucket_type=bucket_type,
+    )
+
+
+@web_router.post("/admin/datasets/{dataset_id}/delete/initiate", tags=["web-admin/datasets"])
+async def admin_initiate_dataset_deletion(
+    dataset_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Send an email verification code before deleting a dataset."""
+    return admin_service.initiate_dataset_deletion(user, dataset_id)
+
+
+@web_router.post("/admin/datasets/{dataset_id}/delete/verify", tags=["web-admin/datasets"])
+async def admin_verify_dataset_deletion(
+    dataset_id: str,
+    body: DatasetDeleteVerifyRequest,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Delete a dataset after OTP verification and explicit dataset-ID confirmation."""
+    return admin_service.verify_dataset_deletion(
+        user,
+        dataset_id,
+        body.code,
+        body.confirmation_dataset_id,
+    )
+
+
+@web_router.get("/admin/raw-datasets", tags=["web-admin/datasets"])
+async def admin_list_raw_datasets(
+    search: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """List raw datasets for admin editing."""
+    return admin_service.list_raw_datasets(user, search=search, limit=limit, offset=offset)
+
+
+@web_router.post("/admin/raw-datasets", tags=["web-admin/datasets"])
+async def admin_create_raw_dataset(
+    body: RawDatasetCreate,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Create a raw dataset."""
+    return admin_service.create_raw_dataset(user, body)
+
+
+@web_router.put("/admin/raw-datasets/{raw_dataset_id}", tags=["web-admin/datasets"])
+async def admin_update_raw_dataset(
+    raw_dataset_id: str,
+    body: RawDatasetUpdate,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Update a raw dataset."""
+    return admin_service.update_raw_dataset(user, raw_dataset_id, body)
+
+
+@web_router.get("/admin/datasets/{dataset_id}/{bucket_type}/tables", tags=["web-admin/datasets"])
+async def admin_list_dataset_tables(
+    dataset_id: str,
+    bucket_type: VersionType,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """List tables stored for a dataset/version."""
+    return admin_service.list_dataset_tables(user, dataset_id, bucket_type)
+
+
+@web_router.post("/admin/datasets/{dataset_id}/{bucket_type}/tables", tags=["web-admin/datasets"])
+async def admin_create_dataset_table(
+    dataset_id: str,
+    bucket_type: VersionType,
+    file: UploadFile = File(...),
+    table_metadata_file: UploadFile = File(...),
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Upload a new table for a dataset/version."""
+    return admin_service.create_dataset_table(
+        user,
+        dataset_id,
+        bucket_type,
+        file,
+        table_metadata_file,
+    )
+
+
 @web_router.get("/admin/datasets/{dataset_id}/{bucket_type}/manifest", tags=["web-admin/datasets"])
 async def admin_get_dataset_manifest(
     dataset_id: str,
@@ -1314,6 +1564,31 @@ async def admin_upsert_dataset_manifest(
         dataset_id,
         bucket_type,
         manifest_file,
+    )
+
+
+@web_router.get("/admin/documentation-sync", tags=["web-admin/datasets"])
+async def admin_check_documentation_sync(
+    dataset_id: Optional[str] = None,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Check which datasets have documentation out of sync with filestore."""
+    return admin_service.check_dataset_documentation_sync(user, dataset_id)
+
+
+@web_router.post("/admin/documentation-sync", tags=["web-admin/datasets"])
+async def admin_run_documentation_sync(
+    body: DocumentationSyncRequest,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Sync dataset documentation from filestore into cached database fields."""
+    return admin_service.sync_dataset_documentation(
+        user,
+        dataset_id=body.dataset_id,
+        only_outdated=body.only_outdated,
+        force=body.force,
     )
 
 

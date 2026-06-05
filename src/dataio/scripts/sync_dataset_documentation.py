@@ -140,18 +140,12 @@ def sync_dataset_documentation(
                     UPDATE datasets
                     SET readme_md = :readme,
                         data_dictionary_json = :data_dict,
-                        manifest_yaml = :manifest_yaml,
-                        manifest_json = CAST(:manifest_json AS jsonb),
-                        manifest_updated_at = :manifest_updated_at,
                         documentation_synced_at = :synced_at
                     WHERE ds_id = :ds_id
                 """)
                 db_session.execute(update_query, {
                     "readme": readme_content,
                     "data_dict": data_dict_content,
-                    "manifest_yaml": manifest_yaml,
-                    "manifest_json": manifest_json_content,
-                    "manifest_updated_at": datetime.utcnow() if manifest_yaml or manifest_json_content else None,
                     "synced_at": datetime.utcnow(),
                     "ds_id": dataset_id,
                 })

@@ -1,0 +1,25 @@
+---
+import AdminDatasetsSubnav from '../../../components/admin/AdminDatasetsSubnav.astro';
+import DatasetAdminManager from '../../../components/admin/DatasetAdminManager';
+import DashboardLayout from '../../../layouts/DashboardLayout.astro';
+---
+
+<DashboardLayout title="Reserved Dataset IDs" fullWidth={true}>
+  <div class="space-y-6">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">Reserved Dataset IDs</h1>
+      <p class="mt-1 text-gray-600">
+        Reserve identifiers for incoming work, keep the queue visible, and release reservations when plans change.
+      </p>
+    </div>
+
+    <AdminDatasetsSubnav />
+    <DatasetAdminManager view="reservations" client:load />
+  </div>
+</DashboardLayout>
+
+<script>
+  import { requireAuthenticatedPage } from '../../../lib/auth';
+
+  requireAuthenticatedPage({ adminOnly: true });
+</script>

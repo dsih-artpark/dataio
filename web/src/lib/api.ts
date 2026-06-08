@@ -858,6 +858,22 @@ class ApiClient {
     });
   }
 
+  async adminUpdateDatasetDocumentation(
+    datasetId: string,
+    payload: {
+      readme_md?: string | null;
+      data_dictionary_json?: unknown;
+    }
+  ) {
+    return this.request<AdminDatasetDetail>(
+      `/admin/datasets/${encodeURIComponent(datasetId)}/documentation`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }
+    );
+  }
+
   async adminPreviewDatasetImport(params: {
     infoFile: File;
     metadataFile: File;

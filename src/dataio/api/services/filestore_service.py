@@ -36,11 +36,32 @@ class FilestoreService(BaseService):
     def _get_prefix_for_dataset(self, dataset_id: str, version_type: VersionType):
         return f"filestore/{version_type.value}/{dataset_id}"
 
+    def _object_exists(self, key: str) -> bool:
+        try:
+            self.bucket.Object(key).load()
+            return True
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") in {"404", "NoSuchKey"}:
+                return False
+            raise
+
     def _manifest_yaml_key(self, dataset_id: str, version_type: VersionType) -> str:
         return f"{self._get_prefix_for_dataset(dataset_id, version_type)}/manifest.yaml"
 
     def _manifest_json_key(self, dataset_id: str, version_type: VersionType) -> str:
         return f"{self._get_prefix_for_dataset(dataset_id, version_type)}/manifest.json"
+
+    def _documentation_keys(self, dataset_id: str, filename: str) -> list[str]:
+        keys = [
+            f"{self._get_prefix_for_dataset(dataset_id, version_type)}/{filename}"
+            for version_type in (VersionType.STANDARDISED, VersionType.PREPROCESSED)
+            if self._object_exists(f"{self._get_prefix_for_dataset(dataset_id, version_type)}/{filename}")
+        ]
+        if keys:
+            return keys
+        return [
+            f"{self._get_prefix_for_dataset(dataset_id, VersionType.STANDARDISED)}/{filename}"
+        ]
 
     def _list_dataset_objects(self, dataset_id: str, version_type: VersionType) -> list[str]:
         prefix = self._get_prefix_for_dataset(dataset_id, version_type)
@@ -172,6 +193,39 @@ class FilestoreService(BaseService):
             "manifest_json": manifest_json,
             "has_manifest": manifest_yaml is not None or manifest_json is not None,
         }
+
+    def upsert_dataset_readme(self, dataset_id: str, readme_md: str | None) -> None:
+        keys = self._documentation_keys(dataset_id, "README.md")
+        if readme_md is None:
+            delete_objects = [{"Key": key} for key in keys]
+            if delete_objects:
+                self.bucket.delete_objects(Delete={"Objects": delete_objects})
+            return
+
+        for key in keys:
+            self.bucket.put_object(
+                Body=readme_md.encode("utf-8"),
+                Key=key,
+                ContentType="text/markdown; charset=utf-8",
+            )
+
+    def upsert_dataset_metadata_json(
+        self, dataset_id: str, metadata_json: dict | list | None
+    ) -> None:
+        keys = self._documentation_keys(dataset_id, "metadata.json")
+        if metadata_json is None:
+            delete_objects = [{"Key": key} for key in keys]
+            if delete_objects:
+                self.bucket.delete_objects(Delete={"Objects": delete_objects})
+            return
+
+        payload = json.dumps(metadata_json, indent=2, sort_keys=True).encode("utf-8")
+        for key in keys:
+            self.bucket.put_object(
+                Body=payload,
+                Key=key,
+                ContentType="application/json",
+            )
 
     def get_tabular_validation_sources(
         self,

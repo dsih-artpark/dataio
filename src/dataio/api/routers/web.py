@@ -32,7 +32,13 @@ from pydantic import BaseModel, EmailStr
 from dataio.api.database.enums import VersionType
 from dataio.api.database.models import User
 from dataio.api.auth.jwt import REFRESH_COOKIE_NAME, get_current_web_user
-from dataio.api.models import DatasetCreate, DatasetUpdate, RawDatasetCreate, RawDatasetUpdate
+from dataio.api.models import (
+    DatasetCreate,
+    DatasetDocumentationUpdate,
+    DatasetUpdate,
+    RawDatasetCreate,
+    RawDatasetUpdate,
+)
 from dataio.api.services.web_auth_service import WebAuthService
 from dataio.api.services.web_admin_service import WebAdminService
 from dataio.api.services.web_user_service import WebUserService
@@ -1400,6 +1406,17 @@ async def admin_update_dataset(
 ):
     """Update dataset metadata and raw dataset links."""
     return admin_service.update_dataset(user, dataset_id, body)
+
+
+@web_router.put("/admin/datasets/{dataset_id}/documentation", tags=["web-admin/datasets"])
+async def admin_update_dataset_documentation(
+    dataset_id: str,
+    body: DatasetDocumentationUpdate,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Update cached dataset README and data dictionary content."""
+    return admin_service.update_dataset_documentation(user, dataset_id, body)
 
 
 @web_router.post("/admin/datasets/import/preview", tags=["web-admin/datasets"])

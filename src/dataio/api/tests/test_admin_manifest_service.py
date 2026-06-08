@@ -16,9 +16,10 @@ os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
 from dataio.api.models import VersionType
 from dataio.api.services.admin_dataset_service import AdminDatasetService
+from dataio.api.services.web_admin_service import WebAdminService
 from dataio.validate.reports.models import Finding, ValidationResult
 from dataio.api.database import functions as database_functions
-from dataio.api.models import DatasetUpdate
+from dataio.api.models import DatasetDocumentationUpdate, DatasetUpdate
 
 
 def test_upsert_dataset_manifest_updates_filestore_and_db(monkeypatch):
@@ -266,3 +267,61 @@ def test_update_dataset_rejects_duplicate_dataset_id(monkeypatch):
         assert str(exc) == "Dataset with ID CUSTOM-ID-2 already exists"
     else:
         raise AssertionError("Expected ValueError to be raised")
+
+
+def test_update_dataset_documentation_writes_filestore_and_refreshes_cache(monkeypatch):
+    service = object.__new__(WebAdminService)
+    service.logger = logging.getLogger(__name__)
+    service._require_admin = lambda _user: None
+
+    recorded = {}
+
+    class QueryStub:
+        def filter(self, *_args, **_kwargs):
+            return self
+
+        def first(self):
+            return SimpleNamespace(ds_id="TS0001DS0001")
+
+    class SessionStub:
+        def query(self, *_args, **_kwargs):
+            return QueryStub()
+
+        def close(self):
+            return None
+
+    class FilestoreStub:
+        def upsert_dataset_readme(self, dataset_id, readme_md):
+            recorded["readme"] = (dataset_id, readme_md)
+
+        def upsert_dataset_metadata_json(self, dataset_id, metadata_json):
+            recorded["metadata"] = (dataset_id, metadata_json)
+
+    class AdminDatasetServiceStub:
+        def __init__(self):
+            self.filestore_service = FilestoreStub()
+
+        def refresh_dataset_documentation_cache(self, dataset_id):
+            recorded["refreshed"] = dataset_id
+
+        def get_dataset_admin_detail(self, dataset_id):
+            recorded["detail"] = dataset_id
+            return {"ds_id": dataset_id}
+
+    service.admin_dataset_service = AdminDatasetServiceStub()
+
+    monkeypatch.setattr("dataio.api.services.web_admin_service.DBSession", lambda: SessionStub())
+
+    result = service.update_dataset_documentation(
+        SimpleNamespace(email="admin@example.com", is_admin=True),
+        "TS0001DS0001",
+        DatasetDocumentationUpdate(
+            readme_md="# Updated",
+            data_dictionary_json={"tables": {"main": {"data_dictionary": {}}}},
+        ),
+    )
+
+    assert result == {"ds_id": "TS0001DS0001"}
+    assert recorded["readme"] == ("TS0001DS0001", "# Updated")
+    assert recorded["metadata"][0] == "TS0001DS0001"
+    assert recorded["refreshed"] == "TS0001DS0001"

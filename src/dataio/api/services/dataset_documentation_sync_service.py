@@ -28,8 +28,8 @@ def build_documentation_snapshot(bucket, dataset_id: str) -> dict[str, Any]:
     readme_content = fetch_file_from_s3(bucket, dataset_id, "README.md")
     manifest_yaml = fetch_file_from_s3(bucket, dataset_id, "manifest.yaml")
     manifest_json_content = fetch_file_from_s3(bucket, dataset_id, "manifest.json")
+    data_dict_content = fetch_file_from_s3(bucket, dataset_id, "metadata.json")
 
-    data_dict_content = None
     if manifest_yaml:
         if not manifest_json_content:
             parsed_manifest = None
@@ -41,8 +41,6 @@ def build_documentation_snapshot(bucket, dataset_id: str) -> dict[str, Any]:
                 parsed_manifest = None
             if parsed_manifest is not None:
                 manifest_json_content = json.dumps(parsed_manifest, sort_keys=True)
-    else:
-        data_dict_content = fetch_file_from_s3(bucket, dataset_id, "metadata.json")
 
     return {
         "readme_md": readme_content,

@@ -18,7 +18,14 @@ import yaml
 from dataio.api.database import functions as database
 from dataio.api.database.config import Session as DBSession
 from dataio.api.database.enums import VersionType
-from dataio.api.models import DatasetCreate, DatasetUpdate, RawDatasetCreate, RawDatasetUpdate, TableMetadata
+from dataio.api.models import (
+    DatasetCreate,
+    DatasetDocumentationUpdate,
+    DatasetUpdate,
+    RawDatasetCreate,
+    RawDatasetUpdate,
+    TableMetadata,
+)
 from dataio.api.database.models import Collection, DataOwner, Dataset, User, UserGroup, UserPermission
 from dataio.api.auth.otp import create_otp, verify_otp
 from dataio.api.auth.security import enforce_rate_limit
@@ -1149,6 +1156,42 @@ class WebAdminService(BaseService):
     def update_dataset(self, admin_user: User, dataset_id: str, dataset: DatasetUpdate):
         self._require_admin(admin_user)
         return self.admin_dataset_service.update_dataset(dataset_id, dataset)
+
+    def update_dataset_documentation(
+        self,
+        admin_user: User,
+        dataset_id: str,
+        documentation: DatasetDocumentationUpdate,
+    ):
+        self._require_admin(admin_user)
+
+        try:
+            session = DBSession()
+            dataset = session.query(Dataset).filter(Dataset.ds_id == dataset_id).first()
+            if not dataset:
+                raise HTTPException(status_code=404, detail="Dataset not found")
+            session.close()
+
+            if "readme_md" in documentation.model_fields_set:
+                self.admin_dataset_service.filestore_service.upsert_dataset_readme(
+                    dataset_id, documentation.readme_md
+                )
+
+            if "data_dictionary_json" in documentation.model_fields_set:
+                self.admin_dataset_service.filestore_service.upsert_dataset_metadata_json(
+                    dataset_id, documentation.data_dictionary_json
+                )
+
+            self.admin_dataset_service.refresh_dataset_documentation_cache(dataset_id)
+            return self.admin_dataset_service.get_dataset_admin_detail(dataset_id)
+        except HTTPException:
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to update dataset documentation: {e!s}")
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to update dataset documentation. Contact support.",
+            ) from e
 
     def suggest_next_dataset_id(self, admin_user: User, collection_id: str) -> dict:
         self._require_admin(admin_user)

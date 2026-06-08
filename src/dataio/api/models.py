@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict
+from typing import Any, List, Optional, Dict
 from pydantic import BaseModel, Field
 from dataio.api.database.enums import (
     AccessLevel,
@@ -82,6 +82,15 @@ class DatasetUpdate(BaseModel):
     raw_dataset_ids: Optional[List[str]] = Field(
         default=None,
         description="Raw dataset IDs for the dataset",
+    )
+
+
+class DatasetDocumentationUpdate(BaseModel):
+    readme_md: Optional[str] = Field(
+        None, description="Dataset README markdown content"
+    )
+    data_dictionary_json: Optional[Any] = Field(
+        None, description="Dataset data dictionary JSON payload"
     )
 
 

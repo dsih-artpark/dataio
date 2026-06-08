@@ -15,7 +15,18 @@ interface NavItem {
 const navItems: NavItem[] = [
   { name: 'Users', href: '/admin/users', icon: 'users', adminOnly: true },
   { name: 'Groups', href: '/admin/groups', icon: 'users-cog', adminOnly: true },
-  { name: 'Manage Datasets', href: '/admin/datasets', icon: 'database', adminOnly: true },
+  {
+    name: 'Datasets',
+    icon: 'database',
+    adminOnly: true,
+    children: [
+      { name: 'Overview', href: '/admin/datasets' },
+      { name: 'Create / Import', href: '/admin/datasets/new' },
+      { name: 'Catalog', href: '/admin/datasets/catalog' },
+      { name: 'Reserved IDs', href: '/admin/datasets/reservations' },
+      { name: 'Documentation Sync', href: '/admin/datasets/sync' },
+    ],
+  },
   {
     name: 'Validation',
     icon: 'database',

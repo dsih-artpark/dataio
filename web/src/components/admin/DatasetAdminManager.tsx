@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'preact/hooks';
+import type { ComponentChildren } from 'preact';
+import { useEffect, useMemo, useState } from 'preact/hooks';
+import { marked } from 'marked';
 
 import { ApiRequestError, api } from '../../lib/api';
 import type {
@@ -15,6 +17,9 @@ import type {
 
 const STANDARDISED_BUCKET = 'STANDARDISED';
 const PREPROCESSED_BUCKET = 'PREPROCESSED';
+
+type DatasetAdminView = 'new' | 'catalog' | 'reservations' | 'sync' | 'detail';
+type DetailWorkspaceTab = 'metadata' | 'sharing' | 'tables' | 'manifest' | 'documentation' | 'sync' | 'danger';
 
 type DatasetFormState = {
   ds_id: string;
@@ -110,7 +115,15 @@ function findingLabel(finding: ValidationFinding) {
   return parts.join(' • ');
 }
 
-export default function DatasetAdminManager() {
+interface DatasetAdminManagerProps {
+  view?: DatasetAdminView;
+  datasetId?: string;
+}
+
+export default function DatasetAdminManager({
+  view = 'catalog',
+  datasetId = '',
+}: DatasetAdminManagerProps) {
   const [datasets, setDatasets] = useState<AdminDatasetSummary[]>([]);
   const [rawDatasets, setRawDatasets] = useState<AdminRawDataset[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -155,6 +168,24 @@ export default function DatasetAdminManager() {
   const [shareGroupEmail, setShareGroupEmail] = useState('');
   const [sharePermission, setSharePermission] = useState('VIEW');
   const [savingAccessLevelFor, setSavingAccessLevelFor] = useState('');
+  const [quickEditDatasetId, setQuickEditDatasetId] = useState('');
+  const [quickEditForm, setQuickEditForm] = useState<DatasetFormState>(emptyDatasetForm());
+  const [shareModalDatasetId, setShareModalDatasetId] = useState('');
+  const [detailTab, setDetailTab] = useState<DetailWorkspaceTab>('metadata');
+  const [readmeDraft, setReadmeDraft] = useState('');
+  const [dataDictionaryDraft, setDataDictionaryDraft] = useState('{}');
+  const [savingDocumentation, setSavingDocumentation] = useState(false);
+  const isCreateView = view === 'new';
+  const isCatalogView = view === 'catalog';
+  const isReservationsView = view === 'reservations';
+  const isSyncView = view === 'sync';
+  const isDetailView = view === 'detail';
+  const showSelectionToolbar = isCatalogView || isSyncView || isDetailView;
+  const showCatalogSection = isCatalogView;
+  const showReservationsSection = isReservationsView;
+  const showCreateSections = isCreateView;
+  const showDetailSections = isDetailView;
+  const showSyncSection = isSyncView || isDetailView;
 
   const loadReferenceData = async (search?: string) => {
     setLoading(true);
@@ -283,6 +314,12 @@ export default function DatasetAdminManager() {
   }, []);
 
   useEffect(() => {
+    if (datasetId) {
+      setSelectedDatasetId(datasetId);
+    }
+  }, [datasetId]);
+
+  useEffect(() => {
     if (selectedDatasetId) {
       loadDatasetDetail(selectedDatasetId);
       loadDocumentationStatuses(selectedDatasetId);
@@ -295,6 +332,29 @@ export default function DatasetAdminManager() {
       setRawDatasetEditForm({ title: selected.title, source: selected.source });
     }
   }, [selectedRawDatasetId, rawDatasets]);
+
+  useEffect(() => {
+    if (quickEditDatasetId && datasetDetail?.ds_id === quickEditDatasetId) {
+      setQuickEditForm(datasetDetailToForm(datasetDetail));
+    }
+  }, [quickEditDatasetId, datasetDetail]);
+
+  useEffect(() => {
+    if (datasetDetail) {
+      setReadmeDraft(datasetDetail.readme_md ?? '');
+      setDataDictionaryDraft(
+        datasetDetail.data_dictionary_json
+          ? (() => {
+              try {
+                return JSON.stringify(JSON.parse(datasetDetail.data_dictionary_json), null, 2);
+              } catch {
+                return datasetDetail.data_dictionary_json;
+              }
+            })()
+          : '{\n  "tables": {}\n}'
+      );
+    }
+  }, [datasetDetail]);
 
   const updateCreateForm = <K extends keyof DatasetFormState>(key: K, value: DatasetFormState[K]) => {
     setCreateForm((current) => ({ ...current, [key]: value }));
@@ -339,6 +399,25 @@ export default function DatasetAdminManager() {
       tags: payload.tags,
     };
   };
+
+  const parsedReadmeHtml = useMemo(() => {
+    if (!readmeDraft.trim()) return '';
+    return marked.parse(readmeDraft) as string;
+  }, [readmeDraft]);
+
+  const parsedDataDictionary = useMemo(() => {
+    if (!dataDictionaryDraft.trim()) return null;
+    try {
+      return JSON.parse(dataDictionaryDraft) as {
+        tables?: Record<
+          string,
+          { description?: string | null; data_dictionary?: Record<string, { description?: string | null; comments?: string | null }> }
+        >;
+      };
+    } catch {
+      return null;
+    }
+  }, [dataDictionaryDraft]);
 
   const applyImportPreview = (preview: AdminDatasetPackagePreview) => {
     setImportPreview(preview);
@@ -623,6 +702,46 @@ export default function DatasetAdminManager() {
     }
   };
 
+  const openQuickEditModal = async (datasetId: string) => {
+    setQuickEditDatasetId(datasetId);
+    setSelectedDatasetId(datasetId);
+    if (datasetDetail?.ds_id !== datasetId) {
+      await loadDatasetDetail(datasetId);
+    } else {
+      setQuickEditForm(datasetDetailToForm(datasetDetail));
+    }
+  };
+
+  const openShareModal = async (datasetId: string) => {
+    setShareModalDatasetId(datasetId);
+    setSelectedDatasetId(datasetId);
+    if (datasetDetail?.ds_id !== datasetId) {
+      await loadDatasetDetail(datasetId);
+    }
+  };
+
+  const handleQuickEditSave = async (e: Event) => {
+    e.preventDefault();
+    if (!quickEditDatasetId) return;
+    setErrorMessage('');
+    setStatusMessage('');
+    try {
+      const payload = buildDatasetPayload(quickEditForm);
+      await api.adminUpdateDataset(quickEditDatasetId, {
+        title: payload.title,
+        description: payload.description,
+        access_level: payload.access_level,
+        tags: payload.tags,
+      });
+      setStatusMessage(`Updated dataset ${quickEditDatasetId}.`);
+      setQuickEditDatasetId('');
+      await loadReferenceData(datasetSearch || undefined);
+      await loadDatasetDetail(selectedDatasetId || quickEditDatasetId);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to update dataset');
+    }
+  };
+
   const handleShareWithUser = async () => {
     if (!selectedDatasetId || !shareUserEmail) return;
     setErrorMessage('');
@@ -646,6 +765,41 @@ export default function DatasetAdminManager() {
       setShareGroupEmail('');
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Failed to share dataset with group');
+    }
+  };
+
+  const handleSaveDocumentation = async (mode: 'readme' | 'data-dictionary') => {
+    if (!selectedDatasetId) return;
+    setSavingDocumentation(true);
+    setErrorMessage('');
+    setStatusMessage('');
+    try {
+      const payload =
+        mode === 'readme'
+          ? { readme_md: readmeDraft.trim() ? readmeDraft : null }
+          : {
+              data_dictionary_json: dataDictionaryDraft.trim()
+                ? (JSON.parse(dataDictionaryDraft) as unknown)
+                : null,
+            };
+      const updated = await api.adminUpdateDatasetDocumentation(selectedDatasetId, payload);
+      setDatasetDetail(updated);
+      setStatusMessage(
+        mode === 'readme'
+          ? `Updated README for ${selectedDatasetId}.`
+          : `Updated data dictionary for ${selectedDatasetId}.`
+      );
+      await loadReferenceData(datasetSearch || undefined);
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error
+          ? err.message
+          : mode === 'readme'
+            ? 'Failed to update README'
+            : 'Failed to update data dictionary'
+      );
+    } finally {
+      setSavingDocumentation(false);
     }
   };
 
@@ -888,6 +1042,108 @@ export default function DatasetAdminManager() {
     </form>
   );
 
+  const renderSharePanels = () => (
+    <div class="grid gap-4 xl:grid-cols-2">
+      <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+        <h4 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Share With User</h4>
+        <p class="mt-1 text-sm text-slate-600">Grant direct access for the currently selected dataset.</p>
+        <div class="mt-4 grid gap-3 sm:grid-cols-[1fr_140px_auto]">
+          <select
+            value={shareUserEmail}
+            onChange={(e) => setShareUserEmail((e.currentTarget as HTMLSelectElement).value)}
+            class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm"
+          >
+            <option value="">Select user</option>
+            {datasetUsers.map((user) => (
+              <option key={user.email} value={user.email}>
+                {user.display_name ? `${user.display_name} (${user.email})` : user.email}
+              </option>
+            ))}
+          </select>
+          <select
+            value={sharePermission}
+            onChange={(e) => setSharePermission((e.currentTarget as HTMLSelectElement).value)}
+            class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm"
+          >
+            <option value="VIEW">VIEW</option>
+            <option value="DOWNLOAD">DOWNLOAD</option>
+            <option value="NONE">NONE</option>
+          </select>
+          <button
+            type="button"
+            onClick={handleShareWithUser}
+            disabled={!selectedDatasetId || !shareUserEmail}
+            class="w-full rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+          >
+            Share
+          </button>
+        </div>
+      </div>
+
+      <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+        <h4 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Share With Group</h4>
+        <p class="mt-1 text-sm text-slate-600">Grant group-level access for the currently selected dataset.</p>
+        <div class="mt-4 grid gap-3 sm:grid-cols-[1fr_140px_auto]">
+          <select
+            value={shareGroupEmail}
+            onChange={(e) => setShareGroupEmail((e.currentTarget as HTMLSelectElement).value)}
+            class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm"
+          >
+            <option value="">Select group</option>
+            {datasetGroups.map((group) => (
+              <option key={group.email} value={group.email}>
+                {group.display_name ? `${group.display_name} (${group.email})` : group.email}
+              </option>
+            ))}
+          </select>
+          <select
+            value={sharePermission}
+            onChange={(e) => setSharePermission((e.currentTarget as HTMLSelectElement).value)}
+            class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm"
+          >
+            <option value="VIEW">VIEW</option>
+            <option value="DOWNLOAD">DOWNLOAD</option>
+            <option value="NONE">NONE</option>
+          </select>
+          <button
+            type="button"
+            onClick={handleShareWithGroup}
+            disabled={!selectedDatasetId || !shareGroupEmail}
+            class="w-full rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+          >
+            Share
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderModalShell = (
+    title: string,
+    subtitle: string,
+    onClose: () => void,
+    content: ComponentChildren
+  ) => (
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
+      <div class="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-3xl bg-white shadow-2xl">
+        <div class="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <h3 class="text-lg font-semibold text-slate-900">{title}</h3>
+            <p class="mt-1 text-sm text-slate-600">{subtitle}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            class="rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"
+          >
+            Close
+          </button>
+        </div>
+        <div class="px-6 py-5">{content}</div>
+      </div>
+    </div>
+  );
+
   return (
     <div class="space-y-6">
       {errorMessage ? (
@@ -899,12 +1155,19 @@ export default function DatasetAdminManager() {
         </div>
       ) : null}
 
+      {showSelectionToolbar ? (
       <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h2 class="text-lg font-semibold text-slate-900">Manage Datasets</h2>
+            <h2 class="text-lg font-semibold text-slate-900">
+              {isDetailView ? 'Dataset Workspace' : isSyncView ? 'Documentation Sync Workspace' : 'Dataset Workspace'}
+            </h2>
             <p class="mt-1 text-sm text-slate-600">
-              Create datasets, update metadata, upload tables, and keep documentation caches in sync.
+              {isDetailView
+                ? 'Choose a dataset and work through its metadata, sharing, tables, manifest, and sync status in one place.'
+                : isSyncView
+                  ? 'Choose a dataset to inspect documentation freshness, or switch datasets quickly while reviewing sync state.'
+                  : 'Search the catalog, switch datasets, and jump into the parts of the admin workflow that need attention.'}
             </p>
           </div>
           <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
@@ -969,7 +1232,9 @@ export default function DatasetAdminManager() {
           </button>
         </div>
       </section>
+      ) : null}
 
+      {showCatalogSection ? (
       <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -1013,13 +1278,35 @@ export default function DatasetAdminManager() {
                     </select>
                   </td>
                   <td class="px-3 py-3">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedDatasetId(dataset.ds_id)}
-                      class="rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"
-                    >
-                      Edit / Share
-                    </button>
+                    <div class="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDatasetId(dataset.ds_id)}
+                        class="rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"
+                      >
+                        Select
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openQuickEditModal(dataset.ds_id)}
+                        class="rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"
+                      >
+                        Quick Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openShareModal(dataset.ds_id)}
+                        class="rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"
+                      >
+                        Share
+                      </button>
+                      <a
+                        href={`/admin/datasets/workspace?dataset=${encodeURIComponent(dataset.ds_id)}`}
+                        class="rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white"
+                      >
+                        Open Workspace
+                      </a>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -1027,81 +1314,13 @@ export default function DatasetAdminManager() {
           </table>
         </div>
 
-        <div class="mt-6 grid gap-4 xl:grid-cols-2">
-          <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <h4 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Share With User</h4>
-            <p class="mt-1 text-sm text-slate-600">Grant direct access for the currently selected dataset.</p>
-            <div class="mt-4 grid gap-3 sm:grid-cols-[1fr_140px_auto]">
-              <select
-                value={shareUserEmail}
-                onChange={(e) => setShareUserEmail((e.currentTarget as HTMLSelectElement).value)}
-                class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm"
-              >
-                <option value="">Select user</option>
-                {datasetUsers.map((user) => (
-                  <option key={user.email} value={user.email}>
-                    {user.display_name ? `${user.display_name} (${user.email})` : user.email}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={sharePermission}
-                onChange={(e) => setSharePermission((e.currentTarget as HTMLSelectElement).value)}
-                class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm"
-              >
-                <option value="VIEW">VIEW</option>
-                <option value="DOWNLOAD">DOWNLOAD</option>
-                <option value="NONE">NONE</option>
-              </select>
-              <button
-                type="button"
-                onClick={handleShareWithUser}
-                disabled={!selectedDatasetId || !shareUserEmail}
-                class="w-full rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-              >
-                Share
-              </button>
-            </div>
-          </div>
-
-          <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <h4 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Share With Group</h4>
-            <p class="mt-1 text-sm text-slate-600">Grant group-level access for the currently selected dataset.</p>
-            <div class="mt-4 grid gap-3 sm:grid-cols-[1fr_140px_auto]">
-              <select
-                value={shareGroupEmail}
-                onChange={(e) => setShareGroupEmail((e.currentTarget as HTMLSelectElement).value)}
-                class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm"
-              >
-                <option value="">Select group</option>
-                {datasetGroups.map((group) => (
-                  <option key={group.email} value={group.email}>
-                    {group.display_name ? `${group.display_name} (${group.email})` : group.email}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={sharePermission}
-                onChange={(e) => setSharePermission((e.currentTarget as HTMLSelectElement).value)}
-                class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm"
-              >
-                <option value="VIEW">VIEW</option>
-                <option value="DOWNLOAD">DOWNLOAD</option>
-                <option value="NONE">NONE</option>
-              </select>
-              <button
-                type="button"
-                onClick={handleShareWithGroup}
-                disabled={!selectedDatasetId || !shareGroupEmail}
-                class="w-full rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-              >
-                Share
-              </button>
-            </div>
-          </div>
+        <div class="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">
+          Use <span class="font-medium text-slate-900">Quick Edit</span> or <span class="font-medium text-slate-900">Share</span> from a dataset row to open focused admin modals without leaving the catalog. Use <span class="font-medium text-slate-900">Open Workspace</span> for tables, manifest, README, and data dictionary work.
         </div>
       </section>
+      ) : null}
 
+      {showReservationsSection ? (
       <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -1185,7 +1404,9 @@ export default function DatasetAdminManager() {
           </table>
         </div>
       </section>
+      ) : null}
 
+      {showCreateSections ? (
       <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -1292,7 +1513,9 @@ export default function DatasetAdminManager() {
           </div>
         ) : null}
       </section>
+      ) : null}
 
+      {showCreateSections ? (
       <div class="grid gap-6 xl:grid-cols-2">
         <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <h3 class="text-lg font-semibold text-slate-900">Create Raw Dataset</h3>
@@ -1358,7 +1581,38 @@ export default function DatasetAdminManager() {
           <div class="mt-4">{renderDatasetForm(createForm, updateCreateForm, 'Create Dataset', handleCreateDataset, true)}</div>
         </section>
       </div>
+      ) : null}
 
+      {showDetailSections ? (
+      <section class="rounded-2xl border border-slate-200 bg-white p-2 shadow-sm sm:p-3">
+        <div class="flex flex-wrap gap-2">
+          {([
+            ['metadata', 'Metadata'],
+            ['sharing', 'Sharing'],
+            ['tables', 'Tables'],
+            ['manifest', 'Manifest'],
+            ['documentation', 'README & Dictionary'],
+            ['sync', 'Sync'],
+            ['danger', 'Danger Zone'],
+          ] as Array<[DetailWorkspaceTab, string]>).map(([tabId, label]) => (
+            <button
+              type="button"
+              key={tabId}
+              onClick={() => setDetailTab(tabId)}
+              class={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+                detailTab === tabId
+                  ? 'bg-slate-900 text-white'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </section>
+      ) : null}
+
+      {showDetailSections && detailTab === 'metadata' ? (
       <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -1379,7 +1633,28 @@ export default function DatasetAdminManager() {
           )}
         </div>
       </section>
+      ) : null}
 
+      {showDetailSections && detailTab === 'sharing' ? (
+      <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h3 class="text-lg font-semibold text-slate-900">Sharing</h3>
+            <p class="mt-1 text-sm text-slate-600">
+              Grant dataset access directly to users or groups while staying in the current workspace.
+            </p>
+          </div>
+          {selectedDatasetId ? (
+            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+              {selectedDatasetId}
+            </span>
+          ) : null}
+        </div>
+        <div class="mt-6">{renderSharePanels()}</div>
+      </section>
+      ) : null}
+
+      {showDetailSections && detailTab === 'danger' ? (
       <section class="rounded-2xl border border-red-200 bg-white p-4 shadow-sm sm:p-6">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -1428,123 +1703,213 @@ export default function DatasetAdminManager() {
           </div>
         </form>
       </section>
+      ) : null}
 
-      <div class="grid gap-6 xl:grid-cols-2">
-        <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-          <div class="flex items-start justify-between gap-3">
-            <div>
-              <h3 class="text-lg font-semibold text-slate-900">Tables</h3>
-              <p class="mt-1 text-sm text-slate-600">Review existing tables and add new tables to the selected dataset.</p>
-            </div>
-            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">{selectedBucket}</span>
+      {showDetailSections && detailTab === 'tables' ? (
+      <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <h3 class="text-lg font-semibold text-slate-900">Tables</h3>
+            <p class="mt-1 text-sm text-slate-600">Review existing tables and add new tables to the selected dataset.</p>
           </div>
+          <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">{selectedBucket}</span>
+        </div>
 
-          {tableLoadError ? (
-            <div class="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{tableLoadError}</div>
-          ) : null}
+        {tableLoadError ? (
+          <div class="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{tableLoadError}</div>
+        ) : null}
 
-          <div class="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            {tableRows.length === 0 ? (
-              <p class="text-sm text-slate-500">No tables found for this dataset/version.</p>
-            ) : (
-              tableRows.map((row) => (
-                <div key={row.table_name} class="rounded-xl border border-slate-200 bg-white px-4 py-3">
-                  <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-                    <div>
-                      <div class="break-all font-medium text-slate-900">{row.table_name}</div>
-                      <div class="mt-1 overflow-x-auto text-xs text-slate-500">{JSON.stringify(row.metadata)}</div>
-                    </div>
-                    <a href={row.download_link} target="_blank" rel="noreferrer" class="text-sm font-medium text-slate-700 underline">
-                      Open file
-                    </a>
+        <div class="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          {tableRows.length === 0 ? (
+            <p class="text-sm text-slate-500">No tables found for this dataset/version.</p>
+          ) : (
+            tableRows.map((row) => (
+              <div key={row.table_name} class="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                  <div>
+                    <div class="break-all font-medium text-slate-900">{row.table_name}</div>
+                    <div class="mt-1 overflow-x-auto text-xs text-slate-500">{JSON.stringify(row.metadata)}</div>
                   </div>
+                  <a href={row.download_link} target="_blank" rel="noreferrer" class="text-sm font-medium text-slate-700 underline">
+                    Open file
+                  </a>
                 </div>
-              ))
-            )}
-          </div>
+              </div>
+            ))
+          )}
+        </div>
 
-          <form class="mt-6 space-y-4" onSubmit={handleTableUpload}>
-            <input
-              type="file"
-              accept=".csv,.geojson,.json"
-              onChange={(e) => setTableFile((e.currentTarget as HTMLInputElement).files?.[0] ?? null)}
-              class="block w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-            />
+        <form class="mt-6 space-y-4" onSubmit={handleTableUpload}>
+          <input
+            type="file"
+            accept=".csv,.geojson,.json"
+            onChange={(e) => setTableFile((e.currentTarget as HTMLInputElement).files?.[0] ?? null)}
+            class="block w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+          />
+          <textarea
+            value={tableMetadataText}
+            onInput={(e) => setTableMetadataText((e.currentTarget as HTMLTextAreaElement).value)}
+            rows={8}
+            class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono text-sm shadow-sm"
+          />
+          <button
+            type="submit"
+            disabled={!selectedDatasetId || !tableFile || !!tableLoadError}
+            class="w-full rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+          >
+            Upload Table
+          </button>
+        </form>
+      </section>
+      ) : null}
+
+      {showDetailSections && detailTab === 'manifest' ? (
+      <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <h3 class="text-lg font-semibold text-slate-900">Canonical Manifest</h3>
+            <p class="mt-1 text-sm text-slate-600">Review and replace the standardised manifest for the selected dataset.</p>
+          </div>
+          <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">STANDARDISED</span>
+        </div>
+
+        <div class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div class="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+            <span>{manifestRecord?.has_manifest ? 'Manifest present' : 'No manifest stored'}</span>
+            {manifestRecord?.manifest_updated_at ? (
+              <span>Updated {new Date(manifestRecord.manifest_updated_at).toLocaleString()}</span>
+            ) : null}
+            {manifestRecord?.manifest_updated_by ? <span>by {manifestRecord.manifest_updated_by}</span> : null}
+          </div>
+          <pre class="mt-4 max-h-[32rem] overflow-auto rounded-xl bg-slate-950 p-4 text-xs leading-6 text-slate-100">
+            {manifestRecord?.manifest_yaml || '# No canonical manifest stored.'}
+          </pre>
+        </div>
+
+        {manifestLoadError ? (
+          <div class="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{manifestLoadError}</div>
+        ) : null}
+
+        <form class="mt-6 space-y-4" onSubmit={handleManifestUpload}>
+          <input
+            type="file"
+            accept=".yaml,.yml"
+            onChange={(e) => setManifestFile((e.currentTarget as HTMLInputElement).files?.[0] ?? null)}
+            class="block w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+          />
+          <button
+            type="submit"
+            disabled={!selectedDatasetId || !manifestFile || !!manifestLoadError}
+            class="w-full rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+          >
+            Update Manifest
+          </button>
+        </form>
+
+        {manifestFindings.length > 0 ? (
+          <div class="mt-4 space-y-3">
+            {manifestFindings.map((finding, index) => (
+              <div key={`${finding.code}-${index}`} class={`rounded-xl px-4 py-3 text-sm ring-1 ${severityClasses(finding.severity)}`}>
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-semibold uppercase">{finding.severity}</span>
+                  <span class="font-mono text-xs">{finding.code}</span>
+                </div>
+                <p class="mt-2">{finding.message}</p>
+                {findingLabel(finding) ? <p class="mt-1 text-xs opacity-80">{findingLabel(finding)}</p> : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </section>
+      ) : null}
+
+      {showDetailSections && detailTab === 'documentation' ? (
+      <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h3 class="text-lg font-semibold text-slate-900">README And Data Dictionary</h3>
+            <p class="mt-1 text-sm text-slate-600">
+              Make small documentation edits directly from the admin workspace without leaving the dataset context.
+            </p>
+          </div>
+          {datasetDetail?.documentation_synced_at ? (
+            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+              Updated {new Date(datasetDetail.documentation_synced_at).toLocaleString()}
+            </span>
+          ) : null}
+        </div>
+
+        <div class="mt-6 grid gap-6 xl:grid-cols-2">
+          <div class="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div class="flex items-center justify-between gap-3">
+              <h4 class="text-sm font-semibold uppercase tracking-wide text-slate-500">README</h4>
+              <button
+                type="button"
+                onClick={() => handleSaveDocumentation('readme')}
+                disabled={!selectedDatasetId || savingDocumentation}
+                class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Save README
+              </button>
+            </div>
             <textarea
-              value={tableMetadataText}
-              onInput={(e) => setTableMetadataText((e.currentTarget as HTMLTextAreaElement).value)}
-              rows={8}
+              value={readmeDraft}
+              onInput={(e) => setReadmeDraft((e.currentTarget as HTMLTextAreaElement).value)}
+              rows={16}
               class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono text-sm shadow-sm"
             />
-            <button
-              type="submit"
-              disabled={!selectedDatasetId || !tableFile || !!tableLoadError}
-              class="w-full rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-            >
-              Upload Table
-            </button>
-          </form>
-        </section>
-
-        <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-          <div class="flex items-start justify-between gap-3">
-            <div>
-              <h3 class="text-lg font-semibold text-slate-900">Canonical Manifest</h3>
-              <p class="mt-1 text-sm text-slate-600">Review and replace the standardised manifest for the selected dataset.</p>
+              <div class="rounded-2xl border border-slate-200 bg-white p-4">
+              <div class="mb-3 text-sm font-medium text-slate-700">Rendered preview</div>
+              {readmeDraft.trim() ? (
+                <div class="prose prose-slate max-w-none text-sm" dangerouslySetInnerHTML={{ __html: parsedReadmeHtml }} />
+              ) : (
+                <p class="text-sm text-slate-500">No README saved yet.</p>
+              )}
             </div>
-            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">STANDARDISED</span>
           </div>
 
-          <div class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div class="flex flex-wrap items-center gap-3 text-xs text-slate-500">
-              <span>{manifestRecord?.has_manifest ? 'Manifest present' : 'No manifest stored'}</span>
-              {manifestRecord?.manifest_updated_at ? (
-                <span>Updated {new Date(manifestRecord.manifest_updated_at).toLocaleString()}</span>
-              ) : null}
-              {manifestRecord?.manifest_updated_by ? <span>by {manifestRecord.manifest_updated_by}</span> : null}
+          <div class="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div class="flex items-center justify-between gap-3">
+              <h4 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Data Dictionary</h4>
+              <button
+                type="button"
+                onClick={() => handleSaveDocumentation('data-dictionary')}
+                disabled={!selectedDatasetId || savingDocumentation}
+                class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Save Data Dictionary
+              </button>
             </div>
-            <pre class="mt-4 max-h-[24rem] overflow-auto rounded-xl bg-slate-950 p-4 text-xs leading-6 text-slate-100">
-              {manifestRecord?.manifest_yaml || '# No canonical manifest stored.'}
-            </pre>
-          </div>
-
-          {manifestLoadError ? (
-            <div class="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{manifestLoadError}</div>
-          ) : null}
-
-          <form class="mt-6 space-y-4" onSubmit={handleManifestUpload}>
-            <input
-              type="file"
-              accept=".yaml,.yml"
-              onChange={(e) => setManifestFile((e.currentTarget as HTMLInputElement).files?.[0] ?? null)}
-              class="block w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+            <textarea
+              value={dataDictionaryDraft}
+              onInput={(e) => setDataDictionaryDraft((e.currentTarget as HTMLTextAreaElement).value)}
+              rows={16}
+              class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono text-sm shadow-sm"
             />
-            <button
-              type="submit"
-              disabled={!selectedDatasetId || !manifestFile || !!manifestLoadError}
-              class="w-full rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-            >
-              Update Manifest
-            </button>
-          </form>
-
-          {manifestFindings.length > 0 ? (
-            <div class="mt-4 space-y-3">
-              {manifestFindings.map((finding, index) => (
-                <div key={`${finding.code}-${index}`} class={`rounded-xl px-4 py-3 text-sm ring-1 ${severityClasses(finding.severity)}`}>
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class="font-semibold uppercase">{finding.severity}</span>
-                    <span class="font-mono text-xs">{finding.code}</span>
-                  </div>
-                  <p class="mt-2">{finding.message}</p>
-                  {findingLabel(finding) ? <p class="mt-1 text-xs opacity-80">{findingLabel(finding)}</p> : null}
+            <div class="rounded-2xl border border-slate-200 bg-white p-4">
+              <div class="mb-3 text-sm font-medium text-slate-700">Current structure</div>
+              {parsedDataDictionary?.tables && Object.keys(parsedDataDictionary.tables).length > 0 ? (
+                <div class="space-y-3">
+                  {Object.entries(parsedDataDictionary.tables).map(([tableName, table]) => (
+                    <div key={tableName} class="rounded-xl border border-slate-200 px-3 py-3">
+                      <div class="font-medium text-slate-900">{tableName}</div>
+                      <div class="mt-1 text-sm text-slate-600">{table.description || 'No table description yet.'}</div>
+                      <div class="mt-2 text-xs text-slate-500">
+                        {table.data_dictionary ? Object.keys(table.data_dictionary).length : 0} field(s)
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              ) : (
+                <p class="text-sm text-slate-500">No parsed table metadata is currently stored.</p>
+              )}
             </div>
-          ) : null}
-        </section>
-      </div>
+          </div>
+        </div>
+      </section>
+      ) : null}
 
+      {showSyncSection && (!showDetailSections || detailTab === 'sync') ? (
       <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -1593,6 +1958,92 @@ export default function DatasetAdminManager() {
           )}
         </div>
       </section>
+      ) : null}
+
+      {quickEditDatasetId
+        ? renderModalShell(
+            'Quick Edit Dataset',
+            `Make small metadata and access changes for ${quickEditDatasetId} without leaving the catalog.`,
+            () => setQuickEditDatasetId(''),
+            <form class="space-y-4" onSubmit={handleQuickEditSave}>
+              <div class="grid gap-4 md:grid-cols-2">
+                <label class="block">
+                  <span class="mb-2 block text-sm font-medium text-slate-700">Dataset ID</span>
+                  <input
+                    value={quickEditForm.ds_id}
+                    disabled
+                    class="w-full rounded-xl border border-slate-300 bg-slate-100 px-3 py-2 text-sm shadow-sm"
+                  />
+                </label>
+                <label class="block">
+                  <span class="mb-2 block text-sm font-medium text-slate-700">Access level</span>
+                  <select
+                    value={quickEditForm.access_level}
+                    onChange={(e) => setQuickEditForm((current) => ({ ...current, access_level: (e.currentTarget as HTMLSelectElement).value }))}
+                    class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm"
+                  >
+                    <option value="NONE">NONE</option>
+                    <option value="VIEW">VIEW</option>
+                    <option value="DOWNLOAD">DOWNLOAD</option>
+                  </select>
+                </label>
+              </div>
+              <label class="block">
+                <span class="mb-2 block text-sm font-medium text-slate-700">Title</span>
+                <input
+                  value={quickEditForm.title}
+                  onInput={(e) => setQuickEditForm((current) => ({ ...current, title: (e.currentTarget as HTMLInputElement).value }))}
+                  class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm"
+                />
+              </label>
+              <label class="block">
+                <span class="mb-2 block text-sm font-medium text-slate-700">Description</span>
+                <textarea
+                  value={quickEditForm.description}
+                  onInput={(e) => setQuickEditForm((current) => ({ ...current, description: (e.currentTarget as HTMLTextAreaElement).value }))}
+                  rows={4}
+                  class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm"
+                />
+              </label>
+              <label class="block">
+                <span class="mb-2 block text-sm font-medium text-slate-700">Tags</span>
+                <input
+                  value={quickEditForm.tags}
+                  onInput={(e) => setQuickEditForm((current) => ({ ...current, tags: (e.currentTarget as HTMLInputElement).value }))}
+                  class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm"
+                />
+              </label>
+              <div class="flex flex-wrap gap-3">
+                <button
+                  type="submit"
+                  class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white"
+                >
+                  Save Changes
+                </button>
+                <a
+                  href={`/admin/datasets/workspace?dataset=${encodeURIComponent(quickEditDatasetId)}`}
+                  class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
+                >
+                  Open Full Workspace
+                </a>
+              </div>
+            </form>
+          )
+        : null}
+
+      {shareModalDatasetId
+        ? renderModalShell(
+            'Share Dataset',
+            `Grant or revoke direct access for ${shareModalDatasetId} using focused admin controls.`,
+            () => setShareModalDatasetId(''),
+            <div class="space-y-4">
+              <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                Sharing updates are applied immediately to the selected dataset. Choose <code>{shareModalDatasetId}</code> recipients below.
+              </div>
+              {renderSharePanels()}
+            </div>
+          )
+        : null}
     </div>
   );
 }

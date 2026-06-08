@@ -199,6 +199,63 @@ def test_web_admin_documentation_sync_endpoint():
     app.dependency_overrides.clear()
 
 
+def test_web_admin_dataset_documentation_update_endpoint():
+    recorded = {}
+
+    class WebAdminServiceStub:
+        def update_dataset_documentation(self, user, dataset_id, body):
+            recorded["user"] = user.email
+            recorded["dataset_id"] = dataset_id
+            recorded["readme_md"] = body.readme_md
+            recorded["data_dictionary_json"] = body.data_dictionary_json
+            return {
+                "ds_id": dataset_id,
+                "title": "Updated Dataset",
+                "collection_id": "TS0001",
+                "collection_name": "Transport",
+                "data_owner_name": "ARTPARK",
+                "description": None,
+                "spatial_coverage_region_id": None,
+                "spatial_resolution": None,
+                "temporal_coverage_start_date": None,
+                "temporal_coverage_end_date": None,
+                "temporal_resolution": None,
+                "access_level": "VIEW",
+                "additional_metadata": None,
+                "tags": [],
+                "raw_dataset_ids": [],
+                "raw_datasets": [],
+                "readme_md": body.readme_md,
+                "data_dictionary_json": '{"tables": {"main": {"data_dictionary": {}}}}',
+                "manifest_yaml": None,
+                "manifest_json": None,
+                "manifest_updated_at": None,
+                "manifest_updated_by": None,
+                "documentation_synced_at": None,
+            }
+
+    app.dependency_overrides[get_current_web_user] = lambda: SimpleNamespace(
+        email="admin@example.com",
+        is_admin=True,
+    )
+    app.dependency_overrides[WebAdminService] = lambda: WebAdminServiceStub()
+
+    response = client.put(
+        "/api/v1/web/admin/datasets/TS0001DS0001/documentation",
+        json={
+            "readme_md": "# Updated README",
+            "data_dictionary_json": {"tables": {"main": {"data_dictionary": {}}}},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["readme_md"] == "# Updated README"
+    assert recorded["dataset_id"] == "TS0001DS0001"
+    assert recorded["data_dictionary_json"]["tables"]["main"]["data_dictionary"] == {}
+
+    app.dependency_overrides.clear()
+
+
 def test_web_admin_dataset_import_preview_endpoint():
     recorded = {}
 

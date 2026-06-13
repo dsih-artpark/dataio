@@ -96,7 +96,7 @@ class DataIOAdminAPI:
                 "Create one with required fields: title, data_owner_name"
             )
 
-        with open(info_path, "r") as f:
+        with open(info_path, "r", encoding="utf-8") as f:
             info = yaml.safe_load(f)
 
         # Validate required fields
@@ -118,7 +118,7 @@ class DataIOAdminAPI:
         if not metadata_path.exists():
             raise FileNotFoundError(f"Missing metadata.yaml in {folder_path}")
 
-        with open(metadata_path, "r") as f:
+        with open(metadata_path, "r", encoding="utf-8") as f:
             metadata = yaml.safe_load(f)
 
         manifest_path = folder / "manifest.yaml"

@@ -154,4 +154,7 @@ data/
 *.geojson
 # AI Files
 
-web/.astro
+web/.astrodataio_naming_policy.md
+dataset_upload_workflow.md
+generate_all_info_yml.py
+reformat_yaml.py

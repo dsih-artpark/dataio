@@ -260,6 +260,11 @@ export interface DatasetIdSuggestion {
   suggested_dataset_id: string;
 }
 
+export interface RawDatasetIdSuggestion {
+  collection_id: string;
+  suggested_raw_dataset_id: string;
+}
+
 export interface DocumentationSyncDatasetStatus {
   ds_id: string;
   needs_update: boolean;

@@ -19,6 +19,12 @@ interface DatasetDetailPanelProps {
 
 type TabId = 'about' | 'manifest' | 'metadata' | 'readme' | 'code';
 
+interface ManifestTableMetadata {
+  table_name: string;
+  description: string | null;
+  data_dictionary: Record<string, { description: string | null; comments: string | null }>;
+}
+
 export default function DatasetDetailPanel({
   dataset,
   loading,
@@ -33,6 +39,7 @@ export default function DatasetDetailPanel({
   const [manifestRecord, setManifestRecord] = useState<DatasetManifestRecord | null>(null);
   const [manifestLoading, setManifestLoading] = useState(false);
   const [manifestError, setManifestError] = useState<string | null>(null);
+  const [activeManifestTableTab, setActiveManifestTableTab] = useState<string | null>(null);
 
   const hasManifest = Boolean(dataset?.has_manifest);
 
@@ -68,10 +75,60 @@ export default function DatasetDetailPanel({
     setManifestRecord(null);
     setManifestLoading(false);
     setManifestError(null);
+    setActiveManifestTableTab(null);
     if (activeTab === 'manifest' && !hasManifest) {
       setActiveTab('about');
     }
   }, [dataset?.ds_id, hasManifest]);
+
+  // Derive per-table metadata (name, description, fields) from the manifest's
+  // datasetTables block, instead of showing the raw dataset-level manifest.
+  const manifestTables = useMemo<Record<string, ManifestTableMetadata>>(() => {
+    const datasetTables = manifestRecord?.manifest_json?.datasetTables as
+      | Record<
+          string,
+          {
+            description?: string | null;
+            dataDictionary?: Record<string, { description?: string | null; comments?: string | null }>;
+          }
+        >
+      | undefined;
+    if (!datasetTables) return {};
+
+    const result: Record<string, ManifestTableMetadata> = {};
+    for (const [tableName, table] of Object.entries(datasetTables)) {
+      const dataDictionary: Record<string, { description: string | null; comments: string | null }> = {};
+      for (const [fieldName, field] of Object.entries(table.dataDictionary || {})) {
+        dataDictionary[fieldName] = {
+          description: field.description ?? null,
+          comments: field.comments ?? null,
+        };
+      }
+      result[tableName] = {
+        table_name: tableName,
+        description: table.description ?? null,
+        data_dictionary: dataDictionary,
+      };
+    }
+    return result;
+  }, [manifestRecord]);
+
+  const manifestTableNames = useMemo(() => Object.keys(manifestTables), [manifestTables]);
+
+  useEffect(() => {
+    if (manifestTableNames.length > 0) {
+      if (!activeManifestTableTab || !manifestTableNames.includes(activeManifestTableTab)) {
+        setActiveManifestTableTab(manifestTableNames[0]);
+      }
+    } else {
+      setActiveManifestTableTab(null);
+    }
+  }, [manifestTableNames]);
+
+  const activeManifestTableMetadata = useMemo<ManifestTableMetadata | null>(() => {
+    if (!activeManifestTableTab) return null;
+    return manifestTables[activeManifestTableTab] || null;
+  }, [manifestTables, activeManifestTableTab]);
 
   useEffect(() => {
     if (!dataset || !isAuthenticated || !hasManifest || activeTab !== 'manifest') {
@@ -767,7 +824,7 @@ export default function DatasetDetailPanel({
         {activeTab === 'manifest' && (
           <div class="space-y-4">
             <div class="flex items-center justify-between">
-              <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Canonical Manifest</h3>
+              <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Data Dictionary</h3>
               {manifestRecord?.manifest_updated_at && (
                 <p class="text-xs text-gray-500">
                   Updated {new Date(manifestRecord.manifest_updated_at).toLocaleString()}
@@ -788,12 +845,85 @@ export default function DatasetDetailPanel({
               </div>
             )}
 
-            {!manifestLoading && !manifestError && manifestRecord?.manifest_yaml && (
-              <div class="rounded-xl border border-gray-200 overflow-hidden">
-                <div class="border-b border-gray-200 bg-gray-50 px-4 py-2">
-                  <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">manifest.yaml</span>
-                </div>
-                <pre class="overflow-x-auto bg-white p-4 text-xs leading-6 text-gray-800"><code>{manifestRecord.manifest_yaml}</code></pre>
+            {!manifestLoading && !manifestError && manifestTableNames.length === 0 && (
+              <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+                No table-level metadata found in this manifest.
+              </div>
+            )}
+
+            {!manifestLoading && !manifestError && manifestTableNames.length > 0 && (
+              <div class="space-y-4">
+                {/* Available files */}
+                {manifestTableNames.length > 1 && (
+                  <div class="flex gap-1 p-1 bg-gray-100 rounded-lg overflow-x-auto">
+                    {manifestTableNames.map((tableName) => (
+                      <button
+                        key={tableName}
+                        onClick={() => setActiveManifestTableTab(tableName)}
+                        class={`flex-shrink-0 px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                          activeManifestTableTab === tableName
+                            ? 'bg-white text-gray-900 shadow-sm'
+                            : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                        }`}
+                      >
+                        {tableName}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Active table metadata */}
+                {activeManifestTableMetadata && (
+                  <div class="space-y-4">
+                    <div class="bg-gray-50 rounded-xl p-4 space-y-2">
+                      <div class="flex items-center gap-2">
+                        <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                        <span class="font-semibold text-gray-900">{activeManifestTableMetadata.table_name}</span>
+                      </div>
+                      {activeManifestTableMetadata.description && (
+                        <p class="text-sm text-gray-600">{activeManifestTableMetadata.description}</p>
+                      )}
+                    </div>
+
+                    {Object.keys(activeManifestTableMetadata.data_dictionary).length > 0 && (
+                      <div class="border border-gray-200 rounded-xl overflow-hidden">
+                        <div class="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                          <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                            Fields ({Object.keys(activeManifestTableMetadata.data_dictionary).length})
+                          </span>
+                        </div>
+                        <div class="overflow-x-auto">
+                          <table class="w-full text-sm">
+                            <thead class="bg-gray-50 border-b border-gray-200">
+                              <tr>
+                                <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Field</th>
+                                <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Description</th>
+                                <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Comments</th>
+                              </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100">
+                              {Object.entries(activeManifestTableMetadata.data_dictionary).map(([fieldName, fieldInfo]) => (
+                                <tr key={fieldName} class="hover:bg-gray-50">
+                                  <td class="px-4 py-3">
+                                    <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded font-mono text-gray-800">{fieldName}</code>
+                                  </td>
+                                  <td class="px-4 py-3 text-gray-700">
+                                    {fieldInfo.description || <span class="text-gray-400 italic">—</span>}
+                                  </td>
+                                  <td class="px-4 py-3 text-gray-500 text-xs">
+                                    {fieldInfo.comments || <span class="text-gray-400 italic">—</span>}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>

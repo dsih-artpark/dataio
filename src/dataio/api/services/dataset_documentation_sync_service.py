@@ -30,17 +30,27 @@ def build_documentation_snapshot(bucket, dataset_id: str) -> dict[str, Any]:
     manifest_json_content = fetch_file_from_s3(bucket, dataset_id, "manifest.json")
     data_dict_content = fetch_file_from_s3(bucket, dataset_id, "metadata.json")
 
-    if manifest_yaml:
-        if not manifest_json_content:
+    # Normalize manifest_json to a sort_keys=True dump regardless of source,
+    # so it compares consistently against the DB side (which is also
+    # re-dumped with sort_keys=True below) - Postgres JSONB storage doesn't
+    # preserve key order, and raw S3 manifest.json is insertion-ordered, so
+    # comparing either against a sorted DB dump without also sorting this
+    # side always reports a spurious diff.
+    parsed_manifest = None
+    if manifest_json_content:
+        try:
+            parsed_manifest = json.loads(manifest_json_content)
+        except (TypeError, ValueError):
             parsed_manifest = None
-            try:
-                import yaml
+    if parsed_manifest is None and manifest_yaml:
+        try:
+            import yaml
 
-                parsed_manifest = yaml.safe_load(manifest_yaml)
-            except Exception:
-                parsed_manifest = None
-            if parsed_manifest is not None:
-                manifest_json_content = json.dumps(parsed_manifest, sort_keys=True)
+            parsed_manifest = yaml.safe_load(manifest_yaml)
+        except Exception:
+            parsed_manifest = None
+    if parsed_manifest is not None:
+        manifest_json_content = json.dumps(parsed_manifest, sort_keys=True)
 
     return {
         "readme_md": readme_content,

@@ -135,6 +135,7 @@ export default function DatasetAdminManager({
   const [editForm, setEditForm] = useState<DatasetFormState>(emptyDatasetForm());
   const [createForm, setCreateForm] = useState<DatasetFormState>(emptyDatasetForm());
   const [rawDatasetForm, setRawDatasetForm] = useState({ rds_id: '', title: '', source: '' });
+  const [rawDatasetCollectionId, setRawDatasetCollectionId] = useState('');
   const [selectedRawDatasetId, setSelectedRawDatasetId] = useState('');
   const [rawDatasetEditForm, setRawDatasetEditForm] = useState({ title: '', source: '' });
   const [loading, setLoading] = useState(true);
@@ -455,6 +456,18 @@ export default function DatasetAdminManager({
     }
   };
 
+  const handleSuggestRawDatasetId = async (collectionId: string) => {
+    setRawDatasetCollectionId(collectionId);
+    if (!collectionId) return;
+    try {
+      const response = await api.adminSuggestRawDatasetId(collectionId);
+      setRawDatasetForm((current) => ({ ...current, rds_id: response.suggested_raw_dataset_id }));
+      setStatusMessage(`Suggested raw dataset ID: ${response.suggested_raw_dataset_id}`);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to suggest raw dataset ID');
+    }
+  };
+
   const handleReserveDatasetId = async (e: Event) => {
     e.preventDefault();
     if (!reserveDatasetId) return;
@@ -496,6 +509,7 @@ export default function DatasetAdminManager({
       await api.adminCreateRawDataset(rawDatasetForm);
       setStatusMessage(`Created raw dataset ${rawDatasetForm.rds_id}.`);
       setRawDatasetForm({ rds_id: '', title: '', source: '' });
+      setRawDatasetCollectionId('');
       await loadReferenceData(datasetSearch || undefined);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Failed to create raw dataset');
@@ -1519,7 +1533,20 @@ export default function DatasetAdminManager({
       <div class="grid gap-6 xl:grid-cols-2">
         <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <h3 class="text-lg font-semibold text-slate-900">Create Raw Dataset</h3>
+          <p class="mt-1 text-sm text-slate-600">Choosing a collection suggests the next sequential raw dataset ID.</p>
           <form class="mt-4 space-y-4" onSubmit={handleCreateRawDataset}>
+            <select
+              value={rawDatasetCollectionId}
+              onChange={(e) => handleSuggestRawDatasetId((e.currentTarget as HTMLSelectElement).value)}
+              class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm"
+            >
+              <option value="">Select collection</option>
+              {collections.map((collection) => (
+                <option key={collection.id} value={collection.collection_id}>
+                  {collection.collection_id} - {collection.collection_name}
+                </option>
+              ))}
+            </select>
             <input
               value={rawDatasetForm.rds_id}
               onInput={(e) => setRawDatasetForm((current) => ({ ...current, rds_id: (e.currentTarget as HTMLInputElement).value }))}

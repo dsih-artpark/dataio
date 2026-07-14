@@ -1221,6 +1221,10 @@ class WebAdminService(BaseService):
         self._require_admin(admin_user)
         return self.admin_dataset_service.suggest_next_dataset_id(collection_id)
 
+    def suggest_next_raw_dataset_id(self, admin_user: User, collection_id: str) -> dict:
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.suggest_next_raw_dataset_id(collection_id)
+
     def list_reserved_dataset_ids(
         self,
         admin_user: User,

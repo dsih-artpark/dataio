@@ -159,3 +159,5 @@ web/.astrodataio_naming_policy.md
 dataset_upload_workflow.md
 generate_all_info_yml.py
 reformat_yaml.py
+dataio_naming_policy.md
+Datasets_Uploaded_Dataio.md

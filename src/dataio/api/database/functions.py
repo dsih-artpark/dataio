@@ -538,6 +538,30 @@ def suggest_next_dataset_id(collection_id: str) -> str:
         session.close()
 
 
+def suggest_next_raw_dataset_id(collection_id: str) -> str:
+    session = Session()
+    try:
+        existing_ids = (
+            session.query(RawDataset.rds_id)
+            .filter(RawDataset.rds_id.like(f"{collection_id}RDS%"))
+            .all()
+        )
+        max_suffix = 0
+        prefix = f"{collection_id}RDS"
+        for (rds_id,) in existing_ids:
+            if not rds_id.startswith(prefix):
+                continue
+            suffix = rds_id[len(prefix):]
+            if len(suffix) == 4 and suffix.isdigit():
+                max_suffix = max(max_suffix, int(suffix))
+        return f"{prefix}{max_suffix + 1:04d}"
+    except Exception as e:
+        logger.error(f"Error suggesting raw dataset id: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
 def list_raw_datasets(search: str | None = None, limit: int = 100, offset: int = 0):
     session = Session()
     try:

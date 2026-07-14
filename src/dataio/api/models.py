@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict
+from typing import Any, List, Optional, Dict
 from pydantic import BaseModel, Field
 from dataio.api.database.enums import (
     AccessLevel,
@@ -12,6 +12,11 @@ class RawDatasetCreate(BaseModel):
     rds_id: str = Field(..., description="Raw dataset identifier", min_length=1)
     title: str = Field(..., description="Raw dataset title", min_length=1)
     source: str = Field(..., description="Raw dataset source", min_length=1)
+
+
+class RawDatasetUpdate(BaseModel):
+    title: Optional[str] = Field(None, description="Raw dataset title")
+    source: Optional[str] = Field(None, description="Raw dataset source")
 
 
 class DatasetCreate(BaseModel):
@@ -45,6 +50,47 @@ class DatasetCreate(BaseModel):
     raw_dataset_ids: List[str] = Field(
         min_length=1,
         description="Raw dataset IDs for the dataset",
+    )
+
+
+class DatasetUpdate(BaseModel):
+    ds_id: Optional[str] = Field(None, description="Dataset identifier")
+    title: Optional[str] = Field(None, description="Dataset title")
+    collection_id: Optional[str] = Field(None, description="Collection ID this dataset belongs to")
+    data_owner_name: Optional[str] = Field(None, description="Name of the data owner")
+    description: Optional[str] = Field(None, description="Dataset description")
+    spatial_coverage_region_id: Optional[str] = Field(
+        None, description="Spatial coverage region ID"
+    )
+    spatial_resolution: Optional[str] = Field(
+        None, description="Spatial resolution information"
+    )
+    temporal_coverage_start_date: Optional[str] = Field(
+        None, description="Temporal coverage start date"
+    )
+    temporal_coverage_end_date: Optional[str] = Field(
+        None, description="Temporal coverage end date"
+    )
+    temporal_resolution: Optional[str] = Field(
+        None, description="Temporal resolution information"
+    )
+    access_level: Optional[AccessLevel] = Field(
+        default=None, description="Public access level for the dataset"
+    )
+    additional_metadata: Optional[dict] = Field(None, description="Additional metadata")
+    tags: Optional[List[str]] = Field(None, description="Tags for the dataset")
+    raw_dataset_ids: Optional[List[str]] = Field(
+        default=None,
+        description="Raw dataset IDs for the dataset",
+    )
+
+
+class DatasetDocumentationUpdate(BaseModel):
+    readme_md: Optional[str] = Field(
+        None, description="Dataset README markdown content"
+    )
+    data_dictionary_json: Optional[Any] = Field(
+        None, description="Dataset data dictionary JSON payload"
     )
 
 

@@ -21,6 +21,58 @@ export const isLoading = signal(typeof window !== 'undefined');
 let initAuthPromise: Promise<void> | null = null;
 let initAuthCompleted = false;
 
+const DEFAULT_POST_LOGIN_PATH = '/datasets';
+
+function normalizeRedirectPath(target: string | null | undefined): string {
+  if (!target) return DEFAULT_POST_LOGIN_PATH;
+  if (!target.startsWith('/')) return DEFAULT_POST_LOGIN_PATH;
+  if (target.startsWith('//')) return DEFAULT_POST_LOGIN_PATH;
+  return target;
+}
+
+export function getCurrentPathWithSearch(): string {
+  if (typeof window === 'undefined') return DEFAULT_POST_LOGIN_PATH;
+  return `${window.location.pathname}${window.location.search}${window.location.hash}`;
+}
+
+export function setPostLoginRedirect(target: string): void {
+  if (typeof window === 'undefined') return;
+  sessionStorage.setItem('post_login_redirect', normalizeRedirectPath(target));
+}
+
+export function getPostLoginRedirect(): string {
+  if (typeof window === 'undefined') return DEFAULT_POST_LOGIN_PATH;
+  const fromQuery = new URLSearchParams(window.location.search).get('next');
+  const fromStorage = sessionStorage.getItem('post_login_redirect');
+  return normalizeRedirectPath(fromQuery || fromStorage);
+}
+
+export function consumePostLoginRedirect(): string {
+  const target = getPostLoginRedirect();
+  if (typeof window !== 'undefined') {
+    sessionStorage.removeItem('post_login_redirect');
+  }
+  return target;
+}
+
+export function redirectToPath(target: string, replace = true): void {
+  if (typeof window === 'undefined') return;
+  const normalized = normalizeRedirectPath(target);
+  if (replace) {
+    window.location.replace(normalized);
+  } else {
+    window.location.href = normalized;
+  }
+}
+
+export function redirectToLogin(target?: string): void {
+  if (typeof window === 'undefined') return;
+  const destination = normalizeRedirectPath(target || getCurrentPathWithSearch());
+  setPostLoginRedirect(destination);
+  const params = new URLSearchParams({ next: destination });
+  window.location.replace(`/login?${params.toString()}`);
+}
+
 /**
  * Initialize auth state from stored tokens.
  * This function is idempotent - multiple calls will share the same promise.
@@ -134,14 +186,49 @@ export function requireAuth(): boolean {
 export async function redirectIfAuthenticated(): Promise<boolean> {
   if (typeof window === 'undefined') return true;
 
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  if (
+    hashParams.get('oauth') === 'success' ||
+    hashParams.get('needs_passkey') === 'true' ||
+    hashParams.get('verification_status') === 'pending'
+  ) {
+    return true;
+  }
+
   try {
     await initAuth();
     if (currentUser.value) {
-      window.location.replace('/datasets');
+      redirectToPath(consumePostLoginRedirect());
       return false;
     }
   } catch {
     return true;
   }
+  return true;
+}
+
+export async function requireAuthenticatedPage(options?: {
+  adminOnly?: boolean;
+  fallbackPath?: string;
+}): Promise<boolean> {
+  if (typeof window === 'undefined') return true;
+
+  try {
+    await initAuth();
+  } catch {
+    redirectToLogin();
+    return false;
+  }
+
+  if (!currentUser.value) {
+    redirectToLogin();
+    return false;
+  }
+
+  if (options?.adminOnly && !isAdmin()) {
+    redirectToPath(options.fallbackPath || DEFAULT_POST_LOGIN_PATH);
+    return false;
+  }
+
   return true;
 }

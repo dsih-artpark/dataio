@@ -157,6 +157,130 @@ export interface AdminDatasetSummary {
   access_level: string | null;
 }
 
+export interface AdminRawDataset {
+  id: number;
+  rds_id: string;
+  title: string;
+  source: string;
+}
+
+export interface AdminDatasetDetail {
+  ds_id: string;
+  title: string;
+  collection_id: string | null;
+  collection_name: string | null;
+  data_owner_name: string | null;
+  description: string | null;
+  spatial_coverage_region_id: string | null;
+  spatial_resolution: string | null;
+  temporal_coverage_start_date: string | null;
+  temporal_coverage_end_date: string | null;
+  temporal_resolution: string | null;
+  access_level: string | null;
+  additional_metadata: Record<string, unknown> | null;
+  tags: string[];
+  raw_dataset_ids: string[];
+  raw_datasets: AdminRawDataset[];
+  readme_md: string | null;
+  data_dictionary_json: string | null;
+  manifest_yaml: string | null;
+  manifest_json: Record<string, unknown> | null;
+  manifest_updated_at: string | null;
+  manifest_updated_by: string | null;
+  documentation_synced_at: string | null;
+}
+
+export interface AdminDatasetTable {
+  table_name: string;
+  download_link: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface AdminDatasetTablesResponse {
+  dataset_id: string;
+  bucket_type: string;
+  tables: AdminDatasetTable[];
+}
+
+export interface AdminDatasetPackageTable {
+  table_name: string;
+  description: string | null;
+  source: string | null;
+  table_metadata: Record<string, unknown>;
+}
+
+export interface AdminDatasetPackagePreview {
+  dataset: {
+    ds_id: string;
+    title: string;
+    collection_id: string;
+    data_owner_name: string;
+    description: string | null;
+    spatial_coverage_region_id: string | null;
+    spatial_resolution: string | null;
+    temporal_coverage_start_date: string | null;
+    temporal_coverage_end_date: string | null;
+    temporal_resolution: string | null;
+    access_level: string;
+    additional_metadata: Record<string, unknown> | null;
+    tags: string[];
+    raw_dataset_ids: string[];
+  };
+  raw_dataset: {
+    rds_id: string;
+    title: string;
+    source: string;
+  };
+  tables: AdminDatasetPackageTable[];
+  manifest_yaml: string;
+  findings: ValidationFinding[];
+  suggested_dataset_id: string | null;
+  can_import: boolean;
+}
+
+export interface ReservedDatasetId {
+  ds_id: string;
+  collection_id: string | null;
+  note: string | null;
+  reserved_by: string;
+  created_at: string | null;
+}
+
+export interface AdminRawDatasetsResponse {
+  raw_datasets: AdminRawDataset[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface DatasetIdSuggestion {
+  collection_id: string;
+  suggested_dataset_id: string;
+}
+
+export interface DocumentationSyncDatasetStatus {
+  ds_id: string;
+  needs_update: boolean;
+  changed_fields: string[];
+  has_remote_documentation?: boolean;
+  manifest_updated_at?: string | null;
+  documentation_synced_at?: string | null;
+  updated?: boolean;
+  skipped?: boolean;
+}
+
+export interface DocumentationSyncCheckResponse {
+  datasets: DocumentationSyncDatasetStatus[];
+  total: number;
+  outdated: number;
+}
+
+export interface DocumentationSyncRunResponse {
+  datasets: DocumentationSyncDatasetStatus[];
+  total: number;
+  updated: number;
+}
+
 export interface AdminManifestRecord {
   dataset_id: string;
   bucket_type: string;

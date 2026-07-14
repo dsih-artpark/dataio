@@ -16,12 +16,23 @@ const navItems: NavItem[] = [
   { name: 'Users', href: '/admin/users', icon: 'users', adminOnly: true },
   { name: 'Groups', href: '/admin/groups', icon: 'users-cog', adminOnly: true },
   {
-    name: 'Manifest',
+    name: 'Datasets',
     icon: 'database',
     adminOnly: true,
     children: [
-      { name: 'Update', href: '/admin/manifests' },
-      { name: 'Validate', href: '/admin/manifest-validation' },
+      { name: 'Overview', href: '/admin/datasets' },
+      { name: 'Create / Import', href: '/admin/datasets/new' },
+      { name: 'Catalog', href: '/admin/datasets/catalog' },
+      { name: 'Reserved IDs', href: '/admin/datasets/reservations' },
+      { name: 'Documentation Sync', href: '/admin/datasets/sync' },
+    ],
+  },
+  {
+    name: 'Validation',
+    icon: 'database',
+    adminOnly: true,
+    children: [
+      { name: 'Manifest', href: '/admin/manifest-validation' },
     ],
   },
 ];

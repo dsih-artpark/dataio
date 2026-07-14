@@ -36,11 +36,32 @@ class FilestoreService(BaseService):
     def _get_prefix_for_dataset(self, dataset_id: str, version_type: VersionType):
         return f"filestore/{version_type.value}/{dataset_id}"
 
+    def _object_exists(self, key: str) -> bool:
+        try:
+            self.bucket.Object(key).load()
+            return True
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") in {"404", "NoSuchKey"}:
+                return False
+            raise
+
     def _manifest_yaml_key(self, dataset_id: str, version_type: VersionType) -> str:
         return f"{self._get_prefix_for_dataset(dataset_id, version_type)}/manifest.yaml"
 
     def _manifest_json_key(self, dataset_id: str, version_type: VersionType) -> str:
         return f"{self._get_prefix_for_dataset(dataset_id, version_type)}/manifest.json"
+
+    def _documentation_keys(self, dataset_id: str, filename: str) -> list[str]:
+        keys = [
+            f"{self._get_prefix_for_dataset(dataset_id, version_type)}/{filename}"
+            for version_type in (VersionType.STANDARDISED, VersionType.PREPROCESSED)
+            if self._object_exists(f"{self._get_prefix_for_dataset(dataset_id, version_type)}/{filename}")
+        ]
+        if keys:
+            return keys
+        return [
+            f"{self._get_prefix_for_dataset(dataset_id, VersionType.STANDARDISED)}/{filename}"
+        ]
 
     def _list_dataset_objects(self, dataset_id: str, version_type: VersionType) -> list[str]:
         prefix = self._get_prefix_for_dataset(dataset_id, version_type)
@@ -49,6 +70,19 @@ class FilestoreService(BaseService):
             for obj in self.bucket.objects.filter(Prefix=prefix)
             if not obj.key.endswith("/")
         ]
+
+    def _move_dataset_objects(
+        self,
+        old_dataset_id: str,
+        new_dataset_id: str,
+        version_type: VersionType,
+    ) -> None:
+        old_prefix = self._get_prefix_for_dataset(old_dataset_id, version_type)
+        new_prefix = self._get_prefix_for_dataset(new_dataset_id, version_type)
+        for key in self._list_dataset_objects(old_dataset_id, version_type):
+            new_key = key.replace(old_prefix, new_prefix, 1)
+            self.bucket.copy({"Bucket": self.bucket.name, "Key": key}, new_key)
+            self.bucket.delete_objects(Delete={"Objects": [{"Key": key}]})
 
     def _get_metadata_object(self, dataset_id: str, version_type: VersionType):
         prefix = self._get_prefix_for_dataset(dataset_id, version_type)
@@ -159,6 +193,39 @@ class FilestoreService(BaseService):
             "manifest_json": manifest_json,
             "has_manifest": manifest_yaml is not None or manifest_json is not None,
         }
+
+    def upsert_dataset_readme(self, dataset_id: str, readme_md: str | None) -> None:
+        keys = self._documentation_keys(dataset_id, "README.md")
+        if readme_md is None:
+            delete_objects = [{"Key": key} for key in keys]
+            if delete_objects:
+                self.bucket.delete_objects(Delete={"Objects": delete_objects})
+            return
+
+        for key in keys:
+            self.bucket.put_object(
+                Body=readme_md.encode("utf-8"),
+                Key=key,
+                ContentType="text/markdown; charset=utf-8",
+            )
+
+    def upsert_dataset_metadata_json(
+        self, dataset_id: str, metadata_json: dict | list | None
+    ) -> None:
+        keys = self._documentation_keys(dataset_id, "metadata.json")
+        if metadata_json is None:
+            delete_objects = [{"Key": key} for key in keys]
+            if delete_objects:
+                self.bucket.delete_objects(Delete={"Objects": delete_objects})
+            return
+
+        payload = json.dumps(metadata_json, indent=2, sort_keys=True).encode("utf-8")
+        for key in keys:
+            self.bucket.put_object(
+                Body=payload,
+                Key=key,
+                ContentType="application/json",
+            )
 
     def get_tabular_validation_sources(
         self,
@@ -275,6 +342,18 @@ class FilestoreService(BaseService):
         except Exception as e:
             self.logger.error(f"Failed to delete file: {e!s}")
             raise e
+
+    def rename_dataset(self, old_dataset_id: str, new_dataset_id: str) -> None:
+        for version_type in (VersionType.STANDARDISED, VersionType.PREPROCESSED):
+            self._move_dataset_objects(old_dataset_id, new_dataset_id, version_type)
+
+    def delete_dataset(self, dataset_id: str) -> None:
+        keys_to_delete = []
+        for version_type in (VersionType.STANDARDISED, VersionType.PREPROCESSED):
+            for key in self._list_dataset_objects(dataset_id, version_type):
+                keys_to_delete.append({"Key": key})
+        if keys_to_delete:
+            self.bucket.delete_objects(Delete={"Objects": keys_to_delete})
 
     def _get_download_link(
         self, dataset_id: str, version_type: VersionType, file_name: str

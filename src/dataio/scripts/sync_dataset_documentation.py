@@ -17,22 +17,20 @@ Usage:
 """
 
 import argparse
-import json
 import logging
 import os
 import sys
-from datetime import datetime
-from typing import Optional
 
 import boto3
-from botocore.client import Config
-from botocore.exceptions import ClientError
 import dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-import yaml
 
 from dataio.api.services.base_service import get_aws_access_key_id
+from dataio.api.services.dataset_documentation_sync_service import (
+    get_dataset_documentation_status,
+    sync_dataset_documentation,
+)
 
 dotenv.load_dotenv()
 
@@ -63,107 +61,6 @@ def get_s3_client():
     s3 = session.resource("s3")
     bucket = s3.Bucket(os.getenv("AWS_BUCKET_NAME"))
     return bucket
-
-
-def fetch_file_from_s3(bucket, dataset_id: str, filename: str) -> Optional[str]:
-    """
-    Fetch a file from S3 for a dataset.
-
-    Looks in both STANDARDISED and PREPROCESSED versions.
-    Returns the file content as string, or None if not found.
-    """
-    for version_type in ["STANDARDISED", "PREPROCESSED"]:
-        key = f"filestore/{version_type}/{dataset_id}/{filename}"
-        try:
-            obj = bucket.Object(key)
-            content = obj.get()["Body"].read().decode("utf-8")
-            logger.debug(f"Found {filename} at {key}")
-            return content
-        except ClientError as e:
-            if e.response["Error"]["Code"] == "NoSuchKey":
-                continue
-            logger.warning(f"Error fetching {key}: {e}")
-        except Exception as e:
-            logger.warning(f"Unexpected error fetching {key}: {e}")
-
-    return None
-
-
-def sync_dataset_documentation(
-    db_session,
-    bucket,
-    dataset_id: str,
-    dry_run: bool = False
-) -> dict:
-    """
-    Sync documentation for a single dataset.
-
-    Returns dict with sync results.
-    """
-    result = {
-        "ds_id": dataset_id,
-        "readme_found": False,
-        "data_dictionary_found": False,
-        "updated": False,
-        "error": None,
-    }
-
-    try:
-        # Fetch README.md
-        readme_content = fetch_file_from_s3(bucket, dataset_id, "README.md")
-        if readme_content:
-            result["readme_found"] = True
-            logger.info(f"  Found README.md ({len(readme_content)} chars)")
-
-        # Fetch manifest.yaml first, then fall back to legacy metadata.json
-        manifest_yaml = fetch_file_from_s3(bucket, dataset_id, "manifest.yaml")
-        manifest_json_content = fetch_file_from_s3(bucket, dataset_id, "manifest.json")
-        data_dict_content = None
-        if manifest_yaml:
-            result["data_dictionary_found"] = True
-            logger.info(f"  Found manifest.yaml ({len(manifest_yaml)} chars)")
-            if not manifest_json_content:
-                try:
-                    manifest_json_content = json.dumps(yaml.safe_load(manifest_yaml))
-                except Exception as e:
-                    logger.warning(f"  Failed to normalize manifest.yaml for {dataset_id}: {e}")
-        else:
-            data_dict_content = fetch_file_from_s3(bucket, dataset_id, "metadata.json")
-            if data_dict_content:
-                result["data_dictionary_found"] = True
-                logger.info(f"  Found legacy metadata.json ({len(data_dict_content)} chars)")
-
-        # Update database if any content found
-        if readme_content or data_dict_content or manifest_yaml or manifest_json_content:
-            if not dry_run:
-                update_query = text("""
-                    UPDATE datasets
-                    SET readme_md = :readme,
-                        data_dictionary_json = :data_dict,
-                        documentation_synced_at = :synced_at
-                    WHERE ds_id = :ds_id
-                """)
-                db_session.execute(update_query, {
-                    "readme": readme_content,
-                    "data_dict": data_dict_content,
-                    "synced_at": datetime.utcnow(),
-                    "ds_id": dataset_id,
-                })
-                db_session.commit()
-                result["updated"] = True
-                logger.info(f"  Updated database")
-            else:
-                logger.info(f"  [DRY RUN] Would update database")
-                result["updated"] = True
-        else:
-            logger.info(f"  No documentation files found")
-
-    except Exception as e:
-        result["error"] = str(e)
-        logger.error(f"  Error: {e}")
-        db_session.rollback()
-
-    return result
 
 
 def main():
@@ -228,11 +125,31 @@ def main():
 
     for (ds_id,) in datasets:
         logger.info(f"Processing {ds_id}...")
-        result = sync_dataset_documentation(db_session, bucket, ds_id, args.dry_run)
+        try:
+            status = get_dataset_documentation_status(db_session, bucket, ds_id)
+            result = sync_dataset_documentation(
+                db_session,
+                bucket,
+                ds_id,
+                dry_run=args.dry_run,
+            )
+        except Exception as e:
+            db_session.rollback()
+            result = {
+                "ds_id": ds_id,
+                "updated": False,
+                "error": str(e),
+                "has_remote_documentation": False,
+            }
+            status = {"changed_fields": []}
+            logger.error(f"  Error: {e}")
 
-        if result["readme_found"]:
+        if "readme_md" in status["changed_fields"] or result.get("has_remote_documentation"):
             results["readme_found"] += 1
-        if result["data_dictionary_found"]:
+        if any(
+            field in status["changed_fields"]
+            for field in ("data_dictionary_json", "manifest_yaml", "manifest_json")
+        ) or result.get("has_remote_documentation"):
             results["data_dict_found"] += 1
         if result["updated"]:
             results["updated"] += 1

@@ -1,0 +1,25 @@
+---
+import AdminDatasetsSubnav from '../../../components/admin/AdminDatasetsSubnav.astro';
+import DatasetAdminManager from '../../../components/admin/DatasetAdminManager';
+import DashboardLayout from '../../../layouts/DashboardLayout.astro';
+---
+
+<DashboardLayout title="Dataset Documentation Sync" fullWidth={true}>
+  <div class="space-y-6">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">Dataset Documentation Sync</h1>
+      <p class="mt-1 text-gray-600">
+        Inspect documentation freshness for a selected dataset and manually sync cached README, dictionary, and manifest metadata when needed.
+      </p>
+    </div>
+
+    <AdminDatasetsSubnav />
+    <DatasetAdminManager view="sync" client:load />
+  </div>
+</DashboardLayout>
+
+<script>
+  import { requireAuthenticatedPage } from '../../../lib/auth';
+
+  requireAuthenticatedPage({ adminOnly: true });
+</script>

@@ -1,0 +1,25 @@
+---
+import AdminDatasetsSubnav from '../../../components/admin/AdminDatasetsSubnav.astro';
+import DatasetAdminManager from '../../../components/admin/DatasetAdminManager';
+import DashboardLayout from '../../../layouts/DashboardLayout.astro';
+---
+
+<DashboardLayout title="Create Dataset" fullWidth={true}>
+  <div class="space-y-6">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">Create Or Import Dataset</h1>
+      <p class="mt-1 text-gray-600">
+        Use package import for `info.yml` and `metadata.yml`, or create datasets and raw datasets manually when you need direct control.
+      </p>
+    </div>
+
+    <AdminDatasetsSubnav />
+    <DatasetAdminManager view="new" client:load />
+  </div>
+</DashboardLayout>
+
+<script>
+  import { requireAuthenticatedPage } from '../../../lib/auth';
+
+  requireAuthenticatedPage({ adminOnly: true });
+</script>

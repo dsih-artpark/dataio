@@ -9,6 +9,7 @@ interface Props {
 }
 
 const { title, fullWidth = false } = Astro.props;
+const showAdminMobileNotice = Astro.url.pathname.startsWith('/admin');
 ---
 
 <BaseLayout title={title}>
@@ -20,6 +21,11 @@ const { title, fullWidth = false } = Astro.props;
 
       <main class="flex-1 p-6 lg:ml-64">
         <div class:list={['mx-auto', fullWidth ? 'max-w-none' : 'max-w-7xl']}>
+          {showAdminMobileNotice ? (
+            <div class="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 md:hidden">
+              This admin interface is optimized for desktop web. Mobile works for quick checks, but larger edits are easier on a laptop or desktop.
+            </div>
+          ) : null}
           <slot />
         </div>
       </main>

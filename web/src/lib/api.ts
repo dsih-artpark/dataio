@@ -3,12 +3,20 @@
  */
 
 import type {
+  AdminDatasetDetail,
+  AdminDatasetPackagePreview,
   AdminDatasetSummary,
+  AdminDatasetTablesResponse,
   AdminManifestRecord,
+  AdminRawDatasetsResponse,
+  ReservedDatasetId,
   DatasetDetail,
   DatasetManifestRecord,
   DataOwnersResponse,
+  DatasetIdSuggestion,
   DatasetsResponse,
+  DocumentationSyncCheckResponse,
+  DocumentationSyncRunResponse,
   CollectionsResponse,
   DatasetDownloadUrls,
   ValidationResult,
@@ -22,11 +30,13 @@ interface ApiError {
 
 export class ApiRequestError extends Error {
   detailData?: unknown;
+  statusCode?: number;
 
-  constructor(message: string, detailData?: unknown) {
+  constructor(message: string, detailData?: unknown, statusCode?: number) {
     super(message);
     this.name = 'ApiRequestError';
     this.detailData = detailData;
+    this.statusCode = statusCode;
   }
 }
 
@@ -49,6 +59,21 @@ interface AuthSession {
 class ApiClient {
   private accessToken: string | null = null;
   private refreshPromise: Promise<boolean> | null = null;
+
+  private redirectToLogin(): void {
+    if (typeof window === 'undefined') return;
+    const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (window.location.pathname === '/login') {
+      return;
+    }
+    try {
+      sessionStorage.setItem('post_login_redirect', currentPath);
+    } catch {
+      // Ignore storage failures and fall back to plain login redirect.
+    }
+    const params = new URLSearchParams({ next: currentPath });
+    window.location.replace(`/login?${params.toString()}`);
+  }
 
   constructor() {
     // Load tokens from sessionStorage on init
@@ -123,15 +148,13 @@ class ApiClient {
             typeof error.detail === 'string'
               ? error.detail
               : error.detail?.message || 'Request failed';
-          throw new ApiRequestError(message, error.detail);
+          throw new ApiRequestError(message, error.detail, retryResponse.status);
         }
         return retryResponse.json();
       } else {
         // Refresh failed, clear tokens and redirect to login
         this.clearTokens();
-        if (typeof window !== 'undefined') {
-          window.location.replace('/login');
-        }
+        this.redirectToLogin();
         throw new Error('Session expired');
       }
     }
@@ -142,7 +165,7 @@ class ApiClient {
         typeof error.detail === 'string'
           ? error.detail
           : error.detail?.message || 'Request failed';
-      throw new ApiRequestError(message, error.detail);
+      throw new ApiRequestError(message, error.detail, response.status);
     }
 
     return response.json();
@@ -341,8 +364,23 @@ class ApiClient {
     return data;
   }
 
-  startOAuth(provider: 'google' | 'github') {
-    window.location.href = `${API_URL}/web/auth/oauth/${provider}/start`;
+  startOAuth(provider: 'google' | 'github', nextPath?: string) {
+    const currentPath =
+      nextPath ||
+      (typeof window !== 'undefined'
+        ? `${window.location.pathname}${window.location.search}${window.location.hash}`
+        : '/datasets');
+
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem('post_login_redirect', currentPath);
+      } catch {
+        // Ignore storage failures.
+      }
+    }
+
+    const params = new URLSearchParams({ next: currentPath });
+    window.location.href = `${API_URL}/web/auth/oauth/${provider}/start?${params.toString()}`;
   }
 
   async listPasskeys() {
@@ -735,6 +773,219 @@ class ApiClient {
     }>(`/admin/datasets${query ? `?${query}` : ''}`);
   }
 
+  async adminSuggestDatasetId(collectionId: string) {
+    return this.request<DatasetIdSuggestion>(
+      `/admin/datasets/suggest-id?collection_id=${encodeURIComponent(collectionId)}`
+    );
+  }
+
+  async adminListReservedDatasetIds(params?: { search?: string; limit?: number; offset?: number }) {
+    const searchParams = new URLSearchParams();
+    if (params?.search) searchParams.set('search', params.search);
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    if (params?.offset) searchParams.set('offset', String(params.offset));
+    const query = searchParams.toString();
+    return this.request<{
+      reservations: ReservedDatasetId[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(`/admin/dataset-id-reservations${query ? `?${query}` : ''}`);
+  }
+
+  async adminReserveDatasetId(payload: { ds_id: string; collection_id?: string | null; note?: string | null }) {
+    return this.request<ReservedDatasetId>('/admin/dataset-id-reservations', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async adminDeleteReservedDatasetId(datasetId: string) {
+    return this.request<{ deleted: boolean; ds_id: string }>(
+      `/admin/dataset-id-reservations/${encodeURIComponent(datasetId)}`,
+      { method: 'DELETE' }
+    );
+  }
+
+  async adminGetDatasetDetail(datasetId: string) {
+    return this.request<AdminDatasetDetail>(`/admin/datasets/${encodeURIComponent(datasetId)}`);
+  }
+
+  async adminCreateDataset(payload: {
+    ds_id: string;
+    title: string;
+    collection_id: string;
+    data_owner_name: string;
+    description?: string | null;
+    spatial_coverage_region_id?: string | null;
+    spatial_resolution?: string | null;
+    temporal_coverage_start_date?: string | null;
+    temporal_coverage_end_date?: string | null;
+    temporal_resolution?: string | null;
+    access_level?: string;
+    additional_metadata?: Record<string, unknown> | null;
+    tags?: string[];
+    raw_dataset_ids: string[];
+  }) {
+    return this.request('/admin/datasets', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async adminUpdateDataset(
+    datasetId: string,
+    payload: {
+      ds_id?: string | null;
+      title?: string | null;
+      collection_id?: string | null;
+      data_owner_name?: string | null;
+      description?: string | null;
+      spatial_coverage_region_id?: string | null;
+      spatial_resolution?: string | null;
+      temporal_coverage_start_date?: string | null;
+      temporal_coverage_end_date?: string | null;
+      temporal_resolution?: string | null;
+      access_level?: string | null;
+      additional_metadata?: Record<string, unknown> | null;
+      tags?: string[] | null;
+      raw_dataset_ids?: string[] | null;
+    }
+  ) {
+    return this.request(`/admin/datasets/${encodeURIComponent(datasetId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async adminUpdateDatasetDocumentation(
+    datasetId: string,
+    payload: {
+      readme_md?: string | null;
+      data_dictionary_json?: unknown;
+    }
+  ) {
+    return this.request<AdminDatasetDetail>(
+      `/admin/datasets/${encodeURIComponent(datasetId)}/documentation`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }
+    );
+  }
+
+  async adminPreviewDatasetImport(params: {
+    infoFile: File;
+    metadataFile: File;
+    csvFiles?: File[];
+    datasetOverride?: Record<string, unknown>;
+    rawDatasetOverride?: Record<string, unknown>;
+  }) {
+    const formData = new FormData();
+    formData.append('info_file', params.infoFile);
+    formData.append('metadata_file', params.metadataFile);
+    for (const file of params.csvFiles ?? []) {
+      formData.append('csv_files', file);
+    }
+    if (params.datasetOverride) {
+      formData.append('dataset_override_json', JSON.stringify(params.datasetOverride));
+    }
+    if (params.rawDatasetOverride) {
+      formData.append('raw_dataset_override_json', JSON.stringify(params.rawDatasetOverride));
+    }
+    return this.request<AdminDatasetPackagePreview>('/admin/datasets/import/preview', {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  async adminApplyDatasetImport(params: {
+    infoFile: File;
+    metadataFile: File;
+    csvFiles: File[];
+    datasetOverride?: Record<string, unknown>;
+    rawDatasetOverride?: Record<string, unknown>;
+    bucketType?: string;
+  }) {
+    const formData = new FormData();
+    formData.append('info_file', params.infoFile);
+    formData.append('metadata_file', params.metadataFile);
+    for (const file of params.csvFiles) {
+      formData.append('csv_files', file);
+    }
+    if (params.datasetOverride) {
+      formData.append('dataset_override_json', JSON.stringify(params.datasetOverride));
+    }
+    if (params.rawDatasetOverride) {
+      formData.append('raw_dataset_override_json', JSON.stringify(params.rawDatasetOverride));
+    }
+    formData.append('bucket_type', params.bucketType ?? 'STANDARDISED');
+    return this.request<{
+      dataset_id: string;
+      bucket_type: string;
+      uploaded_tables: string[];
+      manifest_uploaded: boolean;
+    }>('/admin/datasets/import/apply', {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  async adminListRawDatasets(params?: { search?: string; limit?: number; offset?: number }) {
+    const searchParams = new URLSearchParams();
+    if (params?.search) searchParams.set('search', params.search);
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    if (params?.offset) searchParams.set('offset', String(params.offset));
+
+    const query = searchParams.toString();
+    return this.request<AdminRawDatasetsResponse>(`/admin/raw-datasets${query ? `?${query}` : ''}`);
+  }
+
+  async adminCreateRawDataset(payload: { rds_id: string; title: string; source: string }) {
+    return this.request('/admin/raw-datasets', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async adminUpdateRawDataset(
+    rawDatasetId: string,
+    payload: { title?: string; source?: string }
+  ) {
+    return this.request(`/admin/raw-datasets/${encodeURIComponent(rawDatasetId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async adminListDatasetTables(datasetId: string, bucketType: string) {
+    return this.request<AdminDatasetTablesResponse>(
+      `/admin/datasets/${encodeURIComponent(datasetId)}/${encodeURIComponent(bucketType)}/tables`
+    );
+  }
+
+  async adminUploadDatasetTable(
+    datasetId: string,
+    bucketType: string,
+    file: File,
+    tableMetadata: string
+  ) {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append(
+      'table_metadata_file',
+      new File([tableMetadata], 'table-metadata.json', { type: 'application/json' })
+    );
+
+    return this.request<{ message: string }>(
+      `/admin/datasets/${encodeURIComponent(datasetId)}/${encodeURIComponent(bucketType)}/tables`,
+      {
+        method: 'POST',
+        body: formData,
+      }
+    );
+  }
+
   async adminGetManifest(datasetId: string, bucketType: string) {
     return this.request<AdminManifestRecord>(
       `/admin/datasets/${encodeURIComponent(datasetId)}/${encodeURIComponent(bucketType)}/manifest`
@@ -805,6 +1056,46 @@ class ApiClient {
       method: 'POST',
       body: formData,
     });
+  }
+
+  async adminCheckDocumentationSync(datasetId?: string) {
+    const query = datasetId ? `?dataset_id=${encodeURIComponent(datasetId)}` : '';
+    return this.request<DocumentationSyncCheckResponse>(`/admin/documentation-sync${query}`);
+  }
+
+  async adminRunDocumentationSync(payload?: {
+    dataset_id?: string;
+    only_outdated?: boolean;
+    force?: boolean;
+  }) {
+    return this.request<DocumentationSyncRunResponse>('/admin/documentation-sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        dataset_id: payload?.dataset_id,
+        only_outdated: payload?.only_outdated ?? true,
+        force: payload?.force ?? false,
+      }),
+    });
+  }
+
+  async adminInitiateDatasetDeletion(datasetId: string) {
+    return this.request<{ sent: boolean; message: string }>(
+      `/admin/datasets/${encodeURIComponent(datasetId)}/delete/initiate`,
+      { method: 'POST' }
+    );
+  }
+
+  async adminVerifyDatasetDeletion(
+    datasetId: string,
+    payload: { code: string; confirmation_dataset_id: string }
+  ) {
+    return this.request<{ deleted: boolean; dataset_id: string }>(
+      `/admin/datasets/${encodeURIComponent(datasetId)}/delete/verify`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    );
   }
 }
 

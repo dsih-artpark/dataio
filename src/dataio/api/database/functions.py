@@ -24,12 +24,14 @@ from dataio.api.database.models import (
     DatasetTag,
     RawDataset,
     DatasetRawDataset,
+    ReservedDatasetID,
     Region,
     RateLimit,
 )
 from dataio.api.auth.permissions import determine_highest_permission
 from dataio.api.models import (
     DatasetCreate,
+    DatasetUpdate,
     UserCreate,
     UserReturn,
     DataOwnerCreate,
@@ -37,6 +39,7 @@ from dataio.api.models import (
     DataOwnerUpdate,
     CollectionUpdate,
     RawDatasetCreate,
+    RawDatasetUpdate,
     UserGroupCreate,
     ResourceGroupCreate,
     UserPermissionCreate,
@@ -98,6 +101,77 @@ def get_collection_by_identifier(collection_id: str):
         )
     except Exception as e:
         logger.error(f"Error getting collection by identifier: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def get_raw_dataset_by_identifier(raw_dataset_id: str):
+    session = Session()
+    try:
+        return (
+            session.query(RawDataset)
+            .filter(RawDataset.rds_id == raw_dataset_id)
+            .first()
+        )
+    except Exception as e:
+        logger.error(f"Error getting raw dataset by identifier: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def list_reserved_dataset_ids(search: str | None = None, limit: int = 100, offset: int = 0):
+    session = Session()
+    try:
+        query = session.query(ReservedDatasetID)
+        if search:
+            query = query.filter(ReservedDatasetID.ds_id.ilike(f"%{search}%"))
+        total = query.count()
+        rows = query.order_by(ReservedDatasetID.created_at.desc()).offset(offset).limit(limit).all()
+        return rows, total
+    except Exception as e:
+        logger.error(f"Error listing reserved dataset IDs: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def create_reserved_dataset_id(ds_id: str, collection_id: str | None, note: str | None, reserved_by: str):
+    session = Session()
+    try:
+        if check_if_dataset_exists(ds_id):
+            raise ValueError(f"Dataset with ID {ds_id} already exists")
+        existing = session.query(ReservedDatasetID).filter(ReservedDatasetID.ds_id == ds_id).first()
+        if existing:
+            raise ValueError(f"Dataset ID {ds_id} is already reserved")
+        reservation = ReservedDatasetID(
+            ds_id=ds_id,
+            collection_id=collection_id,
+            note=note,
+            reserved_by=reserved_by,
+        )
+        session.add(reservation)
+        session.commit()
+        session.refresh(reservation)
+        return reservation
+    except Exception as e:
+        logger.error(f"Error creating reserved dataset ID: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def delete_reserved_dataset_id(ds_id: str):
+    session = Session()
+    try:
+        reservation = session.query(ReservedDatasetID).filter(ReservedDatasetID.ds_id == ds_id).first()
+        if not reservation:
+            raise ValueError(f"Reserved dataset ID {ds_id} not found")
+        session.delete(reservation)
+        session.commit()
+    except Exception as e:
+        logger.error(f"Error deleting reserved dataset ID: {str(e)}")
         raise
     finally:
         session.close()
@@ -206,6 +280,9 @@ def parse_date(date_string: str):
 def create_dataset(dataset_create: DatasetCreate):
     session = Session()
     try:
+        if check_if_dataset_exists(dataset_create.ds_id):
+            raise ValueError(f"Dataset with ID {dataset_create.ds_id} already exists")
+
         collection = (
             session.query(Collection)
             .filter(Collection.collection_id == dataset_create.collection_id)
@@ -271,6 +348,10 @@ def create_dataset(dataset_create: DatasetCreate):
             )
             session.add(dataset_raw_dataset)
 
+        reserved = session.query(ReservedDatasetID).filter(ReservedDatasetID.ds_id == dataset_create.ds_id).first()
+        if reserved:
+            session.delete(reserved)
+
         session.commit()
         session.refresh(dataset)
         return dataset
@@ -281,21 +362,227 @@ def create_dataset(dataset_create: DatasetCreate):
         session.close()
 
 
-# def update_dataset(dataset_id: str, new_dataset: DatasetCreate):
-#     session = Session()
-#     try:
-#         dataset = session.query(Dataset).filter(Dataset.ds_id == dataset_id).first()
-#         if not dataset:
-#             raise ValueError(f"Dataset with ID {dataset_id} not found")
-#         for key, value in new_dataset.model_dump().items():
+def update_dataset(dataset_id: str, dataset_update: DatasetUpdate):
+    session = Session()
+    try:
+        dataset = (
+            session.query(Dataset)
+            .options(
+                joinedload(Dataset.collection),
+                joinedload(Dataset.raw_datasets),
+                joinedload(Dataset.tags),
+            )
+            .filter(Dataset.ds_id == dataset_id)
+            .first()
+        )
+        if not dataset:
+            raise ValueError(f"Dataset with ID {dataset_id} not found")
+
+        next_dataset_id = dataset_update.ds_id or dataset.ds_id
+        if next_dataset_id != dataset.ds_id and check_if_dataset_exists(next_dataset_id):
+            raise ValueError(f"Dataset with ID {next_dataset_id} already exists")
+
+        if dataset_update.collection_id is not None:
+            collection = (
+                session.query(Collection)
+                .filter(Collection.collection_id == dataset_update.collection_id)
+                .first()
+            )
+            if not collection:
+                raise ValueError(
+                    f"Collection with ID {dataset_update.collection_id} not found"
+                )
+            dataset.collection_id = collection.id
+
+        if dataset_update.ds_id is not None:
+            previous_dataset_id = dataset.ds_id
+            dataset.ds_id = dataset_update.ds_id
+            session.query(UserPermission).filter(
+                UserPermission.resource_type == ResourceType.DATASET,
+                UserPermission.resource_id == previous_dataset_id,
+            ).update({"resource_id": dataset_update.ds_id}, synchronize_session=False)
+            session.query(ResourceGroupMember).filter(
+                ResourceGroupMember.resource_type == ResourceType.DATASET,
+                ResourceGroupMember.resource_id == previous_dataset_id,
+            ).update({"resource_id": dataset_update.ds_id}, synchronize_session=False)
+            reserved = session.query(ReservedDatasetID).filter(ReservedDatasetID.ds_id == dataset_update.ds_id).first()
+            if reserved:
+                session.delete(reserved)
+
+        if dataset_update.data_owner_name is not None:
+            data_owner = (
+                session.query(DataOwner)
+                .filter(DataOwner.name == dataset_update.data_owner_name)
+                .first()
+            )
+            if not data_owner:
+                raise ValueError(
+                    f"Data owner with name {dataset_update.data_owner_name} not found"
+                )
+            dataset.data_owner_id = data_owner.id
+
+        if "title" in dataset_update.model_fields_set:
+            dataset.title = dataset_update.title
+        if "description" in dataset_update.model_fields_set:
+            dataset.description = dataset_update.description
+        if "spatial_coverage_region_id" in dataset_update.model_fields_set:
+            dataset.spatial_coverage_region_id = dataset_update.spatial_coverage_region_id
+        if "spatial_resolution" in dataset_update.model_fields_set:
+            dataset.spatial_resolution = dataset_update.spatial_resolution
+        if "temporal_resolution" in dataset_update.model_fields_set:
+            dataset.temporal_resolution = dataset_update.temporal_resolution
+        if "access_level" in dataset_update.model_fields_set:
+            dataset.access_level = dataset_update.access_level
+        if "additional_metadata" in dataset_update.model_fields_set:
+            dataset.additional_metadata = dataset_update.additional_metadata
+        if "temporal_coverage_start_date" in dataset_update.model_fields_set:
+            dataset.temporal_coverage_start_date = parse_date(
+                dataset_update.temporal_coverage_start_date
+            )
+        if "temporal_coverage_end_date" in dataset_update.model_fields_set:
+            dataset.temporal_coverage_end_date = parse_date(
+                dataset_update.temporal_coverage_end_date
+            )
+
+        if dataset_update.tags is not None:
+            dataset.tags.clear()
+            for tag_name in dataset_update.tags:
+                existing_tag = session.query(Tag).filter(Tag.tag_name == tag_name).first()
+                if not existing_tag:
+                    existing_tag = Tag(tag_name=tag_name)
+                    session.add(existing_tag)
+                    session.flush()
+                dataset.tags.append(existing_tag)
+
+        if dataset_update.raw_dataset_ids is not None:
+            dataset.raw_datasets.clear()
+            for raw_dataset_id in dataset_update.raw_dataset_ids:
+                raw_dataset = (
+                    session.query(RawDataset)
+                    .filter(RawDataset.rds_id == raw_dataset_id)
+                    .first()
+                )
+                if not raw_dataset:
+                    raise ValueError(f"Raw dataset with ID {raw_dataset_id} not found")
+                dataset.raw_datasets.append(raw_dataset)
+
+        session.commit()
+        session.refresh(dataset)
+        return dataset
+    except Exception as e:
+        logger.error(f"Error updating dataset: {str(e)}")
+        raise
+    finally:
+        session.close()
 
 
-#         session.commit()
-#         session.refresh(dataset)
-#         return dataset
-#     except Exception as e:
-#         logger.error(f"Error updating dataset: {str(e)}")
-#         raise
+def delete_dataset(dataset_id: str):
+    session = Session()
+    try:
+        dataset = (
+            session.query(Dataset)
+            .options(joinedload(Dataset.raw_datasets), joinedload(Dataset.tags))
+            .filter(Dataset.ds_id == dataset_id)
+            .first()
+        )
+        if not dataset:
+            raise ValueError(f"Dataset with ID {dataset_id} not found")
+
+        session.query(UserPermission).filter(
+            UserPermission.resource_type == ResourceType.DATASET,
+            UserPermission.resource_id == dataset_id,
+        ).delete(synchronize_session=False)
+        session.query(ResourceGroupMember).filter(
+            ResourceGroupMember.resource_type == ResourceType.DATASET,
+            ResourceGroupMember.resource_id == dataset_id,
+        ).delete(synchronize_session=False)
+
+        dataset.raw_datasets.clear()
+        dataset.tags.clear()
+        session.flush()
+        session.delete(dataset)
+        session.commit()
+    except Exception as e:
+        logger.error(f"Error deleting dataset: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def suggest_next_dataset_id(collection_id: str) -> str:
+    session = Session()
+    try:
+        existing_ids = (
+            session.query(Dataset.ds_id)
+            .filter(Dataset.ds_id.like(f"{collection_id}DS%"))
+            .all()
+        )
+        reserved_ids = (
+            session.query(ReservedDatasetID.ds_id)
+            .filter(ReservedDatasetID.ds_id.like(f"{collection_id}DS%"))
+            .all()
+        )
+        max_suffix = 0
+        prefix = f"{collection_id}DS"
+        for (ds_id,) in [*existing_ids, *reserved_ids]:
+            if not ds_id.startswith(prefix):
+                continue
+            suffix = ds_id[len(prefix):]
+            if len(suffix) == 4 and suffix.isdigit():
+                max_suffix = max(max_suffix, int(suffix))
+        return f"{prefix}{max_suffix + 1:04d}"
+    except Exception as e:
+        logger.error(f"Error suggesting dataset id: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def list_raw_datasets(search: str | None = None, limit: int = 100, offset: int = 0):
+    session = Session()
+    try:
+        query = session.query(RawDataset)
+        if search:
+            search_pattern = f"%{search}%"
+            query = query.filter(
+                (RawDataset.rds_id.ilike(search_pattern))
+                | (RawDataset.title.ilike(search_pattern))
+                | (RawDataset.source.ilike(search_pattern))
+            )
+
+        total = query.count()
+        raw_datasets = query.order_by(RawDataset.rds_id).offset(offset).limit(limit).all()
+        return raw_datasets, total
+    except Exception as e:
+        logger.error(f"Error listing raw datasets: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def update_raw_dataset(raw_dataset_id: str, raw_dataset_update: RawDatasetUpdate):
+    session = Session()
+    try:
+        raw_dataset = (
+            session.query(RawDataset)
+            .filter(RawDataset.rds_id == raw_dataset_id)
+            .first()
+        )
+        if not raw_dataset:
+            raise ValueError(f"Raw dataset with ID {raw_dataset_id} not found")
+
+        for key, value in raw_dataset_update.model_dump().items():
+            if value is not None:
+                setattr(raw_dataset, key, value)
+
+        session.commit()
+        session.refresh(raw_dataset)
+        return raw_dataset
+    except Exception as e:
+        logger.error(f"Error updating raw dataset: {str(e)}")
+        raise
+    finally:
+        session.close()
 
 
 def get_resource_group_members(resource_group_id: str):

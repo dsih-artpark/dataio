@@ -149,6 +149,8 @@ export interface DatasetDownloadUrls {
   }[];
   readme_md: string | null;
   data_dictionary_json: string | null;
+  manifest_yaml: string | null;
+  manifest_json: Record<string, unknown> | null;
 }
 
 export interface AdminDatasetSummary {

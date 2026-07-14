@@ -66,7 +66,7 @@ class WebAdminService(BaseService):
         slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
         return slug or "dataset"
 
-    def _build_manifest_field(self, field_name: str, field_spec: dict) -> dict:
+    def _build_manifest_field(self, field_name: str, field_spec: dict, enum_scope: Optional[dict] = None) -> dict:
         field_type = field_spec.get("type")
         manifest_field = {
             "description": field_spec.get("description"),
@@ -78,7 +78,18 @@ class WebAdminService(BaseService):
             manifest_field["format"] = "%Y"
         elif field_type == "enum":
             manifest_field["type"] = "enum"
-            manifest_field["allowedValues"] = field_spec.get("enum") or field_spec.get("allowedValues") or []
+            allowed_values = field_spec.get("enum") or field_spec.get("allowedValues")
+            if not allowed_values and field_spec.get("enumRef") and enum_scope:
+                enum_ref = field_spec["enumRef"]
+                # Enum blocks may be authored as flat top-level keys, or nested
+                # under a top-level "enumDefinitions" container. Support both.
+                nested_definitions = enum_scope.get("enumDefinitions")
+                enum_def = enum_scope.get(enum_ref)
+                if not isinstance(enum_def, dict) and isinstance(nested_definitions, dict):
+                    enum_def = nested_definitions.get(enum_ref)
+                if isinstance(enum_def, dict):
+                    allowed_values = list((enum_def.get("values") or {}).keys())
+            manifest_field["allowedValues"] = allowed_values or []
         elif field_type in {"string", "boolean", "int", "float", "regionID", "regionName", "date", "dateTime"}:
             manifest_field["type"] = field_type
             if field_spec.get("format"):
@@ -201,7 +212,7 @@ class WebAdminService(BaseService):
                     "description": table_metadata["description"],
                     "path": f"{table_name}.csv",
                     "dataDictionary": {
-                        field_name: self._build_manifest_field(field_name, field_spec)
+                        field_name: self._build_manifest_field(field_name, field_spec, metadata)
                         for field_name, field_spec in data_dictionary.items()
                         if isinstance(field_spec, dict)
                     },
@@ -255,6 +266,19 @@ class WebAdminService(BaseService):
                 custom_findings.append({"severity": "error", "code": "missing_raw_dataset_id", "message": "Raw dataset ID is required.", "path": "info.raw_dataset.rds_id"})
 
             manifest_payload = {
+                # Carry through every top-level key authored in metadata.yaml
+                # (tags, spatial/temporal coverage, comments, references, custom
+                # enum-definition blocks, etc.) verbatim. "tables" is excluded
+                # since the processed/enumRef-resolved version is rebuilt below
+                # as "datasetTables". "enumDefinitions" is excluded because it's
+                # a reserved manifest field expecting a dict, and authors use
+                # distinctly-named top-level blocks (e.g. productiveAssetIndicator)
+                # for actual enum definitions rather than that key.
+                **{
+                    key: value
+                    for key, value in metadata.items()
+                    if key not in {"tables", "enumDefinitions"}
+                },
                 "metadataSpecVersion": "v2",
                 "datasetTitle": dataset_payload["title"] or "Untitled dataset",
                 "datasetSlug": self._slugify(f"{dataset_payload['ds_id']} {dataset_payload['title']}"),

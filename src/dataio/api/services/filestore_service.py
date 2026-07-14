@@ -27,9 +27,13 @@ class FilestoreService(BaseService):
             aws_access_key_id=get_aws_access_key_id(),
             aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
         )
-        self.s3 = self.session.resource("s3")
+        s3_region = os.getenv("AWS_S3_REGION", "ap-south-1")
+        self.s3 = self.session.resource("s3", region_name=s3_region)
         self.s3_client = self.session.client(
-            "s3", region_name="ap-south-1", config=Config(signature_version="s3v4")
+            "s3",
+            region_name=s3_region,
+            endpoint_url=f"https://s3.{s3_region}.amazonaws.com",
+            config=Config(signature_version="s3v4"),
         )
         self.bucket = self.s3.Bucket(os.getenv("AWS_BUCKET_NAME"))
 
@@ -289,7 +293,7 @@ class FilestoreService(BaseService):
 
             return_json_list = []
             for file in files_list:
-                if file == "metadata.json":
+                if file in {"metadata.json", "manifest.yaml", "manifest.json"}:
                     continue
 
                 file_stem = Path(file).stem

@@ -105,7 +105,7 @@ export default function DatasetDetailPanel({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, dataset, hasManifest, isAuthenticated, manifestLoading, manifestRecord]);
+  }, [activeTab, dataset, hasManifest, isAuthenticated]);
 
   // Parse README markdown
   const renderedReadme = useMemo(() => {
@@ -265,8 +265,25 @@ export default function DatasetDetailPanel({
         folder.file('README.md', downloadData.readme_md);
       }
 
-      // Add metadata file (json or yaml based on user preference)
-      if (downloadData.data_dictionary_json) {
+      // Add metadata file (json or yaml based on user preference).
+      // Prefer the full canonical manifest (dataset-level fields, enum
+      // definitions, and table-level dataDictionary) over data_dictionary_json,
+      // which only ever carried the narrow table-tracking metadata.json content.
+      if (downloadData.manifest_yaml || downloadData.manifest_json) {
+        if (metadataFormat === 'json') {
+          if (downloadData.manifest_json) {
+            folder.file('metadata.json', JSON.stringify(downloadData.manifest_json, null, 2));
+          } else if (downloadData.manifest_yaml) {
+            // No YAML parser available in this file to convert yaml -> json;
+            // degrade to the yaml file rather than the narrower data_dictionary_json.
+            folder.file('metadata.yaml', downloadData.manifest_yaml);
+          }
+        } else if (downloadData.manifest_yaml) {
+          folder.file('metadata.yaml', downloadData.manifest_yaml);
+        } else if (downloadData.manifest_json) {
+          folder.file('metadata.yaml', jsonToYaml(downloadData.manifest_json));
+        }
+      } else if (downloadData.data_dictionary_json) {
         if (metadataFormat === 'json') {
           // Pretty print the JSON
           try {

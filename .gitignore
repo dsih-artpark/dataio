@@ -147,6 +147,7 @@ dmypy.json
 *.yaml
 !.env.example
 data/*
+data_backup_20260716_120337/*
 **/data_inserts/**
 *.zip
 .data/

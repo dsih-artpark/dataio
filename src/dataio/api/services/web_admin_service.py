@@ -110,6 +110,20 @@ class WebAdminService(BaseService):
             manifest_field["min"] = field_spec["min"]
         if field_spec.get("max") is not None:
             manifest_field["max"] = field_spec["max"]
+        # Carry through any remaining authored keys verbatim (e.g. isJoinKey,
+        # joinKeyType, unit) so documentation-only annotations survive into
+        # the downloadable manifest instead of being silently dropped.
+        # ManifestField allows extra fields, so this is safe. Excludes keys
+        # already deliberately resolved above (e.g. "type" here is the raw
+        # authored value like "year", which must not clobber the resolved
+        # "date" set on manifest_field).
+        handled_keys = {
+            "type", "description", "comments", "nullable", "format",
+            "enum", "allowedValues", "enumRef", "range", "min", "max",
+        }
+        for key, value in field_spec.items():
+            if key not in handled_keys and key not in manifest_field:
+                manifest_field[key] = value
         return manifest_field
 
     def _parse_dataset_package(
@@ -217,6 +231,13 @@ class WebAdminService(BaseService):
                         if isinstance(field_spec, dict)
                     },
                 }
+                # Carry through any remaining authored table-level keys
+                # verbatim (e.g. source, joinKeys, comments) so they survive
+                # into the downloadable manifest instead of being silently
+                # dropped. ManifestTable allows extra fields, so this is safe.
+                for key, value in table_definition.items():
+                    if key not in {"info", "data_dictionary"} and key not in manifest_tables[table_name]:
+                        manifest_tables[table_name][key] = value
                 matched_file = csv_by_stem.get(table_name)
                 if matched_file is None:
                     custom_findings.append(
@@ -265,20 +286,34 @@ class WebAdminService(BaseService):
             if not raw_payload["rds_id"]:
                 custom_findings.append({"severity": "error", "code": "missing_raw_dataset_id", "message": "Raw dataset ID is required.", "path": "info.raw_dataset.rds_id"})
 
+            # "enumDefinitions" needs special handling: some authors set it to
+            # null and define enum vocab as flat top-level blocks instead (a
+            # bare null would collide with the manifest's formal dict-typed
+            # field), while others nest real enum vocab under this key
+            # directly. Drop it when it's not a populated dict, but pass it
+            # through verbatim when it is - otherwise the enum value
+            # descriptions authors wrote are silently dropped from every
+            # downloaded package for datasets using the nested convention.
+            raw_enum_definitions = metadata.get("enumDefinitions")
+            enum_definitions_passthrough = (
+                {"enumDefinitions": raw_enum_definitions}
+                if isinstance(raw_enum_definitions, dict) and raw_enum_definitions
+                else {}
+            )
+
             manifest_payload = {
                 # Carry through every top-level key authored in metadata.yaml
                 # (tags, spatial/temporal coverage, comments, references, custom
                 # enum-definition blocks, etc.) verbatim. "tables" is excluded
                 # since the processed/enumRef-resolved version is rebuilt below
-                # as "datasetTables". "enumDefinitions" is excluded because it's
-                # a reserved manifest field expecting a dict, and authors use
-                # distinctly-named top-level blocks (e.g. productiveAssetIndicator)
-                # for actual enum definitions rather than that key.
+                # as "datasetTables". "enumDefinitions" is excluded here and
+                # conditionally re-added above (see comment).
                 **{
                     key: value
                     for key, value in metadata.items()
                     if key not in {"tables", "enumDefinitions"}
                 },
+                **enum_definitions_passthrough,
                 "metadataSpecVersion": "v2",
                 "datasetTitle": dataset_payload["title"] or "Untitled dataset",
                 "datasetSlug": self._slugify(f"{dataset_payload['ds_id']} {dataset_payload['title']}"),

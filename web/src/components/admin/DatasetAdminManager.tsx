@@ -1,5 +1,5 @@
 import type { ComponentChildren } from 'preact';
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { marked } from 'marked';
 
 import { ApiRequestError, api } from '../../lib/api';
@@ -141,6 +141,8 @@ export default function DatasetAdminManager({
   const [idsLookupCollectionId, setIdsLookupCollectionId] = useState('');
   const [idsLookupResult, setIdsLookupResult] = useState<{ collectionId: string; nextDatasetId: string; nextRawDatasetId: string } | null>(null);
   const [idsLookupLoading, setIdsLookupLoading] = useState(false);
+  const idsLookupRequestRef = useRef('');
+  const rawDatasetIdSuggestRequestRef = useRef('');
   const [loading, setLoading] = useState(true);
   const [loadingDatasetDetail, setLoadingDatasetDetail] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
@@ -225,8 +227,14 @@ export default function DatasetAdminManager({
         }))
       );
 
-      const nextDatasetId = datasetResponse.datasets[0]?.ds_id ?? '';
-      setSelectedDatasetId((current) => current || nextDatasetId);
+      // The "ids" view is a standalone read-only lookup that never renders a
+      // selected dataset - skip auto-selecting one so the detail/manifest/
+      // table/doc-sync fetch cascade below (triggered off selectedDatasetId)
+      // doesn't run for a page that has nothing to do with it.
+      if (!isIdsView) {
+        const nextDatasetId = datasetResponse.datasets[0]?.ds_id ?? '';
+        setSelectedDatasetId((current) => current || nextDatasetId);
+      }
       const nextRawDataset = rawDatasetResponse.raw_datasets[0];
       if (nextRawDataset && !selectedRawDatasetId) {
         setSelectedRawDatasetId(nextRawDataset.rds_id);
@@ -491,12 +499,16 @@ export default function DatasetAdminManager({
 
   const handleSuggestRawDatasetId = async (collectionId: string) => {
     setRawDatasetCollectionId(collectionId);
+    rawDatasetIdSuggestRequestRef.current = collectionId;
     if (!collectionId) return;
     try {
       const response = await api.adminSuggestRawDatasetId(collectionId);
+      // Ignore this response if the collection selection has since changed.
+      if (rawDatasetIdSuggestRequestRef.current !== collectionId) return;
       setRawDatasetForm((current) => ({ ...current, rds_id: response.suggested_raw_dataset_id }));
       setStatusMessage(`Suggested raw dataset ID: ${response.suggested_raw_dataset_id}`);
     } catch (err) {
+      if (rawDatasetIdSuggestRequestRef.current !== collectionId) return;
       setErrorMessage(err instanceof Error ? err.message : 'Failed to suggest raw dataset ID');
     }
   };
@@ -504,6 +516,7 @@ export default function DatasetAdminManager({
   const handleLookupNextIds = async (collectionId: string) => {
     setIdsLookupCollectionId(collectionId);
     setIdsLookupResult(null);
+    idsLookupRequestRef.current = collectionId;
     if (!collectionId) return;
     setIdsLookupLoading(true);
     setErrorMessage('');
@@ -512,15 +525,21 @@ export default function DatasetAdminManager({
         api.adminSuggestDatasetId(collectionId),
         api.adminSuggestRawDatasetId(collectionId),
       ]);
+      // Ignore this response if a newer lookup has since been kicked off -
+      // otherwise a slower, stale request can overwrite a faster, newer one.
+      if (idsLookupRequestRef.current !== collectionId) return;
       setIdsLookupResult({
         collectionId,
         nextDatasetId: dsResponse.suggested_dataset_id,
         nextRawDatasetId: rdsResponse.suggested_raw_dataset_id,
       });
     } catch (err) {
+      if (idsLookupRequestRef.current !== collectionId) return;
       setErrorMessage(err instanceof Error ? err.message : 'Failed to look up next available IDs');
     } finally {
-      setIdsLookupLoading(false);
+      if (idsLookupRequestRef.current === collectionId) {
+        setIdsLookupLoading(false);
+      }
     }
   };
 

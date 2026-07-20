@@ -84,7 +84,11 @@ export default function DatasetDetailPanel({
   // Derive per-table metadata (name, description, fields) from the manifest's
   // datasetTables block, instead of showing the raw dataset-level manifest.
   const manifestTables = useMemo<Record<string, ManifestTableMetadata>>(() => {
-    const datasetTables = manifestRecord?.manifest_json?.datasetTables as
+    const rawManifestJson =
+      (manifestRecord && manifestRecord.dataset_id === dataset?.ds_id
+        ? manifestRecord.manifest_json
+        : dataset?.manifest_json) || dataset?.manifest_json;
+    const datasetTables = rawManifestJson?.datasetTables as
       | Record<
           string,
           {
@@ -111,7 +115,7 @@ export default function DatasetDetailPanel({
       };
     }
     return result;
-  }, [manifestRecord]);
+  }, [manifestRecord, dataset]);
 
   const manifestTableNames = useMemo(() => Object.keys(manifestTables), [manifestTables]);
 
@@ -134,7 +138,7 @@ export default function DatasetDetailPanel({
     if (!dataset || !isAuthenticated || !hasManifest || activeTab !== 'manifest') {
       return;
     }
-    if (manifestRecord || manifestLoading) {
+    if (manifestRecord && manifestRecord.dataset_id === dataset.ds_id) {
       return;
     }
 
@@ -162,7 +166,7 @@ export default function DatasetDetailPanel({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, dataset, hasManifest, isAuthenticated]);
+  }, [activeTab, dataset?.ds_id, hasManifest, isAuthenticated]);
 
   // Parse README markdown
   const renderedReadme = useMemo(() => {
@@ -421,7 +425,7 @@ export default function DatasetDetailPanel({
 
   // Download metadata only
   const downloadMetadataOnly = () => {
-    if (!dataset || !dataset.data_dictionary_json) return;
+    if (!dataset) return;
 
     let content: string;
     let filename: string;
@@ -429,24 +433,44 @@ export default function DatasetDetailPanel({
 
     const safeTitle = dataset.title.replace(/[^a-zA-Z0-9-_]/g, '_').substring(0, 50);
 
+    const manifestYaml = manifestRecord?.manifest_yaml || dataset.manifest_yaml;
+    const manifestJson = manifestRecord?.manifest_json || dataset.manifest_json;
+    const dataDictJson = dataset.data_dictionary_json;
+
     if (metadataFormat === 'json') {
-      try {
-        const parsed = JSON.parse(dataset.data_dictionary_json);
-        content = JSON.stringify(parsed, null, 2);
-      } catch {
-        content = dataset.data_dictionary_json;
+      if (manifestJson) {
+        content = JSON.stringify(manifestJson, null, 2);
+      } else if (dataDictJson) {
+        try {
+          const parsed = JSON.parse(dataDictJson);
+          content = JSON.stringify(parsed, null, 2);
+        } catch {
+          content = dataDictJson;
+        }
+      } else if (manifestYaml) {
+        content = manifestYaml;
+      } else {
+        return;
       }
       filename = `${dataset.ds_id}_${safeTitle}_metadata.json`;
       mimeType = 'application/json';
     } else {
-      try {
-        const parsed = JSON.parse(dataset.data_dictionary_json);
-        content = jsonToYaml(parsed);
-        filename = `${dataset.ds_id}_${safeTitle}_metadata.yaml`;
-        mimeType = 'text/yaml';
-      } catch {
+      if (manifestYaml) {
+        content = manifestYaml;
+      } else if (manifestJson) {
+        content = jsonToYaml(manifestJson);
+      } else if (dataDictJson) {
+        try {
+          const parsed = JSON.parse(dataDictJson);
+          content = jsonToYaml(parsed);
+        } catch {
+          content = dataDictJson;
+        }
+      } else {
         return;
       }
+      filename = `${dataset.ds_id}_${safeTitle}_metadata.yaml`;
+      mimeType = 'text/yaml';
     }
 
     const blob = new Blob([content], { type: mimeType });

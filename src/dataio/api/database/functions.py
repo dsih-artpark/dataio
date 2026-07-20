@@ -543,17 +543,23 @@ def suggest_next_raw_dataset_id(collection_id: str) -> str:
     try:
         existing_ids = (
             session.query(RawDataset.rds_id)
-            .filter(RawDataset.rds_id.like(f"{collection_id}RDS%"))
+            .filter(RawDataset.rds_id.like(f"{collection_id}%"))
             .all()
         )
         max_suffix = 0
         prefix = f"{collection_id}RDS"
+        import re
+
         for (rds_id,) in existing_ids:
-            if not rds_id.startswith(prefix):
-                continue
-            suffix = rds_id[len(prefix):]
-            if len(suffix) == 4 and suffix.isdigit():
-                max_suffix = max(max_suffix, int(suffix))
+            if rds_id.startswith(prefix):
+                suffix = rds_id[len(prefix) :]
+                if len(suffix) == 4 and suffix.isdigit():
+                    max_suffix = max(max_suffix, int(suffix))
+            elif "-raw-" in rds_id:
+                m = re.search(r"-raw-(\d+)$", rds_id)
+                if m:
+                    max_suffix = max(max_suffix, int(m.group(1)))
+
         return f"{prefix}{max_suffix + 1:04d}"
     except Exception as e:
         logger.error(f"Error suggesting raw dataset id: {str(e)}")

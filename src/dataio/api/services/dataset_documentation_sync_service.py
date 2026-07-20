@@ -50,7 +50,10 @@ def build_documentation_snapshot(bucket, dataset_id: str) -> dict[str, Any]:
         except Exception:
             parsed_manifest = None
     if parsed_manifest is not None:
-        manifest_json_content = json.dumps(parsed_manifest, sort_keys=True)
+        try:
+            manifest_json_content = json.dumps(parsed_manifest, sort_keys=True, default=str)
+        except Exception:
+            manifest_json_content = None
 
     return {
         "readme_md": readme_content,
@@ -79,7 +82,10 @@ def get_dataset_documentation_status(db_session, bucket, dataset_id: str) -> dic
 
     current_manifest_json = dataset_row["manifest_json"]
     if current_manifest_json is not None:
-        current_manifest_json = json.dumps(current_manifest_json, sort_keys=True)
+        try:
+            current_manifest_json = json.dumps(current_manifest_json, sort_keys=True, default=str)
+        except Exception:
+            current_manifest_json = None
 
     changed_fields = []
     comparisons = {

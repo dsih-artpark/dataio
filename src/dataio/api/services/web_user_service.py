@@ -545,13 +545,15 @@ class WebUserService(BaseService):
             # field order (which the UI and downloads should stay consistent
             # with). Re-derive it from the order-preserving YAML text instead.
             manifest_json = None
+            db_manifest_json = dataset.manifest_json if hasattr(dataset, 'manifest_json') else None
             if manifest_yaml:
                 try:
-                    manifest_json = yaml.safe_load(manifest_yaml)
-                except yaml.YAMLError:
-                    manifest_json = dataset.manifest_json if hasattr(dataset, 'manifest_json') else None
+                    parsed = yaml.safe_load(manifest_yaml)
+                    manifest_json = parsed if isinstance(parsed, dict) else db_manifest_json
+                except Exception:
+                    manifest_json = db_manifest_json
             else:
-                manifest_json = dataset.manifest_json if hasattr(dataset, 'manifest_json') else None
+                manifest_json = db_manifest_json
 
             return {
                 "ds_id": dataset.ds_id,

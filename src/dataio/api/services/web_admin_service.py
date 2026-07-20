@@ -117,8 +117,13 @@ class WebAdminService(BaseService):
         # already deliberately resolved above (e.g. "type" here is the raw
         # authored value like "year", which must not clobber the resolved
         # "date" set on manifest_field).
+        # "format" is intentionally NOT in this set: it's only explicitly set
+        # above for a subset of branches (year/date/scalar types), so leaving
+        # it out lets the passthrough below carry an authored format through
+        # for enum/regionID/regionName/string-fallback fields too, without
+        # ever clobbering a value a branch above already set.
         handled_keys = {
-            "type", "description", "comments", "nullable", "format",
+            "type", "description", "comments", "nullable",
             "enum", "allowedValues", "enumRef", "range", "min", "max",
         }
         for key, value in field_spec.items():
@@ -203,7 +208,7 @@ class WebAdminService(BaseService):
                 table_metadata = {
                     "table_name": table_name,
                     "description": info_block.get("about") or table_definition.get("description"),
-                    "source": info_block.get("source"),
+                    "source": info_block.get("source") or table_definition.get("source"),
                     "data_dictionary": {
                         field_name: {
                             "description": field_spec.get("description"),
@@ -224,6 +229,7 @@ class WebAdminService(BaseService):
                 )
                 manifest_tables[table_name] = {
                     "description": table_metadata["description"],
+                    "source": table_metadata["source"],
                     "path": f"{table_name}.csv",
                     "dataDictionary": {
                         field_name: self._build_manifest_field(field_name, field_spec, metadata)

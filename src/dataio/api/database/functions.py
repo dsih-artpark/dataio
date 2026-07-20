@@ -1,5 +1,6 @@
 from typing import List, Optional
 import logging
+import re
 from sqlalchemy.orm import joinedload
 import bcrypt
 import secrets
@@ -509,28 +510,41 @@ def delete_dataset(dataset_id: str):
         session.close()
 
 
+def get_next_dataset_serial_number(session=None) -> int:
+    """The next number in the catalogue-wide dataset ID counter (see
+    suggest_next_dataset_id) - independent of collection, since this counter
+    is global. Accepts an optional existing session so callers already
+    holding one (e.g. suggest_next_dataset_id) don't open a second.
+    """
+    owns_session = session is None
+    session = session or Session()
+    try:
+        existing_ids = session.query(Dataset.ds_id).all()
+        reserved_ids = session.query(ReservedDatasetID.ds_id).all()
+        max_suffix = 0
+        suffix_pattern = re.compile(r"DS(\d{4})$")
+        for (ds_id,) in [*existing_ids, *reserved_ids]:
+            match = suffix_pattern.search(ds_id or "")
+            if match:
+                max_suffix = max(max_suffix, int(match.group(1)))
+        return max_suffix + 1
+    finally:
+        if owns_session:
+            session.close()
+
+
 def suggest_next_dataset_id(collection_id: str) -> str:
+    """Suggest the next dataset ID, matching the master catalogue's numbering:
+    the numeric suffix is a single counter shared across every dataset in the
+    catalogue (not scoped to one collection), so it always keeps pace with
+    whatever the catalogue would assign next, regardless of which collection
+    the new dataset belongs to.
+    """
     session = Session()
     try:
-        existing_ids = (
-            session.query(Dataset.ds_id)
-            .filter(Dataset.ds_id.like(f"{collection_id}DS%"))
-            .all()
-        )
-        reserved_ids = (
-            session.query(ReservedDatasetID.ds_id)
-            .filter(ReservedDatasetID.ds_id.like(f"{collection_id}DS%"))
-            .all()
-        )
-        max_suffix = 0
+        next_number = get_next_dataset_serial_number(session)
         prefix = f"{collection_id}DS"
-        for (ds_id,) in [*existing_ids, *reserved_ids]:
-            if not ds_id.startswith(prefix):
-                continue
-            suffix = ds_id[len(prefix):]
-            if len(suffix) == 4 and suffix.isdigit():
-                max_suffix = max(max_suffix, int(suffix))
-        return f"{prefix}{max_suffix + 1:04d}"
+        return f"{prefix}{next_number:04d}"
     except Exception as e:
         logger.error(f"Error suggesting dataset id: {str(e)}")
         raise
@@ -538,29 +552,48 @@ def suggest_next_dataset_id(collection_id: str) -> str:
         session.close()
 
 
+def suggest_next_raw_dataset_id_for_category(category_id: str, session=None) -> str:
+    """The next raw dataset ID for a category (e.g. "CS"), matching the
+    master catalogue's numbering: the counter is shared across every
+    collection in that category (all of CS0001, CS0007, CS0026... share one
+    "CS" counter), using the catalogue's own unpadded "{category}RDS{n}"
+    format (e.g. CSRDS16).
+
+    Also folds in rds_ids still stored in the older per-collection format
+    (e.g. CS0002RDS0003) so a category that already has raw datasets under
+    the old scheme doesn't restart its counter from 1 and collide with them.
+    """
+    owns_session = session is None
+    session = session or Session()
+    try:
+        existing_ids = session.query(RawDataset.rds_id).all()
+        max_suffix = 0
+        new_format_pattern = re.compile(rf"^{re.escape(category_id)}RDS(\d+)$")
+        legacy_format_pattern = re.compile(rf"^{re.escape(category_id)}\d{{4}}RDS(\d{{4}})$")
+        for (rds_id,) in existing_ids:
+            rds_id = rds_id or ""
+            match = new_format_pattern.match(rds_id) or legacy_format_pattern.match(rds_id)
+            if match:
+                max_suffix = max(max_suffix, int(match.group(1)))
+        return f"{category_id}RDS{max_suffix + 1}"
+    finally:
+        if owns_session:
+            session.close()
+
+
 def suggest_next_raw_dataset_id(collection_id: str) -> str:
+    """Suggest the next raw dataset ID for the category that collection_id
+    belongs to - see suggest_next_raw_dataset_id_for_category.
+    """
     session = Session()
     try:
-        existing_ids = (
-            session.query(RawDataset.rds_id)
-            .filter(RawDataset.rds_id.like(f"{collection_id}%"))
-            .all()
+        collection = (
+            session.query(Collection)
+            .filter(Collection.collection_id == collection_id)
+            .first()
         )
-        max_suffix = 0
-        prefix = f"{collection_id}RDS"
-        import re
-
-        for (rds_id,) in existing_ids:
-            if rds_id.startswith(prefix):
-                suffix = rds_id[len(prefix) :]
-                if len(suffix) == 4 and suffix.isdigit():
-                    max_suffix = max(max_suffix, int(suffix))
-            elif "-raw-" in rds_id:
-                m = re.search(r"-raw-(\d+)$", rds_id)
-                if m:
-                    max_suffix = max(max_suffix, int(m.group(1)))
-
-        return f"{prefix}{max_suffix + 1:04d}"
+        category_id = collection.category_id if collection else re.sub(r"\d+$", "", collection_id)
+        return suggest_next_raw_dataset_id_for_category(category_id, session)
     except Exception as e:
         logger.error(f"Error suggesting raw dataset id: {str(e)}")
         raise

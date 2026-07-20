@@ -138,10 +138,13 @@ export default function DatasetAdminManager({
   const [rawDatasetCollectionId, setRawDatasetCollectionId] = useState('');
   const [selectedRawDatasetId, setSelectedRawDatasetId] = useState('');
   const [rawDatasetEditForm, setRawDatasetEditForm] = useState({ title: '', source: '' });
-  const [idsLookupCollectionId, setIdsLookupCollectionId] = useState('');
-  const [idsLookupResult, setIdsLookupResult] = useState<{ collectionId: string; nextDatasetId: string; nextRawDatasetId: string } | null>(null);
-  const [idsLookupLoading, setIdsLookupLoading] = useState(false);
-  const idsLookupRequestRef = useRef('');
+  const [nextDatasetIdNumber, setNextDatasetIdNumber] = useState<number | null>(null);
+  const [nextDatasetIdLoading, setNextDatasetIdLoading] = useState(false);
+  const [idsLookupCategoryId, setIdsLookupCategoryId] = useState('');
+  const [nextRawDatasetIdByCategory, setNextRawDatasetIdByCategory] = useState<{ categoryId: string; rdsId: string } | null>(null);
+  const [nextRawDatasetIdLoading, setNextRawDatasetIdLoading] = useState(false);
+  const nextDatasetIdRequestRef = useRef(0);
+  const nextRawDatasetIdRequestRef = useRef(0);
   const rawDatasetIdSuggestRequestRef = useRef('');
   const [loading, setLoading] = useState(true);
   const [loadingDatasetDetail, setLoadingDatasetDetail] = useState(false);
@@ -414,6 +417,18 @@ export default function DatasetAdminManager({
     };
   };
 
+  const categoryOptions = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const collection of collections) {
+      if (!byId.has(collection.category_id)) {
+        byId.set(collection.category_id, collection.category_name);
+      }
+    }
+    return Array.from(byId.entries())
+      .map(([category_id, category_name]) => ({ category_id, category_name }))
+      .sort((a, b) => a.category_id.localeCompare(b.category_id));
+  }, [collections]);
+
   const parsedReadmeHtml = useMemo(() => {
     if (!readmeDraft.trim()) return '';
     return marked.parse(readmeDraft) as string;
@@ -433,33 +448,6 @@ export default function DatasetAdminManager({
     }
   }, [dataDictionaryDraft]);
 
-  const dsIdSequenceNote = useMemo(() => {
-    const actual = importPreview?.dataset.ds_id;
-    const suggested = importPreview?.suggested_dataset_id;
-    if (!actual || !suggested) return null;
-
-    const idPattern = /^([A-Z]{2}\d{4}DS)(\d{4})$/;
-    const actualMatch = actual.match(idPattern);
-    const suggestedMatch = suggested.match(idPattern);
-    if (!actualMatch || !suggestedMatch || actualMatch[1] !== suggestedMatch[1]) return null;
-
-    const actualNum = parseInt(actualMatch[2], 10);
-    const suggestedNum = parseInt(suggestedMatch[2], 10);
-    if (actualNum === suggestedNum) return null;
-
-    const prefix = actualMatch[1];
-    const pad = (n: number) => String(n).padStart(4, '0');
-
-    if (actualNum > suggestedNum) {
-      const gapRange =
-        suggestedNum === actualNum - 1
-          ? `${prefix}${pad(suggestedNum)}`
-          : `${prefix}${pad(suggestedNum)}–${prefix}${pad(actualNum - 1)}`;
-      return `This is higher than the next sequential ID (${suggested}) - ${gapRange} will remain unused in this collection.`;
-    }
-
-    return `This is lower than the next sequential ID (${suggested}) - it fills a previously unused ID in the sequence.`;
-  }, [importPreview]);
 
   const applyImportPreview = (preview: AdminDatasetPackagePreview) => {
     setImportPreview(preview);
@@ -513,32 +501,43 @@ export default function DatasetAdminManager({
     }
   };
 
-  const handleLookupNextIds = async (collectionId: string) => {
-    setIdsLookupCollectionId(collectionId);
-    setIdsLookupResult(null);
-    idsLookupRequestRef.current = collectionId;
-    if (!collectionId) return;
-    setIdsLookupLoading(true);
+  const handleGetNextDatasetId = async () => {
+    const requestId = nextDatasetIdRequestRef.current + 1;
+    nextDatasetIdRequestRef.current = requestId;
+    setNextDatasetIdLoading(true);
     setErrorMessage('');
     try {
-      const [dsResponse, rdsResponse] = await Promise.all([
-        api.adminSuggestDatasetId(collectionId),
-        api.adminSuggestRawDatasetId(collectionId),
-      ]);
-      // Ignore this response if a newer lookup has since been kicked off -
-      // otherwise a slower, stale request can overwrite a faster, newer one.
-      if (idsLookupRequestRef.current !== collectionId) return;
-      setIdsLookupResult({
-        collectionId,
-        nextDatasetId: dsResponse.suggested_dataset_id,
-        nextRawDatasetId: rdsResponse.suggested_raw_dataset_id,
-      });
+      const response = await api.adminGetNextDatasetIdNumber();
+      if (nextDatasetIdRequestRef.current !== requestId) return;
+      setNextDatasetIdNumber(response.next_number);
     } catch (err) {
-      if (idsLookupRequestRef.current !== collectionId) return;
-      setErrorMessage(err instanceof Error ? err.message : 'Failed to look up next available IDs');
+      if (nextDatasetIdRequestRef.current !== requestId) return;
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to get next dataset ID number');
     } finally {
-      if (idsLookupRequestRef.current === collectionId) {
-        setIdsLookupLoading(false);
+      if (nextDatasetIdRequestRef.current === requestId) {
+        setNextDatasetIdLoading(false);
+      }
+    }
+  };
+
+  const handleGetNextRawDatasetIdForCategory = async (categoryId: string) => {
+    setIdsLookupCategoryId(categoryId);
+    setNextRawDatasetIdByCategory(null);
+    const requestId = nextRawDatasetIdRequestRef.current + 1;
+    nextRawDatasetIdRequestRef.current = requestId;
+    if (!categoryId) return;
+    setNextRawDatasetIdLoading(true);
+    setErrorMessage('');
+    try {
+      const response = await api.adminSuggestRawDatasetIdByCategory(categoryId);
+      if (nextRawDatasetIdRequestRef.current !== requestId) return;
+      setNextRawDatasetIdByCategory({ categoryId, rdsId: response.suggested_raw_dataset_id });
+    } catch (err) {
+      if (nextRawDatasetIdRequestRef.current !== requestId) return;
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to get next raw dataset ID');
+    } finally {
+      if (nextRawDatasetIdRequestRef.current === requestId) {
+        setNextRawDatasetIdLoading(false);
       }
     }
   };
@@ -1500,47 +1499,65 @@ export default function DatasetAdminManager({
         <div>
           <h3 class="text-lg font-semibold text-slate-900">Next Available IDs</h3>
           <p class="mt-1 text-sm text-slate-600">
-            Pick a collection to see the next free dataset ID and raw dataset ID - nothing is created or reserved, this is a read-only lookup for authoring metadata.yaml / info.yml.
+            Read-only lookups for authoring metadata.yaml / info.yml - nothing is created or reserved.
           </p>
         </div>
 
-        <div class="mt-4 grid gap-4 md:grid-cols-[1fr_auto]">
-          <select
-            value={idsLookupCollectionId}
-            onChange={(e) => handleLookupNextIds((e.currentTarget as HTMLSelectElement).value)}
-            class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm"
-          >
-            <option value="">Select collection</option>
-            {collections.map((collection) => (
-              <option key={collection.id} value={collection.collection_id}>
-                {collection.collection_id} - {collection.collection_name}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={() => handleLookupNextIds(idsLookupCollectionId)}
-            disabled={!idsLookupCollectionId || idsLookupLoading}
-            class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
-          >
-            {idsLookupLoading ? 'Looking up…' : 'Refresh'}
-          </button>
-        </div>
-
-        {idsLookupResult ? (
-          <div class="mt-4 grid gap-4 sm:grid-cols-2">
-            <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <div class="text-xs font-medium uppercase tracking-wide text-slate-500">Next Dataset ID</div>
-              <div class="mt-1 font-mono text-lg font-semibold text-slate-900">{idsLookupResult.nextDatasetId}</div>
-            </div>
-            <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <div class="text-xs font-medium uppercase tracking-wide text-slate-500">Next Raw Dataset ID</div>
-              <div class="mt-1 font-mono text-lg font-semibold text-slate-900">{idsLookupResult.nextRawDatasetId}</div>
-            </div>
+        <div class="mt-4 grid gap-4 sm:grid-cols-2">
+          <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div class="text-xs font-medium uppercase tracking-wide text-slate-500">Next Dataset ID Number</div>
+            <p class="mt-1 text-xs text-slate-500">
+              {nextDatasetIdNumber !== null
+                ? `Shared across every collection - attach your collection's own code as the prefix, e.g. CS0026DS${String(nextDatasetIdNumber).padStart(4, '0')}.`
+                : "Shared across every collection - attach your collection's own code as the prefix (e.g. CS0026DS####)."}
+            </p>
+            <button
+              type="button"
+              onClick={handleGetNextDatasetId}
+              disabled={nextDatasetIdLoading}
+              class="mt-3 rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+            >
+              {nextDatasetIdLoading ? 'Looking up…' : 'Get Available ID'}
+            </button>
+            {nextDatasetIdNumber !== null ? (
+              <div class="mt-3 font-mono text-lg font-semibold text-slate-900">
+                {String(nextDatasetIdNumber).padStart(4, '0')}
+              </div>
+            ) : null}
           </div>
-        ) : (
-          <p class="mt-4 text-sm text-slate-500">Select a collection above to see its next available IDs.</p>
-        )}
+
+          <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div class="text-xs font-medium uppercase tracking-wide text-slate-500">Next Raw Dataset ID</div>
+            <p class="mt-1 text-xs text-slate-500">Shared across every collection in the same category.</p>
+            <div class="mt-3 flex flex-wrap gap-2">
+              <select
+                value={idsLookupCategoryId}
+                onChange={(e) => handleGetNextRawDatasetIdForCategory((e.currentTarget as HTMLSelectElement).value)}
+                class="flex-1 rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm"
+              >
+                <option value="">Select category</option>
+                {categoryOptions.map((category) => (
+                  <option key={category.category_id} value={category.category_id}>
+                    {category.category_id} - {category.category_name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => handleGetNextRawDatasetIdForCategory(idsLookupCategoryId)}
+                disabled={!idsLookupCategoryId || nextRawDatasetIdLoading}
+                class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+              >
+                {nextRawDatasetIdLoading ? 'Looking up…' : 'Get Available ID'}
+              </button>
+            </div>
+            {nextRawDatasetIdByCategory ? (
+              <div class="mt-3 font-mono text-lg font-semibold text-slate-900">
+                {nextRawDatasetIdByCategory.rdsId}
+              </div>
+            ) : null}
+          </div>
+          </div>
       </section>
       ) : null}
 
@@ -1626,11 +1643,6 @@ export default function DatasetAdminManager({
                 <span>{importCsvFiles.length} CSV file(s) selected</span>
                 <span>{importPreview.can_import ? 'Ready to import' : 'Needs review'}</span>
               </div>
-              {dsIdSequenceNote ? (
-                <div class="mt-2 rounded-lg bg-amber-100 px-3 py-2 text-xs font-medium text-amber-800">
-                  {importPreview.dataset.ds_id}: {dsIdSequenceNote}
-                </div>
-              ) : null}
             </div>
 
             {importPreview.findings.length > 0 ? (

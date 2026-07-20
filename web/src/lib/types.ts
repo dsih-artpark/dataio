@@ -265,6 +265,15 @@ export interface RawDatasetIdSuggestion {
   suggested_raw_dataset_id: string;
 }
 
+export interface NextDatasetIdNumber {
+  next_number: number;
+}
+
+export interface RawDatasetIdSuggestionByCategory {
+  category_id: string;
+  suggested_raw_dataset_id: string;
+}
+
 export interface DocumentationSyncDatasetStatus {
   ds_id: string;
   needs_update: boolean;

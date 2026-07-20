@@ -193,6 +193,32 @@ class AdminDatasetService(BaseService):
                 status_code=500, detail="Failed to update dataset. Contact support."
             ) from e
 
+    def get_next_dataset_id_number(self):
+        try:
+            return {"next_number": database.get_next_dataset_serial_number()}
+        except Exception as e:
+            self.logger.error(f"Failed to get next dataset id number: {e!s}")
+            raise HTTPException(
+                status_code=500, detail="Failed to get next dataset ID number. Contact support."
+            ) from e
+
+    def suggest_next_raw_dataset_id_for_category(self, category_id: str):
+        try:
+            if not category_id.strip():
+                raise ValidationError("Category ID is required")
+            return {
+                "category_id": category_id,
+                "suggested_raw_dataset_id": database.suggest_next_raw_dataset_id_for_category(category_id),
+            }
+        except ValidationError as e:
+            self.logger.error(f"Failed to suggest raw dataset id for category: {e!s}")
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except Exception as e:
+            self.logger.error(f"Failed to suggest raw dataset id for category: {e!s}")
+            raise HTTPException(
+                status_code=500, detail="Failed to suggest raw dataset ID. Contact support."
+            ) from e
+
     def suggest_next_dataset_id(self, collection_id: str):
         try:
             if not collection_id.strip():

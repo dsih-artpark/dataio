@@ -14,7 +14,9 @@ import type {
   DatasetManifestRecord,
   DataOwnersResponse,
   DatasetIdSuggestion,
+  NextDatasetIdNumber,
   RawDatasetIdSuggestion,
+  RawDatasetIdSuggestionByCategory,
   DatasetsResponse,
   DocumentationSyncCheckResponse,
   DocumentationSyncRunResponse,
@@ -780,6 +782,10 @@ class ApiClient {
     );
   }
 
+  async adminGetNextDatasetIdNumber() {
+    return this.request<NextDatasetIdNumber>('/admin/datasets/next-id-number');
+  }
+
   async adminListReservedDatasetIds(params?: { search?: string; limit?: number; offset?: number }) {
     const searchParams = new URLSearchParams();
     if (params?.search) searchParams.set('search', params.search);
@@ -952,6 +958,12 @@ class ApiClient {
   async adminSuggestRawDatasetId(collectionId: string) {
     return this.request<RawDatasetIdSuggestion>(
       `/admin/raw-datasets/suggest-id?collection_id=${encodeURIComponent(collectionId)}`
+    );
+  }
+
+  async adminSuggestRawDatasetIdByCategory(categoryId: string) {
+    return this.request<RawDatasetIdSuggestionByCategory>(
+      `/admin/raw-datasets/suggest-id-by-category?category_id=${encodeURIComponent(categoryId)}`
     );
   }
 

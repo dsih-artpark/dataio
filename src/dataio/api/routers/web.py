@@ -1345,6 +1345,15 @@ async def admin_suggest_dataset_id(
     return admin_service.suggest_next_dataset_id(user, collection_id)
 
 
+@web_router.get("/admin/datasets/next-id-number", tags=["web-admin/datasets"])
+async def admin_get_next_dataset_id_number(
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """The next dataset ID number, catalogue-wide (independent of collection)."""
+    return admin_service.get_next_dataset_id_number(user)
+
+
 @web_router.get("/admin/raw-datasets/suggest-id", tags=["web-admin/datasets"])
 async def admin_suggest_raw_dataset_id(
     collection_id: str,
@@ -1353,6 +1362,16 @@ async def admin_suggest_raw_dataset_id(
 ):
     """Suggest the next sequential raw dataset ID for a collection."""
     return admin_service.suggest_next_raw_dataset_id(user, collection_id)
+
+
+@web_router.get("/admin/raw-datasets/suggest-id-by-category", tags=["web-admin/datasets"])
+async def admin_suggest_raw_dataset_id_by_category(
+    category_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Suggest the next raw dataset ID for a category (shared across its collections)."""
+    return admin_service.suggest_next_raw_dataset_id_for_category(user, category_id)
 
 
 @web_router.get("/admin/dataset-id-reservations", tags=["web-admin/datasets"])

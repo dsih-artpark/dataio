@@ -144,7 +144,7 @@ export default function DatasetAdminManager({
   const [nextRawDatasetIdByCategory, setNextRawDatasetIdByCategory] = useState<{ categoryId: string; rdsId: string } | null>(null);
   const [nextRawDatasetIdLoading, setNextRawDatasetIdLoading] = useState(false);
   const nextDatasetIdRequestRef = useRef(0);
-  const nextRawDatasetIdRequestRef = useRef('');
+  const nextRawDatasetIdRequestRef = useRef(0);
   const rawDatasetIdSuggestRequestRef = useRef('');
   const [loading, setLoading] = useState(true);
   const [loadingDatasetDetail, setLoadingDatasetDetail] = useState(false);
@@ -523,19 +523,20 @@ export default function DatasetAdminManager({
   const handleGetNextRawDatasetIdForCategory = async (categoryId: string) => {
     setIdsLookupCategoryId(categoryId);
     setNextRawDatasetIdByCategory(null);
-    nextRawDatasetIdRequestRef.current = categoryId;
+    const requestId = nextRawDatasetIdRequestRef.current + 1;
+    nextRawDatasetIdRequestRef.current = requestId;
     if (!categoryId) return;
     setNextRawDatasetIdLoading(true);
     setErrorMessage('');
     try {
       const response = await api.adminSuggestRawDatasetIdByCategory(categoryId);
-      if (nextRawDatasetIdRequestRef.current !== categoryId) return;
+      if (nextRawDatasetIdRequestRef.current !== requestId) return;
       setNextRawDatasetIdByCategory({ categoryId, rdsId: response.suggested_raw_dataset_id });
     } catch (err) {
-      if (nextRawDatasetIdRequestRef.current !== categoryId) return;
+      if (nextRawDatasetIdRequestRef.current !== requestId) return;
       setErrorMessage(err instanceof Error ? err.message : 'Failed to get next raw dataset ID');
     } finally {
-      if (nextRawDatasetIdRequestRef.current === categoryId) {
+      if (nextRawDatasetIdRequestRef.current === requestId) {
         setNextRawDatasetIdLoading(false);
       }
     }
@@ -1506,7 +1507,9 @@ export default function DatasetAdminManager({
           <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
             <div class="text-xs font-medium uppercase tracking-wide text-slate-500">Next Dataset ID Number</div>
             <p class="mt-1 text-xs text-slate-500">
-              Shared across every collection - attach your collection's own code as the prefix, e.g. CS0026DS{String(nextDatasetIdNumber ?? 0).padStart(4, '0')}.
+              {nextDatasetIdNumber !== null
+                ? `Shared across every collection - attach your collection's own code as the prefix, e.g. CS0026DS${String(nextDatasetIdNumber).padStart(4, '0')}.`
+                : "Shared across every collection - attach your collection's own code as the prefix (e.g. CS0026DS####)."}
             </p>
             <button
               type="button"

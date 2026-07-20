@@ -558,15 +558,21 @@ def suggest_next_raw_dataset_id_for_category(category_id: str, session=None) -> 
     collection in that category (all of CS0001, CS0007, CS0026... share one
     "CS" counter), using the catalogue's own unpadded "{category}RDS{n}"
     format (e.g. CSRDS16).
+
+    Also folds in rds_ids still stored in the older per-collection format
+    (e.g. CS0002RDS0003) so a category that already has raw datasets under
+    the old scheme doesn't restart its counter from 1 and collide with them.
     """
     owns_session = session is None
     session = session or Session()
     try:
         existing_ids = session.query(RawDataset.rds_id).all()
         max_suffix = 0
-        suffix_pattern = re.compile(rf"^{re.escape(category_id)}RDS(\d+)$")
+        new_format_pattern = re.compile(rf"^{re.escape(category_id)}RDS(\d+)$")
+        legacy_format_pattern = re.compile(rf"^{re.escape(category_id)}\d{{4}}RDS(\d{{4}})$")
         for (rds_id,) in existing_ids:
-            match = suffix_pattern.match(rds_id or "")
+            rds_id = rds_id or ""
+            match = new_format_pattern.match(rds_id) or legacy_format_pattern.match(rds_id)
             if match:
                 max_suffix = max(max_suffix, int(match.group(1)))
         return f"{category_id}RDS{max_suffix + 1}"

@@ -29,7 +29,16 @@ class FilestoreService(BaseService):
         )
         self.s3 = self.session.resource("s3")
         self.s3_client = self.session.client(
-            "s3", region_name="ap-south-1", config=Config(signature_version="s3v4")
+            "s3",
+            region_name="ap-south-1",
+            # generate_presigned_url() defaults to S3's legacy global endpoint
+            # host, which 307-redirects for any bucket outside us-east-1 and
+            # drops CORS headers on that redirect response, breaking
+            # browser-side downloads. Force the regional endpoint directly to
+            # skip the redirect. Region-independent - not tied to any
+            # particular bucket's location.
+            endpoint_url="https://s3.ap-south-1.amazonaws.com",
+            config=Config(signature_version="s3v4"),
         )
         self.bucket = self.s3.Bucket(os.getenv("AWS_BUCKET_NAME"))
 
@@ -289,7 +298,7 @@ class FilestoreService(BaseService):
 
             return_json_list = []
             for file in files_list:
-                if file == "metadata.json":
+                if file in {"metadata.json", "manifest.yaml", "manifest.json"}:
                     continue
 
                 file_stem = Path(file).stem

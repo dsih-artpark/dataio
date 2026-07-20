@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Optional, List
 
 import bcrypt
+import yaml
 from fastapi import HTTPException
 
 from dataio.api.database.config import Session as DBSession
@@ -538,14 +539,30 @@ class WebUserService(BaseService):
             if not tables and last_error:
                 self.logger.error(f"No tables found for {dataset_id}. Last error: {str(last_error)}")
 
+            manifest_yaml = dataset.manifest_yaml if hasattr(dataset, 'manifest_yaml') else None
+            # Postgres JSONB storage does not preserve key order, so the stored
+            # manifest_json column can't be trusted to match manifest_yaml's
+            # field order (which the UI and downloads should stay consistent
+            # with). Re-derive it from the order-preserving YAML text instead.
+            manifest_json = None
+            db_manifest_json = dataset.manifest_json if hasattr(dataset, 'manifest_json') else None
+            if manifest_yaml:
+                try:
+                    parsed = yaml.safe_load(manifest_yaml)
+                    manifest_json = parsed if isinstance(parsed, dict) else db_manifest_json
+                except Exception:
+                    manifest_json = db_manifest_json
+            else:
+                manifest_json = db_manifest_json
+
             return {
                 "ds_id": dataset.ds_id,
                 "title": dataset.title,
                 "tables": tables,
                 "readme_md": dataset.readme_md if hasattr(dataset, 'readme_md') else None,
                 "data_dictionary_json": dataset.data_dictionary_json if hasattr(dataset, 'data_dictionary_json') else None,
-                "manifest_yaml": dataset.manifest_yaml if hasattr(dataset, 'manifest_yaml') else None,
-                "manifest_json": dataset.manifest_json if hasattr(dataset, 'manifest_json') else None,
+                "manifest_yaml": manifest_yaml,
+                "manifest_json": manifest_json,
             }
         except HTTPException:
             raise

@@ -103,6 +103,7 @@ celerybeat.pid
 
 # Environments
 .env
+.env.prod
 .venv
 env/
 venv/
@@ -146,6 +147,7 @@ dmypy.json
 *.yaml
 !.env.example
 data/*
+data_backup_20260716_120337/*
 **/data_inserts/**
 *.zip
 .data/
@@ -155,3 +157,10 @@ data/
 # AI Files
 
 web/.astro
+prod_datasets_clustered.md
+dataset_upload_workflow.md
+generate_all_info_yml.py
+reformat_yaml.py
+dataio_naming_policy.md
+Datasets_Uploaded_Dataio.md
+

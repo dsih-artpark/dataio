@@ -1,5 +1,5 @@
 import type { ComponentChildren } from 'preact';
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { marked } from 'marked';
 
 import { ApiRequestError, api } from '../../lib/api';
@@ -18,7 +18,7 @@ import type {
 const STANDARDISED_BUCKET = 'STANDARDISED';
 const PREPROCESSED_BUCKET = 'PREPROCESSED';
 
-type DatasetAdminView = 'new' | 'catalog' | 'reservations' | 'sync' | 'detail';
+type DatasetAdminView = 'new' | 'catalog' | 'reservations' | 'sync' | 'detail' | 'ids';
 type DetailWorkspaceTab = 'metadata' | 'sharing' | 'tables' | 'manifest' | 'documentation' | 'sync' | 'danger';
 
 type DatasetFormState = {
@@ -135,8 +135,14 @@ export default function DatasetAdminManager({
   const [editForm, setEditForm] = useState<DatasetFormState>(emptyDatasetForm());
   const [createForm, setCreateForm] = useState<DatasetFormState>(emptyDatasetForm());
   const [rawDatasetForm, setRawDatasetForm] = useState({ rds_id: '', title: '', source: '' });
+  const [rawDatasetCollectionId, setRawDatasetCollectionId] = useState('');
   const [selectedRawDatasetId, setSelectedRawDatasetId] = useState('');
   const [rawDatasetEditForm, setRawDatasetEditForm] = useState({ title: '', source: '' });
+  const [idsLookupCollectionId, setIdsLookupCollectionId] = useState('');
+  const [idsLookupResult, setIdsLookupResult] = useState<{ collectionId: string; nextDatasetId: string; nextRawDatasetId: string } | null>(null);
+  const [idsLookupLoading, setIdsLookupLoading] = useState(false);
+  const idsLookupRequestRef = useRef('');
+  const rawDatasetIdSuggestRequestRef = useRef('');
   const [loading, setLoading] = useState(true);
   const [loadingDatasetDetail, setLoadingDatasetDetail] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
@@ -180,12 +186,14 @@ export default function DatasetAdminManager({
   const isReservationsView = view === 'reservations';
   const isSyncView = view === 'sync';
   const isDetailView = view === 'detail';
+  const isIdsView = view === 'ids';
   const showSelectionToolbar = isCatalogView || isSyncView || isDetailView;
   const showCatalogSection = isCatalogView;
   const showReservationsSection = isReservationsView;
   const showCreateSections = isCreateView;
   const showDetailSections = isDetailView;
   const showSyncSection = isSyncView || isDetailView;
+  const showIdsSection = isIdsView;
 
   const loadReferenceData = async (search?: string) => {
     setLoading(true);
@@ -219,8 +227,14 @@ export default function DatasetAdminManager({
         }))
       );
 
-      const nextDatasetId = datasetResponse.datasets[0]?.ds_id ?? '';
-      setSelectedDatasetId((current) => current || nextDatasetId);
+      // The "ids" view is a standalone read-only lookup that never renders a
+      // selected dataset - skip auto-selecting one so the detail/manifest/
+      // table/doc-sync fetch cascade below (triggered off selectedDatasetId)
+      // doesn't run for a page that has nothing to do with it.
+      if (!isIdsView) {
+        const nextDatasetId = datasetResponse.datasets[0]?.ds_id ?? '';
+        setSelectedDatasetId((current) => current || nextDatasetId);
+      }
       const nextRawDataset = rawDatasetResponse.raw_datasets[0];
       if (nextRawDataset && !selectedRawDatasetId) {
         setSelectedRawDatasetId(nextRawDataset.rds_id);
@@ -419,6 +433,34 @@ export default function DatasetAdminManager({
     }
   }, [dataDictionaryDraft]);
 
+  const dsIdSequenceNote = useMemo(() => {
+    const actual = importPreview?.dataset.ds_id;
+    const suggested = importPreview?.suggested_dataset_id;
+    if (!actual || !suggested) return null;
+
+    const idPattern = /^([A-Z]{2}\d{4}DS)(\d{4})$/;
+    const actualMatch = actual.match(idPattern);
+    const suggestedMatch = suggested.match(idPattern);
+    if (!actualMatch || !suggestedMatch || actualMatch[1] !== suggestedMatch[1]) return null;
+
+    const actualNum = parseInt(actualMatch[2], 10);
+    const suggestedNum = parseInt(suggestedMatch[2], 10);
+    if (actualNum === suggestedNum) return null;
+
+    const prefix = actualMatch[1];
+    const pad = (n: number) => String(n).padStart(4, '0');
+
+    if (actualNum > suggestedNum) {
+      const gapRange =
+        suggestedNum === actualNum - 1
+          ? `${prefix}${pad(suggestedNum)}`
+          : `${prefix}${pad(suggestedNum)}–${prefix}${pad(actualNum - 1)}`;
+      return `This is higher than the next sequential ID (${suggested}) - ${gapRange} will remain unused in this collection.`;
+    }
+
+    return `This is lower than the next sequential ID (${suggested}) - it fills a previously unused ID in the sequence.`;
+  }, [importPreview]);
+
   const applyImportPreview = (preview: AdminDatasetPackagePreview) => {
     setImportPreview(preview);
     setCreateForm({
@@ -452,6 +494,52 @@ export default function DatasetAdminManager({
       setStatusMessage(`Suggested dataset ID: ${response.suggested_dataset_id}`);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Failed to suggest dataset ID');
+    }
+  };
+
+  const handleSuggestRawDatasetId = async (collectionId: string) => {
+    setRawDatasetCollectionId(collectionId);
+    rawDatasetIdSuggestRequestRef.current = collectionId;
+    if (!collectionId) return;
+    try {
+      const response = await api.adminSuggestRawDatasetId(collectionId);
+      // Ignore this response if the collection selection has since changed.
+      if (rawDatasetIdSuggestRequestRef.current !== collectionId) return;
+      setRawDatasetForm((current) => ({ ...current, rds_id: response.suggested_raw_dataset_id }));
+      setStatusMessage(`Suggested raw dataset ID: ${response.suggested_raw_dataset_id}`);
+    } catch (err) {
+      if (rawDatasetIdSuggestRequestRef.current !== collectionId) return;
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to suggest raw dataset ID');
+    }
+  };
+
+  const handleLookupNextIds = async (collectionId: string) => {
+    setIdsLookupCollectionId(collectionId);
+    setIdsLookupResult(null);
+    idsLookupRequestRef.current = collectionId;
+    if (!collectionId) return;
+    setIdsLookupLoading(true);
+    setErrorMessage('');
+    try {
+      const [dsResponse, rdsResponse] = await Promise.all([
+        api.adminSuggestDatasetId(collectionId),
+        api.adminSuggestRawDatasetId(collectionId),
+      ]);
+      // Ignore this response if a newer lookup has since been kicked off -
+      // otherwise a slower, stale request can overwrite a faster, newer one.
+      if (idsLookupRequestRef.current !== collectionId) return;
+      setIdsLookupResult({
+        collectionId,
+        nextDatasetId: dsResponse.suggested_dataset_id,
+        nextRawDatasetId: rdsResponse.suggested_raw_dataset_id,
+      });
+    } catch (err) {
+      if (idsLookupRequestRef.current !== collectionId) return;
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to look up next available IDs');
+    } finally {
+      if (idsLookupRequestRef.current === collectionId) {
+        setIdsLookupLoading(false);
+      }
     }
   };
 
@@ -496,6 +584,7 @@ export default function DatasetAdminManager({
       await api.adminCreateRawDataset(rawDatasetForm);
       setStatusMessage(`Created raw dataset ${rawDatasetForm.rds_id}.`);
       setRawDatasetForm({ rds_id: '', title: '', source: '' });
+      setRawDatasetCollectionId('');
       await loadReferenceData(datasetSearch || undefined);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Failed to create raw dataset');
@@ -1406,11 +1495,63 @@ export default function DatasetAdminManager({
       </section>
       ) : null}
 
+      {showIdsSection ? (
+      <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <div>
+          <h3 class="text-lg font-semibold text-slate-900">Next Available IDs</h3>
+          <p class="mt-1 text-sm text-slate-600">
+            Pick a collection to see the next free dataset ID and raw dataset ID - nothing is created or reserved, this is a read-only lookup for authoring metadata.yaml / info.yml.
+          </p>
+        </div>
+
+        <div class="mt-4 grid gap-4 md:grid-cols-[1fr_auto]">
+          <select
+            value={idsLookupCollectionId}
+            onChange={(e) => handleLookupNextIds((e.currentTarget as HTMLSelectElement).value)}
+            class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm"
+          >
+            <option value="">Select collection</option>
+            {collections.map((collection) => (
+              <option key={collection.id} value={collection.collection_id}>
+                {collection.collection_id} - {collection.collection_name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => handleLookupNextIds(idsLookupCollectionId)}
+            disabled={!idsLookupCollectionId || idsLookupLoading}
+            class="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+          >
+            {idsLookupLoading ? 'Looking up…' : 'Refresh'}
+          </button>
+        </div>
+
+        {idsLookupResult ? (
+          <div class="mt-4 grid gap-4 sm:grid-cols-2">
+            <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div class="text-xs font-medium uppercase tracking-wide text-slate-500">Next Dataset ID</div>
+              <div class="mt-1 font-mono text-lg font-semibold text-slate-900">{idsLookupResult.nextDatasetId}</div>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div class="text-xs font-medium uppercase tracking-wide text-slate-500">Next Raw Dataset ID</div>
+              <div class="mt-1 font-mono text-lg font-semibold text-slate-900">{idsLookupResult.nextRawDatasetId}</div>
+            </div>
+          </div>
+        ) : (
+          <p class="mt-4 text-sm text-slate-500">Select a collection above to see its next available IDs.</p>
+        )}
+      </section>
+      ) : null}
+
       {showCreateSections ? (
       <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h3 class="text-lg font-semibold text-slate-900">Import Dataset Package</h3>
+            <p class="mt-1 text-sm font-medium text-primary-700">
+              Use this for real datasets — uploads your CSVs and creates a full, downloadable dataset with manifest and data dictionary.
+            </p>
             <p class="mt-1 text-sm text-slate-600">
               Upload `info.yml` and `metadata.yml` to autofill the dataset form, preview server-side validation, then upload the matching CSV tables in one import.
             </p>
@@ -1485,6 +1626,11 @@ export default function DatasetAdminManager({
                 <span>{importCsvFiles.length} CSV file(s) selected</span>
                 <span>{importPreview.can_import ? 'Ready to import' : 'Needs review'}</span>
               </div>
+              {dsIdSequenceNote ? (
+                <div class="mt-2 rounded-lg bg-amber-100 px-3 py-2 text-xs font-medium text-amber-800">
+                  {importPreview.dataset.ds_id}: {dsIdSequenceNote}
+                </div>
+              ) : null}
             </div>
 
             {importPreview.findings.length > 0 ? (
@@ -1519,7 +1665,20 @@ export default function DatasetAdminManager({
       <div class="grid gap-6 xl:grid-cols-2">
         <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <h3 class="text-lg font-semibold text-slate-900">Create Raw Dataset</h3>
+          <p class="mt-1 text-sm text-slate-600">Choosing a collection suggests the next sequential raw dataset ID.</p>
           <form class="mt-4 space-y-4" onSubmit={handleCreateRawDataset}>
+            <select
+              value={rawDatasetCollectionId}
+              onChange={(e) => handleSuggestRawDatasetId((e.currentTarget as HTMLSelectElement).value)}
+              class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm"
+            >
+              <option value="">Select collection</option>
+              {collections.map((collection) => (
+                <option key={collection.id} value={collection.collection_id}>
+                  {collection.collection_id} - {collection.collection_name}
+                </option>
+              ))}
+            </select>
             <input
               value={rawDatasetForm.rds_id}
               onInput={(e) => setRawDatasetForm((current) => ({ ...current, rds_id: (e.currentTarget as HTMLInputElement).value }))}
@@ -1577,6 +1736,9 @@ export default function DatasetAdminManager({
 
         <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <h3 class="text-lg font-semibold text-slate-900">Create Dataset</h3>
+          <p class="mt-1 text-sm font-medium text-amber-700">
+            Not for real datasets — creates an empty record with no files, tables, or manifest. Use Import above instead.
+          </p>
           <p class="mt-1 text-sm text-slate-600">Choosing a collection suggests the next sequential dataset ID.</p>
           <div class="mt-4">{renderDatasetForm(createForm, updateCreateForm, 'Create Dataset', handleCreateDataset, true)}</div>
         </section>
@@ -1947,6 +2109,9 @@ export default function DatasetAdminManager({
                     <div class="font-medium text-slate-900">{item.ds_id}</div>
                     <div class="mt-1 text-xs text-slate-500">
                       Changed fields: {item.changed_fields.length > 0 ? item.changed_fields.join(', ') : 'none'}
+                    </div>
+                    <div class="mt-1 text-xs text-slate-500">
+                      Last synced: {item.documentation_synced_at ? new Date(item.documentation_synced_at).toLocaleString() : 'never'}
                     </div>
                   </div>
                   <span class={`rounded-full px-3 py-1 text-xs font-medium ${item.needs_update ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>

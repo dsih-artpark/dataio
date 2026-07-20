@@ -1345,6 +1345,16 @@ async def admin_suggest_dataset_id(
     return admin_service.suggest_next_dataset_id(user, collection_id)
 
 
+@web_router.get("/admin/raw-datasets/suggest-id", tags=["web-admin/datasets"])
+async def admin_suggest_raw_dataset_id(
+    collection_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Suggest the next sequential raw dataset ID for a collection."""
+    return admin_service.suggest_next_raw_dataset_id(user, collection_id)
+
+
 @web_router.get("/admin/dataset-id-reservations", tags=["web-admin/datasets"])
 async def admin_list_reserved_dataset_ids(
     search: Optional[str] = None,

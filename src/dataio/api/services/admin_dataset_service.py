@@ -210,6 +210,23 @@ class AdminDatasetService(BaseService):
                 status_code=500, detail="Failed to suggest dataset ID. Contact support."
             ) from e
 
+    def suggest_next_raw_dataset_id(self, collection_id: str):
+        try:
+            if not collection_id.strip():
+                raise ValidationError("Collection ID is required")
+            return {
+                "collection_id": collection_id,
+                "suggested_raw_dataset_id": database.suggest_next_raw_dataset_id(collection_id),
+            }
+        except ValidationError as e:
+            self.logger.error(f"Failed to suggest raw dataset id: {e!s}")
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except Exception as e:
+            self.logger.error(f"Failed to suggest raw dataset id: {e!s}")
+            raise HTTPException(
+                status_code=500, detail="Failed to suggest raw dataset ID. Contact support."
+            ) from e
+
     def delete_dataset(self, dataset_id: str):
         try:
             if not database.check_if_dataset_exists(dataset_id):

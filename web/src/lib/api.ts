@@ -14,6 +14,7 @@ import type {
   DatasetManifestRecord,
   DataOwnersResponse,
   DatasetIdSuggestion,
+  RawDatasetIdSuggestion,
   DatasetsResponse,
   DocumentationSyncCheckResponse,
   DocumentationSyncRunResponse,
@@ -946,6 +947,12 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+  }
+
+  async adminSuggestRawDatasetId(collectionId: string) {
+    return this.request<RawDatasetIdSuggestion>(
+      `/admin/raw-datasets/suggest-id?collection_id=${encodeURIComponent(collectionId)}`
+    );
   }
 
   async adminUpdateRawDataset(

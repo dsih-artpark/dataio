@@ -66,7 +66,7 @@ class WebAdminService(BaseService):
         slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
         return slug or "dataset"
 
-    def _build_manifest_field(self, field_name: str, field_spec: dict) -> dict:
+    def _build_manifest_field(self, field_name: str, field_spec: dict, enum_scope: Optional[dict] = None) -> dict:
         field_type = field_spec.get("type")
         manifest_field = {
             "description": field_spec.get("description"),
@@ -78,7 +78,18 @@ class WebAdminService(BaseService):
             manifest_field["format"] = "%Y"
         elif field_type == "enum":
             manifest_field["type"] = "enum"
-            manifest_field["allowedValues"] = field_spec.get("enum") or field_spec.get("allowedValues") or []
+            allowed_values = field_spec.get("enum") or field_spec.get("allowedValues")
+            if not allowed_values and field_spec.get("enumRef") and enum_scope:
+                enum_ref = field_spec["enumRef"]
+                # Enum blocks may be authored as flat top-level keys, or nested
+                # under a top-level "enumDefinitions" container. Support both.
+                nested_definitions = enum_scope.get("enumDefinitions")
+                enum_def = enum_scope.get(enum_ref)
+                if not isinstance(enum_def, dict) and isinstance(nested_definitions, dict):
+                    enum_def = nested_definitions.get(enum_ref)
+                if isinstance(enum_def, dict):
+                    allowed_values = list((enum_def.get("values") or {}).keys())
+            manifest_field["allowedValues"] = allowed_values or []
         elif field_type in {"string", "boolean", "int", "float", "regionID", "regionName", "date", "dateTime"}:
             manifest_field["type"] = field_type
             if field_spec.get("format"):
@@ -99,6 +110,25 @@ class WebAdminService(BaseService):
             manifest_field["min"] = field_spec["min"]
         if field_spec.get("max") is not None:
             manifest_field["max"] = field_spec["max"]
+        # Carry through any remaining authored keys verbatim (e.g. isJoinKey,
+        # joinKeyType, unit) so documentation-only annotations survive into
+        # the downloadable manifest instead of being silently dropped.
+        # ManifestField allows extra fields, so this is safe. Excludes keys
+        # already deliberately resolved above (e.g. "type" here is the raw
+        # authored value like "year", which must not clobber the resolved
+        # "date" set on manifest_field).
+        # "format" is intentionally NOT in this set: it's only explicitly set
+        # above for a subset of branches (year/date/scalar types), so leaving
+        # it out lets the passthrough below carry an authored format through
+        # for enum/regionID/regionName/string-fallback fields too, without
+        # ever clobbering a value a branch above already set.
+        handled_keys = {
+            "type", "description", "comments", "nullable",
+            "enum", "allowedValues", "enumRef", "range", "min", "max",
+        }
+        for key, value in field_spec.items():
+            if key not in handled_keys and key not in manifest_field:
+                manifest_field[key] = value
         return manifest_field
 
     def _parse_dataset_package(
@@ -178,7 +208,7 @@ class WebAdminService(BaseService):
                 table_metadata = {
                     "table_name": table_name,
                     "description": info_block.get("about") or table_definition.get("description"),
-                    "source": info_block.get("source"),
+                    "source": info_block.get("source") or table_definition.get("source"),
                     "data_dictionary": {
                         field_name: {
                             "description": field_spec.get("description"),
@@ -199,13 +229,21 @@ class WebAdminService(BaseService):
                 )
                 manifest_tables[table_name] = {
                     "description": table_metadata["description"],
+                    "source": table_metadata["source"],
                     "path": f"{table_name}.csv",
                     "dataDictionary": {
-                        field_name: self._build_manifest_field(field_name, field_spec)
+                        field_name: self._build_manifest_field(field_name, field_spec, metadata)
                         for field_name, field_spec in data_dictionary.items()
                         if isinstance(field_spec, dict)
                     },
                 }
+                # Carry through any remaining authored table-level keys
+                # verbatim (e.g. source, joinKeys, comments) so they survive
+                # into the downloadable manifest instead of being silently
+                # dropped. ManifestTable allows extra fields, so this is safe.
+                for key, value in table_definition.items():
+                    if key not in {"info", "data_dictionary"} and key not in manifest_tables[table_name]:
+                        manifest_tables[table_name][key] = value
                 matched_file = csv_by_stem.get(table_name)
                 if matched_file is None:
                     custom_findings.append(
@@ -254,7 +292,34 @@ class WebAdminService(BaseService):
             if not raw_payload["rds_id"]:
                 custom_findings.append({"severity": "error", "code": "missing_raw_dataset_id", "message": "Raw dataset ID is required.", "path": "info.raw_dataset.rds_id"})
 
+            # "enumDefinitions" needs special handling: some authors set it to
+            # null and define enum vocab as flat top-level blocks instead (a
+            # bare null would collide with the manifest's formal dict-typed
+            # field), while others nest real enum vocab under this key
+            # directly. Drop it when it's not a populated dict, but pass it
+            # through verbatim when it is - otherwise the enum value
+            # descriptions authors wrote are silently dropped from every
+            # downloaded package for datasets using the nested convention.
+            raw_enum_definitions = metadata.get("enumDefinitions")
+            enum_definitions_passthrough = (
+                {"enumDefinitions": raw_enum_definitions}
+                if isinstance(raw_enum_definitions, dict) and raw_enum_definitions
+                else {}
+            )
+
             manifest_payload = {
+                # Carry through every top-level key authored in metadata.yaml
+                # (tags, spatial/temporal coverage, comments, references, custom
+                # enum-definition blocks, etc.) verbatim. "tables" is excluded
+                # since the processed/enumRef-resolved version is rebuilt below
+                # as "datasetTables". "enumDefinitions" is excluded here and
+                # conditionally re-added above (see comment).
+                **{
+                    key: value
+                    for key, value in metadata.items()
+                    if key not in {"tables", "enumDefinitions"}
+                },
+                **enum_definitions_passthrough,
                 "metadataSpecVersion": "v2",
                 "datasetTitle": dataset_payload["title"] or "Untitled dataset",
                 "datasetSlug": self._slugify(f"{dataset_payload['ds_id']} {dataset_payload['title']}"),
@@ -1196,6 +1261,10 @@ class WebAdminService(BaseService):
     def suggest_next_dataset_id(self, admin_user: User, collection_id: str) -> dict:
         self._require_admin(admin_user)
         return self.admin_dataset_service.suggest_next_dataset_id(collection_id)
+
+    def suggest_next_raw_dataset_id(self, admin_user: User, collection_id: str) -> dict:
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.suggest_next_raw_dataset_id(collection_id)
 
     def list_reserved_dataset_ids(
         self,

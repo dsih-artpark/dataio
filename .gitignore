@@ -153,8 +153,10 @@ data_backup_20260716_120337/*
 **/data_inserts/**
 *.zip
 .data/
+meta-data-Generation/*
 data/
 *.nc
+
 *.geojson
 # AI Files
 
@@ -166,3 +168,5 @@ reformat_yaml.py
 dataio_naming_policy.md
 Datasets_Uploaded_Dataio.md
 
+metadata_field_reference.md
+ARTPARK Data Catalogue.xlsx

@@ -1,0 +1,23 @@
+---
+import AdminDatasetsSubnav from '../../../../components/admin/AdminDatasetsSubnav.astro';
+import { DraftReviewDetail } from '../../../../components/admin/DraftReviewManager';
+import DashboardLayout from '../../../../layouts/DashboardLayout.astro';
+---
+
+<DashboardLayout title="Review Manifest Draft" fullWidth={true}>
+  <div class="space-y-6">
+    <div>
+      <a href="/admin/datasets/drafts" class="text-sm text-slate-500 hover:text-slate-700">&larr; Back to drafts</a>
+      <h1 class="mt-2 text-2xl font-bold text-gray-900">Review Manifest Draft</h1>
+    </div>
+
+    <AdminDatasetsSubnav />
+    <DraftReviewDetail client:load />
+  </div>
+</DashboardLayout>
+
+<script>
+  import { requireAuthenticatedPage } from '../../../../lib/auth';
+
+  requireAuthenticatedPage({ adminOnly: true });
+</script>

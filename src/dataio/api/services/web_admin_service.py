@@ -31,6 +31,7 @@ from dataio.api.auth.otp import create_otp, verify_otp
 from dataio.api.auth.security import enforce_rate_limit
 from dataio.api.services.base_service import BaseService
 from dataio.api.services.admin_dataset_service import AdminDatasetService
+from dataio.api.services.draft_review_service import DraftReviewService
 from dataio.api.services.email_service import EmailService
 from dataio.api.auth.permissions import is_admin
 from dataio.api.auth.security import record_auth_event
@@ -49,6 +50,7 @@ class WebAdminService(BaseService):
         super().__init__()
         self.email_service = EmailService()
         self.admin_dataset_service = AdminDatasetService()
+        self.draft_review_service = DraftReviewService()
         self.validation_service = DataIOValidationService(
             platform_manifest_checker=apply_platform_manifest_checks
         )
@@ -1519,9 +1521,11 @@ class WebAdminService(BaseService):
         self,
         admin_user: User,
         dataset_id: str | None = None,
+        *,
+        check_all: bool = False,
     ) -> dict:
         self._require_admin(admin_user)
-        return self.admin_dataset_service.check_dataset_documentation_sync(dataset_id)
+        return self.admin_dataset_service.check_dataset_documentation_sync(dataset_id, check_all=check_all)
 
     def sync_dataset_documentation(
         self,
@@ -1584,6 +1588,66 @@ class WebAdminService(BaseService):
             manifest_file,
             admin_user.email,
         )
+
+    def generate_manifest_draft(
+        self,
+        admin_user: User,
+        csv_files,
+        category_id: str,
+        collection_id: str,
+        data_owner_name: str,
+        dataset_id: Optional[str] = None,
+        digitization_log_file=None,
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.generate_draft_from_upload(
+            csv_files=csv_files,
+            category_id=category_id,
+            collection_id=collection_id,
+            data_owner_name=data_owner_name,
+            created_by=admin_user.email,
+            dataset_id=dataset_id,
+            digitization_log_file=digitization_log_file,
+        )
+
+    def list_manifest_drafts(
+        self,
+        admin_user: User,
+        status: Optional[str] = None,
+        dataset_id: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.list_drafts(status=status, dataset_id=dataset_id, limit=limit, offset=offset)
+
+    def get_manifest_draft(self, admin_user: User, draft_id: str) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.get_draft(draft_id)
+
+    def delete_manifest_draft(self, admin_user: User, draft_id: str) -> None:
+        self._require_admin(admin_user)
+        self.draft_review_service.delete_draft(draft_id)
+
+    def revalidate_manifest_draft(self, admin_user: User, draft_id: str) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.revalidate_draft(draft_id)
+
+    def approve_manifest_draft(self, admin_user: User, draft_id: str) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.approve_draft(draft_id, admin_user.email)
+
+    def reject_manifest_draft(self, admin_user: User, draft_id: str, reason: Optional[str] = None) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.reject_draft(draft_id, admin_user.email, reason=reason)
+
+    def flag_manifest_draft_field(self, admin_user: User, draft_id: str, field_path: str, note: str) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.flag_field(draft_id, field_path, note, admin_user.email)
+
+    def regenerate_manifest_draft(self, admin_user: User, draft_id: str) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.regenerate_draft(draft_id, admin_user.email)
 
     def validate_dataset(
         self,

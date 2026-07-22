@@ -54,3 +54,10 @@ class ResourceType(str, enum.Enum):
     GROUP = "GROUP"
     BUCKET = "BUCKET"
     WEATHER_DATA_API = "WEATHER_DATA_API"
+
+
+class DatasetManifestDraftStatus(str, enum.Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    FLAGGED = "flagged"

@@ -94,6 +94,15 @@ class DatasetDocumentationUpdate(BaseModel):
     )
 
 
+class ManifestDraftReject(BaseModel):
+    reason: Optional[str] = Field(None, description="Why this draft was rejected")
+
+
+class ManifestDraftFlagField(BaseModel):
+    field_path: str = Field(..., description="Dotted path or column name being flagged")
+    note: str = Field(..., description="Why this field needs curator attention")
+
+
 class User(BaseModel):
     email: str
     is_group: bool

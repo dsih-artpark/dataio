@@ -20,6 +20,7 @@ from dataio.api.database.enums import (
     SpatialResolution,
     TemporalResolution,
     ResourceType,
+    DatasetManifestDraftStatus,
 )
 
 Base = declarative_base()
@@ -109,6 +110,17 @@ class ReservedDatasetID(Base):
     id = Column(Integer, primary_key=True)
     ds_id = Column(Text, nullable=False, unique=True)
     collection_id = Column(Text, nullable=True)
+    note = Column(Text, nullable=True)
+    reserved_by = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class ReservedRawDatasetID(Base):
+    __tablename__ = "reserved_raw_dataset_ids"
+
+    id = Column(Integer, primary_key=True)
+    rds_id = Column(Text, nullable=False, unique=True)
+    category_id = Column(Text, nullable=True)
     note = Column(Text, nullable=True)
     reserved_by = Column(Text, nullable=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
@@ -383,3 +395,53 @@ class ChatMessage(Base):
 
     # Relationship
     session = relationship("ChatSession", back_populates="messages")
+
+
+class DatasetManifestDraft(Base):
+    """LLM-drafted metadata.yaml, pending curator review/approval.
+
+    Staging area only. As of now, approving a draft (DraftReviewService.
+    approve_draft) only flips its status - it does not write anything to
+    filestore/Postgres itself. A curator downloads the approved draft_yaml
+    and re-imports it through the existing manifest-upload path (see
+    AdminDatasetService._validate_and_persist_manifest), which is what
+    actually validates and persists it. This table never becomes a second
+    source of truth for the live manifest, but "approve" alone is not
+    sufficient to make a draft live.
+    """
+
+    __tablename__ = "dataset_manifest_drafts"
+
+    draft_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    dataset_id = Column(Text, nullable=True)
+    collection_id = Column(Text, nullable=False)
+    category_id = Column(Text, nullable=False)
+    source_csv_path = Column(Text, nullable=False)
+    digitization_log_path = Column(Text, nullable=True)
+    # The resolved raw_dataset rds_id, tracked here rather than inside
+    # draft_json/draft_yaml - real metadata.yaml files never contain a
+    # raw_dataset/rds_id field, that belongs only in info.yml.
+    raw_dataset_id = Column(Text, nullable=True)
+    # values_callable is required here (unlike the other SQLEnum columns in
+    # this file): DatasetManifestDraftStatus's member names are uppercase
+    # but its values are lowercase to match the Postgres enum type
+    # (dataset_manifest_draft_status), and SQLAlchemy's Enum binds by
+    # .name, not .value, unless told otherwise.
+    status = Column(
+        SQLEnum(DatasetManifestDraftStatus, values_callable=lambda enum_cls: [e.value for e in enum_cls]),
+        nullable=False,
+        default=DatasetManifestDraftStatus.PENDING,
+    )
+    draft_yaml = Column(Text, nullable=False)
+    draft_json = Column(JSONB, nullable=False)
+    flagged_fields = Column(JSONB, nullable=False, default=list)
+    reviewer_notes = Column(JSONB, nullable=False, default=list)
+    validation_result = Column(JSONB, nullable=True)
+    llm_model_id = Column(Text, nullable=False)
+    llm_prompt_tokens = Column(Integer, nullable=True)
+    llm_completion_tokens = Column(Integer, nullable=True)
+    created_by = Column(Text, ForeignKey("users.email"), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    reviewed_by = Column(Text, ForeignKey("users.email"), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    superseded_by_draft_id = Column(UUID(as_uuid=True), ForeignKey("dataset_manifest_drafts.draft_id"), nullable=True)

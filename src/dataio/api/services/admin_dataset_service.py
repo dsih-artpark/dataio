@@ -370,6 +370,88 @@ class AdminDatasetService(BaseService):
                 status_code=500, detail="Failed to list dataset tables. Contact support."
             ) from e
 
+    def _validate_and_persist_manifest(
+        self,
+        dataset_id: str,
+        bucket_type: VersionType,
+        manifest_text: str,
+        parsed_manifest: dict,
+        updated_by: str,
+    ):
+        """Validates a manifest against the dataset's stored data files,
+        then writes it to filestore + the DB manifest cache and refreshes
+        doc-sync. Raises ValidationError/HTTPException on failure.
+
+        Used by the direct manifest-upload endpoint. An LLM draft that has
+        been through DraftReviewService.approve_draft has NOT gone through
+        this method yet - approval only flips the draft's status. A curator
+        must download the approved draft_yaml and re-upload it through the
+        normal manifest-upload flow (which does call this) before it's
+        actually validated and persisted. If the draft-approval path is ever
+        wired to call this directly instead, this docstring should say so.
+        """
+        dataset_kind = parsed_manifest.get("datasetKind")
+        if not dataset_kind:
+            raise ValidationError("Manifest must define datasetKind")
+        try:
+            dataset_kind_enum = DatasetKind(dataset_kind)
+        except ValueError as e:
+            raise ValidationError(f"Unsupported datasetKind '{dataset_kind}'") from e
+
+        validation_request = ValidationRequest(
+            dataset_kind=dataset_kind_enum,
+            manifest_source=manifest_text,
+            validate_data=True,
+        )
+        if dataset_kind_enum == DatasetKind.TABULAR:
+            validation_request.data_files = (
+                self.filestore_service.get_tabular_validation_sources(
+                    dataset_id,
+                    bucket_type,
+                )
+            )
+            if not validation_request.data_files:
+                raise ValidationError(
+                    "Cannot upload manifest until tabular data files exist in filestore"
+                )
+        elif dataset_kind_enum == DatasetKind.GEOJSON:
+            validation_request.data = self.filestore_service.get_geojson_validation_source(
+                dataset_id,
+                bucket_type,
+            )
+
+        validation_result = self.validation_service.validate(validation_request)
+        if validation_result.status == "fail":
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Manifest and stored data validation failed",
+                    "findings": [
+                        finding.model_dump() for finding in validation_result.findings
+                    ],
+                },
+            )
+
+        self.filestore_service.upload_manifest(
+            dataset_id=dataset_id,
+            version_type=bucket_type,
+            manifest_yaml=manifest_text,
+            manifest_json=parsed_manifest,
+        )
+        database.update_dataset_manifest_cache(
+            dataset_id,
+            manifest_yaml=manifest_text,
+            manifest_json=parsed_manifest,
+            updated_by=updated_by,
+        )
+        self.refresh_dataset_documentation_cache(dataset_id)
+        return {
+            "message": "Manifest uploaded successfully",
+            "dataset_id": dataset_id,
+            "bucket_type": bucket_type.value,
+            "manifest_json": parsed_manifest,
+        }
+
     def upsert_dataset_manifest(
         self,
         dataset_id: str,
@@ -386,67 +468,9 @@ class AdminDatasetService(BaseService):
             if not isinstance(parsed_manifest, dict):
                 raise ValidationError("Manifest must deserialize to an object")
 
-            dataset_kind = parsed_manifest.get("datasetKind")
-            if not dataset_kind:
-                raise ValidationError("Manifest must define datasetKind")
-            try:
-                dataset_kind_enum = DatasetKind(dataset_kind)
-            except ValueError as e:
-                raise ValidationError(f"Unsupported datasetKind '{dataset_kind}'") from e
-
-            validation_request = ValidationRequest(
-                dataset_kind=dataset_kind_enum,
-                manifest_source=manifest_text,
-                validate_data=True,
+            return self._validate_and_persist_manifest(
+                dataset_id, bucket_type, manifest_text, parsed_manifest, updated_by
             )
-            if dataset_kind_enum == DatasetKind.TABULAR:
-                validation_request.data_files = (
-                    self.filestore_service.get_tabular_validation_sources(
-                        dataset_id,
-                        bucket_type,
-                    )
-                )
-                if not validation_request.data_files:
-                    raise ValidationError(
-                        "Cannot upload manifest until tabular data files exist in filestore"
-                    )
-            elif dataset_kind_enum == DatasetKind.GEOJSON:
-                validation_request.data = self.filestore_service.get_geojson_validation_source(
-                    dataset_id,
-                    bucket_type,
-                )
-
-            validation_result = self.validation_service.validate(validation_request)
-            if validation_result.status == "fail":
-                raise HTTPException(
-                    status_code=400,
-                    detail={
-                        "message": "Manifest and stored data validation failed",
-                        "findings": [
-                            finding.model_dump() for finding in validation_result.findings
-                        ],
-                    },
-                )
-
-            self.filestore_service.upload_manifest(
-                dataset_id=dataset_id,
-                version_type=bucket_type,
-                manifest_yaml=manifest_text,
-                manifest_json=parsed_manifest,
-            )
-            database.update_dataset_manifest_cache(
-                dataset_id,
-                manifest_yaml=manifest_text,
-                manifest_json=parsed_manifest,
-                updated_by=updated_by,
-            )
-            self.refresh_dataset_documentation_cache(dataset_id)
-            return {
-                "message": "Manifest uploaded successfully",
-                "dataset_id": dataset_id,
-                "bucket_type": bucket_type.value,
-                "manifest_json": parsed_manifest,
-            }
         except HTTPException:
             raise
         except ValidationError as e:
@@ -490,10 +514,16 @@ class AdminDatasetService(BaseService):
                 detail="Failed to delete dataset version file. Contact support.",
             ) from e
 
-    def check_dataset_documentation_sync(self, dataset_id: str | None = None):
+    def check_dataset_documentation_sync(self, dataset_id: str | None = None, *, check_all: bool = False):
+        """Interactive per-dataset check by default - a curator picks one
+        dataset in the sync workspace and checks just that one. `check_all`
+        is a separate opt-in for summary use (e.g. the admin overview's
+        outdated-docs count), where checking every dataset at once is the
+        whole point rather than an accident of a missing dataset_id.
+        """
         session = self.db_session_factory()
         try:
-            if dataset_id is None:
+            if dataset_id is None and not check_all:
                 raise ValidationError(
                     "Dataset ID is required for interactive documentation sync"
                 )

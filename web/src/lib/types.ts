@@ -345,3 +345,45 @@ export interface ValidationResult {
   findings: ValidationFinding[];
   inferred: Record<string, unknown>;
 }
+
+export interface ManifestDraftFlaggedField {
+  field: string;
+  reason: string;
+}
+
+export interface ManifestDraftReviewerNote {
+  field?: string;
+  note: string;
+  by: string;
+}
+
+export type ManifestDraftStatus = 'pending' | 'approved' | 'rejected' | 'flagged';
+
+export interface ManifestDraftSummary {
+  draft_id: string;
+  dataset_id: string | null;
+  collection_id: string;
+  category_id: string;
+  status: ManifestDraftStatus;
+  llm_model_id: string;
+  created_by: string;
+  created_at: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  superseded_by_draft_id: string | null;
+}
+
+export interface ManifestDraftDetail extends ManifestDraftSummary {
+  // Whether dataset_id (a reserved ID, always set) already corresponds to
+  // a real Dataset row - a draft with dataset_id set could still be for a
+  // brand-new dataset, since the ID gets reserved before the dataset
+  // actually exists.
+  dataset_exists: boolean | null;
+  source_csv_path: string;
+  digitization_log_path: string | null;
+  draft_yaml: string;
+  draft_json: Record<string, unknown>;
+  flagged_fields: ManifestDraftFlaggedField[];
+  reviewer_notes: ManifestDraftReviewerNote[];
+  validation_result: ValidationResult | null;
+}

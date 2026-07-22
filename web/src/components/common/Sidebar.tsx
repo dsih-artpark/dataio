@@ -1,4 +1,5 @@
 import type { JSX } from 'preact';
+import { useState } from 'preact/hooks';
 import { currentUser } from '../../lib/auth';
 
 interface NavItem {
@@ -21,9 +22,11 @@ const navItems: NavItem[] = [
     adminOnly: true,
     children: [
       { name: 'Overview', href: '/admin/datasets' },
+      { name: 'Metadata Drafts', href: '/admin/datasets/drafts' },
       { name: 'Create / Import', href: '/admin/datasets/new' },
       { name: 'Catalog', href: '/admin/datasets/catalog' },
       { name: 'Reserved IDs', href: '/admin/datasets/reservations' },
+      { name: 'Next ID', href: '/admin/datasets/next-id' },
       { name: 'Documentation Sync', href: '/admin/datasets/sync' },
     ],
   },
@@ -87,6 +90,35 @@ export default function Sidebar() {
 
   const filteredItems = navItems.filter((item) => !item.adminOnly || isAdmin);
 
+  // Collapsed by default; a section auto-expands if the current page is one
+  // of its children, so landing directly on e.g. /admin/datasets/drafts
+  // doesn't leave the sidebar looking empty.
+  const [expanded, setExpanded] = useState<Set<string>>(() => {
+    const initial = new Set<string>();
+    for (const item of navItems) {
+      if (
+        item.children?.some(
+          (child) => currentPath === child.href || currentPath.startsWith(child.href + '/')
+        )
+      ) {
+        initial.add(item.name);
+      }
+    }
+    return initial;
+  });
+
+  const toggleSection = (name: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) {
+        next.delete(name);
+      } else {
+        next.add(name);
+      }
+      return next;
+    });
+  };
+
   return (
     <aside class="hidden lg:flex lg:flex-shrink-0">
       <div class="flex flex-col w-64 fixed inset-y-0 pt-16">
@@ -116,23 +148,52 @@ export default function Sidebar() {
                       {item.name}
                     </a>
                   ) : (
-                    <div
-                      class={`flex items-center px-3 py-2 text-sm font-semibold rounded-lg ${
+                    <button
+                      type="button"
+                      onClick={() => toggleSection(item.name)}
+                      aria-expanded={expanded.has(item.name)}
+                      class={`w-full flex items-center justify-between px-3 py-2 text-sm font-semibold rounded-lg hover:bg-gray-50 ${
                         isActive ? 'text-primary-700' : 'text-gray-700'
                       }`}
                     >
-                      <span class={`mr-3 ${isActive ? 'text-primary-600' : 'text-gray-400'}`}>
-                        {icons[item.icon]}
+                      <span class="flex items-center">
+                        <span class={`mr-3 ${isActive ? 'text-primary-600' : 'text-gray-400'}`}>
+                          {icons[item.icon]}
+                        </span>
+                        {item.name}
                       </span>
-                      {item.name}
-                    </div>
+                      <svg
+                        class={`w-4 h-4 text-gray-400 transition-transform ${
+                          expanded.has(item.name) ? 'rotate-90' : ''
+                        }`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M9 5l7 7-7 7"
+                        />
+                      </svg>
+                    </button>
                   )}
 
-                  {item.children ? (
+                  {item.children && expanded.has(item.name) ? (
                     <div class="ml-11 mt-1 space-y-1">
                       {item.children.map((child) => {
-                        const childActive =
-                          currentPath === child.href || currentPath.startsWith(child.href + '/');
+                        // A link whose href is itself a prefix of a sibling's
+                        // href (e.g. "Overview" -> /admin/datasets, sibling
+                        // "Catalog" -> /admin/datasets/catalog) must match
+                        // exactly - otherwise it lights up on every sibling
+                        // page too, since its own path is a prefix of theirs.
+                        const isAncestorOfSibling = item.children!.some(
+                          (sibling) => sibling.href !== child.href && sibling.href.startsWith(child.href + '/')
+                        );
+                        const childActive = isAncestorOfSibling
+                          ? currentPath === child.href
+                          : currentPath === child.href || currentPath.startsWith(child.href + '/');
                         return (
                           <a
                             key={child.href}

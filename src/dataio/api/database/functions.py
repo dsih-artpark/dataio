@@ -373,6 +373,44 @@ def update_manifest_draft_status(
             session.close()
 
 
+def update_manifest_draft_content(
+    draft_id,
+    *,
+    draft_yaml: str,
+    draft_json: dict,
+    validation_result: dict | None = None,
+    session=None,
+):
+    """Overwrites a draft's manifest content in place (curator-edited YAML,
+    see draft_review_service.update_draft_content) - unlike
+    update_manifest_draft_status, this never touches status/reviewed_by,
+    since editing content is independent of the review decision.
+    """
+    owns_session = session is None
+    session = session or Session()
+    try:
+        draft = (
+            session.query(DatasetManifestDraft)
+            .filter(DatasetManifestDraft.draft_id == _coerce_draft_id(draft_id))
+            .first()
+        )
+        if not draft:
+            raise ValueError(f"Manifest draft {draft_id} not found")
+        draft.draft_yaml = draft_yaml
+        draft.draft_json = draft_json
+        if validation_result is not None:
+            draft.validation_result = validation_result
+        session.commit()
+        session.refresh(draft)
+        return draft
+    except Exception as e:
+        logger.error(f"Error updating manifest draft content {draft_id}: {str(e)}")
+        raise
+    finally:
+        if owns_session:
+            session.close()
+
+
 def flag_manifest_draft_field(draft_id, field_path: str, reason: str, flagged_by: str, session=None):
     """Appends one entry to a draft's flagged_fields, sets its status to
     'flagged', and records a matching reviewer note - the one place a

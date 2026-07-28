@@ -365,12 +365,45 @@ export interface ManifestDraftSummary {
   collection_id: string;
   category_id: string;
   status: ManifestDraftStatus;
-  llm_model_id: string;
+  // null for a deterministic (rule-based, no-LLM) draft - see
+  // adminGenerateDeterministicManifestDraft.
+  llm_model_id: string | null;
   created_by: string;
   created_at: string | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
   superseded_by_draft_id: string | null;
+}
+
+// The manifest fields no deterministic rule can derive from the CSV alone -
+// supplied directly by the curator through the intake form. Mirrors
+// dataio.api.services.deterministic_draft_service.CuratorMetadataInput.
+export interface CuratorMetadataInput {
+  datasetDescription: string;
+  source: string[];
+  references: string[];
+  tags: { concept: string[]; epiType: string[] };
+  spatialCoverage: string;
+  spatialResolution: string;
+  temporalCoverage: string;
+  temporalResolution: string;
+  updateFrequency: string;
+  comments: string[];
+  // The curator's confirmed/edited subset of the auto-suggested join-key
+  // candidates - leave empty to accept the backend's own suggestion.
+  joinKeyColumns: string[];
+  // Required, one entry per table (keyed by table name - the CSV filename
+  // without its extension). No rule can derive real table-level narrative
+  // from a CSV alone.
+  tableDescriptions: Record<string, string>;
+  // Required, one entry per column not classified as "fixed" by
+  // /admin/manifest-drafts/classify-columns (keyed table name -> column
+  // name). Region-identifier and source/provenance columns are excluded -
+  // those are auto-filled server-side.
+  columnDescriptions: Record<string, Record<string, string>>;
+  // Only meaningful (and required) with 2+ CSVs - a single-CSV dataset is
+  // always named after that CSV's own filename regardless of this value.
+  datasetTitle: string;
 }
 
 export interface ManifestDraftDetail extends ManifestDraftSummary {

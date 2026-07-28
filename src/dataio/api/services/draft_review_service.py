@@ -13,6 +13,7 @@ will ever go on to consume it itself.
 
 from __future__ import annotations
 
+import datetime
 import os
 
 import yaml
@@ -56,6 +57,25 @@ def _draft_to_dict(draft, *, dataset_exists: bool | None = None) -> dict:
         "reviewed_at": draft.reviewed_at.isoformat() if draft.reviewed_at else None,
         "superseded_by_draft_id": str(draft.superseded_by_draft_id) if draft.superseded_by_draft_id else None,
     }
+
+
+def _stringify_dates(value):
+    """yaml.safe_load implicitly parses an ISO-8601-looking scalar (e.g. a
+    temporalCoverage value like "2019-06-30") into a datetime.date/datetime
+    object - every manifest field is a plain string everywhere else in the
+    app (CuratorMetadataInput, field_inference, etc. never produce a real
+    date object), and the JSONB column's json serializer has no idea how to
+    write one out, so a curator-edited draft containing one fails to save.
+    Round-trips it back to the plain-string contract the rest of the app
+    expects.
+    """
+    if isinstance(value, dict):
+        return {k: _stringify_dates(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_stringify_dates(v) for v in value]
+    if isinstance(value, (datetime.date, datetime.datetime)):
+        return value.isoformat()
+    return value
 
 
 class DraftReviewService(BaseService):
@@ -112,6 +132,72 @@ class DraftReviewService(BaseService):
 
         return draft.model_dump()
 
+    def generate_deterministic_draft_from_upload(
+        self,
+        *,
+        csv_files: list[UploadFile],
+        category_id: str,
+        collection_id: str,
+        created_by: str,
+        data_owner_name: str,
+        curator_input: dict,
+        dataset_id: str | None = None,
+    ) -> dict:
+        """Backs the web "Generate deterministic draft" form - the no-LLM
+        self-service path agreed with Lijith (2026-07-24 Data-Platform
+        Discussion). Same upload-then-draft pattern as
+        generate_draft_from_upload, but curator_input (the structured
+        fields a human must supply - see CuratorMetadataInput) takes the
+        place of a digitization log file, and there's no LLM call to make.
+        """
+        from pydantic import ValidationError
+
+        from dataio.api.services.deterministic_draft_service import (
+            CuratorMetadataInput,
+            generate_deterministic_draft,
+        )
+
+        try:
+            parsed_curator_input = CuratorMetadataInput(**curator_input)
+        except ValidationError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid curator_input: {e}") from e
+
+        csv_paths = [save_upload(f) for f in csv_files]
+
+        try:
+            draft = generate_deterministic_draft(
+                csv_paths=csv_paths,
+                category_id=category_id,
+                collection_id=collection_id,
+                created_by=created_by,
+                data_owner_name=data_owner_name,
+                curator_input=parsed_curator_input,
+                dataset_id=dataset_id,
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to generate deterministic manifest draft: {e!s}")
+            raise HTTPException(status_code=502, detail=f"Draft generation failed: {e}") from e
+
+        return draft.model_dump()
+
+    def classify_columns(self, *, column_names: list[str]) -> dict:
+        """Backs the intake form's dynamic per-column description prompts:
+        splits column_names into "fixed" (auto-filled by
+        field_inference.infer_fixed_column_description - never prompted)
+        and "needsDescription" (everything else - the curator must supply
+        one, see deterministic_draft_service.CuratorMetadataInput.
+        columnDescriptions). No CSV read, no LLM call - the same rule both
+        this endpoint and generate_deterministic_draft use, so the intake
+        form and the actual validation can never disagree about which
+        columns require a description. Classification only depends on each
+        column's own name, not which table it's in, so no table_name here.
+        """
+        from dataio.api.services.field_inference import infer_fixed_column_description
+
+        fixed = [name for name in column_names if infer_fixed_column_description(name) is not None]
+        needs_description = [name for name in column_names if name not in fixed]
+        return {"fixed": fixed, "needsDescription": needs_description}
+
     def revalidate_draft(self, draft_id: str) -> dict:
         """Re-runs the same conversion + existing-DataIOValidator check
         generate_draft() used, in case the CSV(s) or the manifest have
@@ -130,6 +216,58 @@ class DraftReviewService(BaseService):
         )
         updated = database.update_manifest_draft_status(
             draft_id, draft.status.value, validation_result=result.model_dump(),
+        )
+        return _draft_to_dict(updated)
+
+    def update_draft_content(self, draft_id: str, draft_yaml: str) -> dict:
+        """Persists curator-edited manifest YAML (the Draft Review screen's
+        inline editor), re-validating against the same real CSVs
+        revalidate_draft uses. Only allowed while a draft is still under
+        review - an approved/rejected draft is final, and its ids may
+        already be in use elsewhere.
+        """
+        from dataio.api.services.draft_service import _reorder_manifest_keys, decode_csv_paths
+
+        draft = self._get_draft_or_404(draft_id)
+        if draft.status.value in ("approved", "rejected"):
+            raise HTTPException(
+                status_code=400, detail=f"Cannot edit a draft that is already {draft.status.value}."
+            )
+
+        try:
+            draft_json = _stringify_dates(yaml.safe_load(draft_yaml))
+        except yaml.YAMLError as exc:
+            raise HTTPException(status_code=400, detail=f"Not valid YAML: {exc}") from exc
+        if not isinstance(draft_json, dict):
+            raise HTTPException(status_code=400, detail="Manifest must be a YAML mapping.")
+
+        table_names = list((draft_json.get("tables") or {}).keys())
+        csv_paths_by_table = decode_csv_paths(draft.source_csv_path, table_names)
+
+        # Re-canonicalize key/column order on every save, not just at
+        # generation time (_finalize_draft) - a full-manifest submission
+        # (the Apply numeric-settings action, a raw YAML edit) round-trips
+        # draft_json through the DB's JSONB column, which does not preserve
+        # object key order at any nesting depth, so without this the saved
+        # draft_yaml would drift away from the hand-authored ordering every
+        # real metadata.yaml uses (see CANONICAL_KEY_ORDER).
+        draft_json = _reorder_manifest_keys(draft_json, csv_paths_by_table)
+        draft_yaml = yaml.safe_dump(draft_json, sort_keys=False, allow_unicode=True)
+
+        contract_manifest = convert_v2_manifest_to_contract(draft_json)
+        manifest_yaml = yaml.safe_dump(contract_manifest, sort_keys=False, allow_unicode=True)
+        data_files = {
+            name: csv_paths_by_table[name] for name in table_names if name in csv_paths_by_table
+        }
+        result = DataIOValidator().validate_tabular(
+            manifest=manifest_yaml, data_files=data_files, deep_check=False, full_scan=True,
+        )
+
+        updated = database.update_manifest_draft_content(
+            draft_id,
+            draft_yaml=draft_yaml,
+            draft_json=draft_json,
+            validation_result=result.model_dump(),
         )
         return _draft_to_dict(updated)
 
@@ -217,28 +355,105 @@ class DraftReviewService(BaseService):
         return _draft_to_dict(updated)
 
     def regenerate_draft(self, draft_id: str, reviewed_by: str) -> dict:
-        """Regenerates the whole draft from the same inputs (CSVs,
-        digitization log, category/collection), superseding the original.
-        Scoping regeneration to a single field is a further refinement not
-        implemented here - this re-runs the full drafting pass.
+        """Regenerates the whole draft from the same inputs, superseding the
+        original. Scoping regeneration to a single field is a further
+        refinement not implemented here - this re-runs the full drafting
+        pass. Dispatches on llm_model_id (None means the original was a
+        deterministic draft - see generate_deterministic_draft_from_upload)
+        since the two paths need different regeneration inputs (a
+        digitization log file vs. a reconstructed CuratorMetadataInput).
         """
         from dataio.api.services.draft_service import decode_csv_paths, generate_draft
 
         original = self._get_draft_or_404(draft_id)
         table_names = list(original.draft_json.get("tables", {}).keys())
         csv_paths_by_table = decode_csv_paths(original.source_csv_path, table_names)
-        new_draft = generate_draft(
+
+        if original.llm_model_id is None:
+            new_draft = self._regenerate_deterministic_draft(
+                original, csv_paths_by_table, reviewed_by
+            )
+        else:
+            new_draft = generate_draft(
+                csv_paths=list(csv_paths_by_table.values()),
+                category_id=original.category_id,
+                collection_id=original.collection_id,
+                created_by=reviewed_by,
+                data_owner_name=original.draft_json.get("datasetOwner", ""),
+                dataset_id=original.dataset_id,
+                digitization_log_path=original.digitization_log_path,
+                superseded_by_draft_id=str(original.draft_id),
+                # Reuse the same reserved rds_id rather than reserving a
+                # second one - this is a redraft of the same dataset, not a
+                # new one.
+                raw_dataset_id=original.raw_dataset_id,
+            )
+        database.update_manifest_draft_status(draft_id, "rejected", reviewed_by=reviewed_by)
+        return new_draft.model_dump()
+
+    def _regenerate_deterministic_draft(self, original, csv_paths_by_table: dict, reviewed_by: str):
+        """Reconstructs a CuratorMetadataInput from the original draft's own
+        draft_json (its top-level curator-owned fields round-trip verbatim)
+        and re-runs generate_deterministic_draft against the same CSVs -
+        the deterministic equivalent of the LLM path's full re-drafting
+        pass. Regenerating with unchanged input reproduces the same output
+        by design (no randomness to re-roll); it only differs from the
+        original if the curator edits fields first via a future intake-form
+        "regenerate with edits" flow.
+
+        Region-history comments (prefixed "[region history]", see
+        region_gap_detector.py) are excluded from the round-tripped
+        `comments` list since generate_deterministic_draft recomputes and
+        re-appends them fresh from region_history.yaml - carrying the old
+        ones forward would duplicate every one of them.
+        """
+        from dataio.api.services.deterministic_draft_service import (
+            CuratorMetadataInput,
+            TagsInput,
+            generate_deterministic_draft,
+        )
+        from dataio.api.services.field_inference import infer_fixed_column_description
+
+        manifest = original.draft_json
+        tags = manifest.get("tags") or {}
+        curator_input = CuratorMetadataInput(
+            datasetDescription=manifest.get("datasetDescription", ""),
+            source=manifest.get("source", []),
+            references=manifest.get("references", []),
+            tags=TagsInput(concept=tags.get("concept", []), epiType=tags.get("epiType", [])),
+            spatialCoverage=manifest.get("spatialCoverage", ""),
+            spatialResolution=manifest.get("spatialResolution", ""),
+            temporalCoverage=manifest.get("temporalCoverage", ""),
+            temporalResolution=manifest.get("temporalResolution", ""),
+            updateFrequency=manifest.get("updateFrequency", ""),
+            comments=[
+                c for c in manifest.get("comments", []) if not c.startswith("[region history]")
+            ],
+            joinKeyColumns=manifest.get("joinKeys", []),
+            tableDescriptions={
+                name: t.get("description", "") for name, t in (manifest.get("tables") or {}).items()
+            },
+            # Fixed-pattern columns (region identifiers, source/provenance)
+            # regenerate fresh from infer_fixed_column_description - only
+            # curator-supplied ones need to round-trip.
+            columnDescriptions={
+                table_name: {
+                    column_name: field.get("description", "")
+                    for column_name, field in (table.get("data_dictionary") or {}).items()
+                    if infer_fixed_column_description(column_name) is None
+                }
+                for table_name, table in (manifest.get("tables") or {}).items()
+            },
+            datasetTitle=manifest.get("datasetTitle", ""),
+        )
+        return generate_deterministic_draft(
             csv_paths=list(csv_paths_by_table.values()),
             category_id=original.category_id,
             collection_id=original.collection_id,
             created_by=reviewed_by,
-            data_owner_name=original.draft_json.get("datasetOwner", ""),
+            data_owner_name=manifest.get("datasetOwner", ""),
+            curator_input=curator_input,
             dataset_id=original.dataset_id,
-            digitization_log_path=original.digitization_log_path,
             superseded_by_draft_id=str(original.draft_id),
-            # Reuse the same reserved rds_id rather than reserving a second
-            # one - this is a redraft of the same dataset, not a new one.
             raw_dataset_id=original.raw_dataset_id,
         )
-        database.update_manifest_draft_status(draft_id, "rejected", reviewed_by=reviewed_by)
-        return new_draft.model_dump()

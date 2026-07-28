@@ -1610,6 +1610,31 @@ class WebAdminService(BaseService):
             digitization_log_file=digitization_log_file,
         )
 
+    def generate_deterministic_manifest_draft(
+        self,
+        admin_user: User,
+        csv_files,
+        category_id: str,
+        collection_id: str,
+        data_owner_name: str,
+        curator_input: dict,
+        dataset_id: Optional[str] = None,
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.generate_deterministic_draft_from_upload(
+            csv_files=csv_files,
+            category_id=category_id,
+            collection_id=collection_id,
+            data_owner_name=data_owner_name,
+            created_by=admin_user.email,
+            curator_input=curator_input,
+            dataset_id=dataset_id,
+        )
+
+    def classify_columns(self, admin_user: User, column_names: list) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.classify_columns(column_names=column_names)
+
     def list_manifest_drafts(
         self,
         admin_user: User,
@@ -1644,6 +1669,12 @@ class WebAdminService(BaseService):
     def flag_manifest_draft_field(self, admin_user: User, draft_id: str, field_path: str, note: str) -> dict:
         self._require_admin(admin_user)
         return self.draft_review_service.flag_field(draft_id, field_path, note, admin_user.email)
+
+    def update_manifest_draft_content(
+        self, admin_user: User, draft_id: str, draft_yaml: str
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.update_draft_content(draft_id, draft_yaml)
 
     def regenerate_manifest_draft(self, admin_user: User, draft_id: str) -> dict:
         self._require_admin(admin_user)

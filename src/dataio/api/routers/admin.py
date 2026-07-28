@@ -1,10 +1,13 @@
 from fastapi import HTTPException, Depends, APIRouter, Form, UploadFile
 from typing import List
+import json
 import logging
 from dataio.api.auth import get_user, admin_required
 from dataio.api.services import AdminUserManagementService, AdminDatasetService, DraftReviewService
 from dataio.api.models import (
+    ClassifyColumnsRequest,
     DatasetCreate,
+    ManifestDraftEdit,
     ManifestDraftFlagField,
     ManifestDraftReject,
     User,
@@ -202,6 +205,40 @@ async def generate_manifest_draft(
     )
 
 
+@admin_router.post("/manifest-drafts/generate-deterministic", tags=["admin/manifest-drafts"])
+@admin_required
+async def generate_deterministic_manifest_draft(
+    csv_files: List[UploadFile],
+    category_id: str = Form(...),
+    collection_id: str = Form(...),
+    data_owner_name: str = Form(...),
+    curator_input: str = Form(...),
+    created_by: str = Form(None),
+    dataset_id: str = Form(None),
+    user: User = Depends(get_user),
+    draft_review_service: DraftReviewService = Depends(DraftReviewService),
+):
+    return draft_review_service.generate_deterministic_draft_from_upload(
+        csv_files=csv_files,
+        category_id=category_id,
+        collection_id=collection_id,
+        data_owner_name=data_owner_name,
+        created_by=created_by or user.email,
+        curator_input=json.loads(curator_input),
+        dataset_id=dataset_id,
+    )
+
+
+@admin_router.post("/manifest-drafts/classify-columns", tags=["admin/manifest-drafts"])
+@admin_required
+async def classify_columns(
+    body: ClassifyColumnsRequest,
+    user: User = Depends(get_user),
+    draft_review_service: DraftReviewService = Depends(DraftReviewService),
+):
+    return draft_review_service.classify_columns(column_names=body.column_names)
+
+
 @admin_router.get("/manifest-drafts", tags=["admin/manifest-drafts"])
 @admin_required
 async def list_manifest_drafts(
@@ -265,6 +302,17 @@ async def reject_manifest_draft(
     draft_review_service: DraftReviewService = Depends(DraftReviewService),
 ):
     return draft_review_service.reject_draft(draft_id, user.email, reason=body.reason)
+
+
+@admin_router.put("/manifest-drafts/{draft_id}", tags=["admin/manifest-drafts"])
+@admin_required
+async def update_manifest_draft(
+    draft_id: str,
+    body: ManifestDraftEdit,
+    user: User = Depends(get_user),
+    draft_review_service: DraftReviewService = Depends(DraftReviewService),
+):
+    return draft_review_service.update_draft_content(draft_id, body.draft_yaml)
 
 
 @admin_router.post("/manifest-drafts/{draft_id}/flag-field", tags=["admin/manifest-drafts"])

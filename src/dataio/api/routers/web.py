@@ -33,9 +33,11 @@ from dataio.api.database.enums import VersionType
 from dataio.api.database.models import User
 from dataio.api.auth.jwt import REFRESH_COOKIE_NAME, get_current_web_user
 from dataio.api.models import (
+    ClassifyColumnsRequest,
     DatasetCreate,
     DatasetDocumentationUpdate,
     DatasetUpdate,
+    ManifestDraftEdit,
     ManifestDraftFlagField,
     ManifestDraftReject,
     RawDatasetCreate,
@@ -1637,6 +1639,39 @@ async def web_generate_manifest_draft(
     )
 
 
+@web_router.post(
+    "/admin/manifest-drafts/generate-deterministic", tags=["web-admin/manifest-drafts"]
+)
+async def web_generate_deterministic_manifest_draft(
+    csv_files: List[UploadFile] = File(...),
+    category_id: str = Form(...),
+    collection_id: str = Form(...),
+    data_owner_name: str = Form(...),
+    curator_input: str = Form(...),
+    dataset_id: Optional[str] = Form(None),
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.generate_deterministic_manifest_draft(
+        user,
+        csv_files,
+        category_id,
+        collection_id,
+        data_owner_name,
+        json.loads(curator_input),
+        dataset_id=dataset_id,
+    )
+
+
+@web_router.post("/admin/manifest-drafts/classify-columns", tags=["web-admin/manifest-drafts"])
+async def web_classify_columns(
+    body: ClassifyColumnsRequest,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.classify_columns(user, body.column_names)
+
+
 @web_router.get("/admin/manifest-drafts", tags=["web-admin/manifest-drafts"])
 async def web_list_manifest_drafts(
     status: Optional[str] = None,
@@ -1694,6 +1729,16 @@ async def web_reject_manifest_draft(
     admin_service: WebAdminService = Depends(WebAdminService),
 ):
     return admin_service.reject_manifest_draft(user, draft_id, reason=body.reason)
+
+
+@web_router.put("/admin/manifest-drafts/{draft_id}", tags=["web-admin/manifest-drafts"])
+async def web_update_manifest_draft(
+    draft_id: str,
+    body: ManifestDraftEdit,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.update_manifest_draft_content(user, draft_id, body.draft_yaml)
 
 
 @web_router.post("/admin/manifest-drafts/{draft_id}/flag-field", tags=["web-admin/manifest-drafts"])

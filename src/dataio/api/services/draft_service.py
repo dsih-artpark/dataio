@@ -8,6 +8,7 @@ regenerate-flagged-field endpoint - there is exactly one implementation of
 
 from __future__ import annotations
 
+import csv
 import json
 import re
 from datetime import date
@@ -25,7 +26,7 @@ from dataio.api.database.functions import (
     suggest_next_dataset_id,
 )
 from dataio.api.database.rds_id_helpers import resolve_rds_id
-from dataio.api.services.csv_profiler import profile_csv, read_full_csv_text
+from dataio.api.services.csv_profiler import CsvProfile, profile_csv, read_full_csv_text
 from dataio.api.services.digitization_log import load_digitization_log
 from dataio.api.services.draft_prompt import build_batch_prompt, build_prompt, parse_llm_output
 from dataio.api.services.manifest_v2_conversion import convert_v2_manifest_to_contract
@@ -49,11 +50,79 @@ CANONICAL_KEY_ORDER = (
     "joinKeys", "comments", "references", "tables",
 )
 
+# Same convention, one level down: a tables.<name> entry (see e.g.
+# CS0007DS0112's own "tables:" block).
+TABLE_KEY_ORDER = ("description", "source", "joinKeys", "data_dictionary")
 
-def _reorder_manifest_keys(manifest_dict: dict) -> dict:
-    ordered = {key: manifest_dict[key] for key in CANONICAL_KEY_ORDER if key in manifest_dict}
-    remaining = {key: value for key, value in manifest_dict.items() if key not in ordered}
+# Same convention, one level further down: a single data_dictionary.<column>
+# field spec - matches the order field_inference.py naturally builds one in
+# (type/format/enumRef first, then nullable, then description, then
+# isJoinKey/joinKeyType once apply_join_keys runs, then the few
+# curator/review-time additions last).
+FIELD_KEY_ORDER = (
+    "type", "format", "enumRef", "nullable", "description", "isJoinKey",
+    "joinKeyType", "allowedValues", "temporal_axis", "additive", "aggregation", "min",
+)
+
+
+def _reorder_dict(value: dict, key_order: tuple[str, ...]) -> dict:
+    ordered = {key: value[key] for key in key_order if key in value}
+    remaining = {key: val for key, val in value.items() if key not in ordered}
     return {**ordered, **remaining}
+
+
+def _csv_header_columns(csv_path: str) -> list[str]:
+    """Just the header row - the true source of a table's "natural" column
+    order (what infer_data_dictionary produces at generation time, before
+    it's ever round-tripped through the DB). Best-effort: an unreadable/
+    missing path just means column order can't be restored, not that the
+    save should fail.
+    """
+    try:
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            return next(csv.reader(f))
+    except (OSError, StopIteration):
+        return []
+
+
+def _reorder_manifest_keys(
+    manifest_dict: dict, csv_paths_by_table: dict[str, str] | None = None
+) -> dict:
+    """Restores the hand-authored key/column order at every level of the v2
+    manifest (top-level, each table, each data_dictionary field and its
+    column order) - needed not just once at generation time but on every
+    subsequent save, since a JSONB column (draft_json's storage type) does
+    not preserve object key order at any nesting depth, so a curator-edited
+    draft that round-tripped through the DB would otherwise drift away from
+    this order. csv_paths_by_table is optional and only affects
+    data_dictionary column order (restored to each CSV's own header order);
+    everything else reorders regardless.
+    """
+    ordered = _reorder_dict(manifest_dict, CANONICAL_KEY_ORDER)
+    tables = ordered.get("tables")
+    if isinstance(tables, dict):
+        ordered["tables"] = {
+            name: _reorder_table(table, (csv_paths_by_table or {}).get(name))
+            for name, table in tables.items()
+        }
+    return ordered
+
+
+def _reorder_table(table: dict, csv_path: str | None = None) -> dict:
+    if not isinstance(table, dict):
+        return table
+    reordered = _reorder_dict(table, TABLE_KEY_ORDER)
+    data_dictionary = reordered.get("data_dictionary")
+    if isinstance(data_dictionary, dict):
+        if csv_path:
+            header_columns = _csv_header_columns(csv_path)
+            if header_columns:
+                data_dictionary = _reorder_dict(data_dictionary, tuple(header_columns))
+        reordered["data_dictionary"] = {
+            column: _reorder_dict(field, FIELD_KEY_ORDER) if isinstance(field, dict) else field
+            for column, field in data_dictionary.items()
+        }
+    return reordered
 
 
 def _encode_csv_paths(csv_paths_by_table: dict[str, str]) -> str:
@@ -341,6 +410,105 @@ def _validate_manifest(manifest_dict: dict, csv_paths_by_table: dict[str, str]):
     )
 
 
+def _finalize_draft(
+    *,
+    manifest_dict: dict,
+    flags: list[dict],
+    csv_paths_by_table: dict[str, str],
+    csv_profiles: dict[str, CsvProfile],
+    category_id: str,
+    collection_id: str,
+    created_by: str,
+    data_owner_name: str,
+    dataset_id: str | None,
+    raw_dataset_id: str | None,
+    digitization_log_path: str | None,
+    superseded_by_draft_id: str | None,
+    llm_model_id: str | None,
+) -> DraftRecord:
+    """Shared tail for every draft-generation path (LLM or deterministic):
+    resolves category/collection and ds_id/rds_id, sets the fields no
+    generator has any basis for guessing (datasetID, category, collection,
+    datasetOwner, lastUpdated, datasetSlug), validates against the real CSV
+    data, and persists a pending draft row. Callers only need to have
+    already produced a v2-schema manifest_dict + flags by whatever means
+    (LLM completion, rule-based inference, ...) - everything from here on
+    (ID reservation, key ordering, validation, persistence) is identical
+    regardless of how the manifest content was produced.
+    """
+    all_missing_source_columns = sorted(
+        {column for profile in csv_profiles.values() for column in profile.missing_source_columns}
+    )
+    flags = _ensure_missing_source_columns_flagged(flags, all_missing_source_columns)
+
+    # Validate the collection exists before reserving anything below - a
+    # request for a nonexistent collection must fail with nothing left
+    # reserved behind it.
+    category, collection_field = _resolve_category_and_collection(collection_id)
+
+    # rds_id is tracked on the draft row, not inside the manifest itself -
+    # real metadata.yaml never contains a raw_dataset/rds_id field, that
+    # belongs only in info.yml, generated later. Resolved+reserved (or
+    # reused as-is if raw_dataset_id was passed in, e.g. by regenerate_draft)
+    # the same way resolved_dataset_id is below.
+    rds_id = _resolve_and_reserve_raw_dataset_id(raw_dataset_id, category_id, collection_id, created_by)
+
+    resolved_dataset_id = _resolve_dataset_id(dataset_id, collection_id, created_by)
+
+    # datasetTitle: for a single-CSV dataset, use that CSV's own filename -
+    # matches the established convention (e.g. CS0007DS0112's datasetTitle
+    # is literally "consolidated-livestock-census-1997-2019", its one and
+    # only table/CSV name). With more than one CSV there's no single file to
+    # name it after (e.g. CS0026DS0111's datasetTitle "bahs-milk-production-
+    # statistics-1950-2024" names none of its ~20 table CSVs), so the
+    # generator's own proposed dataset-level title is used instead, falling
+    # back to the first table's name only if none was produced. Set before
+    # building the slug so its fallback has a real title to work from.
+    table_names = list(csv_paths_by_table.keys())
+    if len(table_names) == 1:
+        manifest_dict["datasetTitle"] = table_names[0]
+    else:
+        manifest_dict["datasetTitle"] = manifest_dict.get("datasetTitle") or table_names[0]
+    manifest_dict["datasetID"] = resolved_dataset_id
+    manifest_dict["datasetSlug"] = _build_dataset_slug(
+        resolved_dataset_id, manifest_dict.get("datasetSlug"), manifest_dict.get("datasetTitle")
+    )
+    manifest_dict["metadataSpecVersion"] = METADATA_SPEC_VERSION
+    manifest_dict["category"] = category
+    manifest_dict["collection"] = collection_field
+    manifest_dict["datasetOwner"] = data_owner_name
+    manifest_dict["lastUpdated"] = date.today().isoformat()
+    manifest_dict = _reorder_manifest_keys(manifest_dict)
+
+    manifest_yaml = yaml.safe_dump(manifest_dict, sort_keys=False, allow_unicode=True)
+    validation_result = _validate_manifest(manifest_dict, csv_paths_by_table)
+
+    draft = database.create_manifest_draft(
+        dataset_id=resolved_dataset_id,
+        collection_id=collection_id,
+        category_id=category_id,
+        source_csv_path=_encode_csv_paths(csv_paths_by_table),
+        digitization_log_path=digitization_log_path,
+        raw_dataset_id=rds_id,
+        draft_yaml=manifest_yaml,
+        draft_json=manifest_dict,
+        flagged_fields=flags,
+        validation_result=validation_result.model_dump(),
+        llm_model_id=llm_model_id,
+        created_by=created_by,
+        superseded_by_draft_id=superseded_by_draft_id,
+    )
+
+    return DraftRecord(
+        draft_id=str(draft.draft_id),
+        status=draft.status.value,
+        draft_yaml=draft.draft_yaml,
+        draft_json=draft.draft_json,
+        flagged_fields=draft.flagged_fields,
+        validation_status=validation_result.status,
+    )
+
+
 def generate_draft(
     *,
     csv_paths: list[str],
@@ -394,74 +562,18 @@ def generate_draft(
 
     manifest_dict, flags = _merge_batch_manifests(batch_results)
 
-    all_missing_source_columns = sorted(
-        {column for profile in csv_profiles.values() for column in profile.missing_source_columns}
-    )
-    flags = _ensure_missing_source_columns_flagged(flags, all_missing_source_columns)
-
-    # Validate the collection exists before reserving anything below - a
-    # request for a nonexistent collection must fail with nothing left
-    # reserved behind it.
-    category, collection_field = _resolve_category_and_collection(collection_id)
-
-    # rds_id is tracked on the draft row, not inside the manifest itself -
-    # real metadata.yaml never contains a raw_dataset/rds_id field, that
-    # belongs only in info.yml, generated later. Resolved+reserved (or
-    # reused as-is if raw_dataset_id was passed in, e.g. by regenerate_draft)
-    # the same way resolved_dataset_id is below.
-    rds_id = _resolve_and_reserve_raw_dataset_id(raw_dataset_id, category_id, collection_id, created_by)
-
-    resolved_dataset_id = _resolve_dataset_id(dataset_id, collection_id, created_by)
-
-    # datasetTitle: for a single-CSV dataset, use that CSV's own filename -
-    # matches the established convention (e.g. CS0007DS0112's datasetTitle
-    # is literally "consolidated-livestock-census-1997-2019", its one and
-    # only table/CSV name). With more than one CSV there's no single file to
-    # name it after (e.g. CS0026DS0111's datasetTitle "bahs-milk-production-
-    # statistics-1950-2024" names none of its ~20 table CSVs), so the LLM's
-    # own proposed dataset-level title is used instead, falling back to the
-    # first table's name only if the LLM didn't produce one. Set before
-    # building the slug so its fallback has a real title to work from.
-    table_names = list(csv_paths_by_table.keys())
-    if len(table_names) == 1:
-        manifest_dict["datasetTitle"] = table_names[0]
-    else:
-        manifest_dict["datasetTitle"] = manifest_dict.get("datasetTitle") or table_names[0]
-    manifest_dict["datasetID"] = resolved_dataset_id
-    manifest_dict["datasetSlug"] = _build_dataset_slug(
-        resolved_dataset_id, manifest_dict.get("datasetSlug"), manifest_dict.get("datasetTitle")
-    )
-    manifest_dict["metadataSpecVersion"] = METADATA_SPEC_VERSION
-    manifest_dict["category"] = category
-    manifest_dict["collection"] = collection_field
-    manifest_dict["datasetOwner"] = data_owner_name
-    manifest_dict["lastUpdated"] = date.today().isoformat()
-    manifest_dict = _reorder_manifest_keys(manifest_dict)
-
-    manifest_yaml = yaml.safe_dump(manifest_dict, sort_keys=False, allow_unicode=True)
-    validation_result = _validate_manifest(manifest_dict, csv_paths_by_table)
-
-    draft = database.create_manifest_draft(
-        dataset_id=resolved_dataset_id,
-        collection_id=collection_id,
+    return _finalize_draft(
+        manifest_dict=manifest_dict,
+        flags=flags,
+        csv_paths_by_table=csv_paths_by_table,
+        csv_profiles=csv_profiles,
         category_id=category_id,
-        source_csv_path=_encode_csv_paths(csv_paths_by_table),
-        digitization_log_path=digitization_log_path,
-        raw_dataset_id=rds_id,
-        draft_yaml=manifest_yaml,
-        draft_json=manifest_dict,
-        flagged_fields=flags,
-        validation_result=validation_result.model_dump(),
-        llm_model_id=client.model_id,
+        collection_id=collection_id,
         created_by=created_by,
+        data_owner_name=data_owner_name,
+        dataset_id=dataset_id,
+        raw_dataset_id=raw_dataset_id,
+        digitization_log_path=digitization_log_path,
         superseded_by_draft_id=superseded_by_draft_id,
-    )
-
-    return DraftRecord(
-        draft_id=str(draft.draft_id),
-        status=draft.status.value,
-        draft_yaml=draft.draft_yaml,
-        draft_json=draft.draft_json,
-        flagged_fields=draft.flagged_fields,
-        validation_status=validation_result.status,
+        llm_model_id=client.model_id,
     )

@@ -103,6 +103,17 @@ class ManifestDraftFlagField(BaseModel):
     note: str = Field(..., description="Why this field needs curator attention")
 
 
+class ManifestDraftEdit(BaseModel):
+    draft_yaml: str = Field(..., description="Full replacement manifest YAML, curator-edited")
+
+
+class ClassifyColumnsRequest(BaseModel):
+    table_name: str = Field(..., description="Name of the table (CSV filename stem)")
+    column_names: List[str] = Field(
+        ..., description="Column names read from the CSV header - schema only"
+    )
+
+
 class User(BaseModel):
     email: str
     is_group: bool

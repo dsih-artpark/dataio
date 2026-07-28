@@ -14,6 +14,7 @@ os.environ.setdefault("DB_NAME", "catalogue")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
 import pytest
+import yaml
 from fastapi import HTTPException
 
 from dataio.api.database.enums import DatasetManifestDraftStatus
@@ -233,6 +234,200 @@ def test_revalidate_draft_converts_and_uses_existing_validator(monkeypatch):
     assert recorded["data_files"] == {"main": draft.source_csv_path}
 
 
+def test_update_draft_content_revalidates_and_persists(monkeypatch):
+    service = _make_service()
+    draft = _fake_draft(draft_json={
+        "datasetTitle": "Foo",
+        "tables": {"main": {"description": "old", "data_dictionary": {"count": {"type": "int"}}}},
+    })
+    monkeypatch.setattr(service_module.database, "get_manifest_draft", lambda draft_id: draft)
+
+    recorded = {}
+
+    class FakeValidator:
+        def validate_tabular(self, *, manifest, data_files, deep_check, full_scan):
+            recorded["manifest"] = manifest
+            return ValidationResult(dataset_kind="tabular")
+
+    monkeypatch.setattr(service_module, "DataIOValidator", FakeValidator)
+
+    def fake_update_content(draft_id, *, draft_yaml, draft_json, validation_result=None):
+        recorded["draft_yaml"] = draft_yaml
+        recorded["draft_json"] = draft_json
+        recorded["validation_result"] = validation_result
+        return _fake_draft(draft_yaml=draft_yaml, draft_json=draft_json)
+
+    monkeypatch.setattr(service_module.database, "update_manifest_draft_content", fake_update_content)
+
+    new_yaml = "datasetTitle: Foo\ntables:\n  main:\n    description: new and improved\n"
+    result = service.update_draft_content(str(draft.draft_id), new_yaml)
+
+    assert recorded["draft_yaml"] == new_yaml
+    assert recorded["draft_json"]["tables"]["main"]["description"] == "new and improved"
+    assert recorded["validation_result"]["dataset_kind"] == "tabular"
+    assert result["draft_yaml"] == new_yaml
+
+
+def test_update_draft_content_stringifies_yaml_implicit_dates(monkeypatch):
+    """yaml.safe_load silently parses an ISO-8601-looking scalar (e.g. a
+    temporalCoverage value like 2019-06-30) into a real datetime.date -
+    every manifest field is a plain string everywhere else in the app, and
+    the JSONB column's json serializer can't write a date object out, so
+    saving a curator edit containing one used to crash with a 500.
+    """
+    service = _make_service()
+    draft = _fake_draft(draft_json={"datasetTitle": "Foo", "tables": {}})
+    monkeypatch.setattr(service_module.database, "get_manifest_draft", lambda draft_id: draft)
+
+    class FakeValidator:
+        def validate_tabular(self, *, manifest, data_files, deep_check, full_scan):
+            return ValidationResult(dataset_kind="tabular")
+
+    monkeypatch.setattr(service_module, "DataIOValidator", FakeValidator)
+
+    recorded = {}
+
+    def fake_update_content(draft_id, *, draft_yaml, draft_json, validation_result=None):
+        recorded["draft_json"] = draft_json
+        return _fake_draft(draft_yaml=draft_yaml, draft_json=draft_json)
+
+    monkeypatch.setattr(
+        service_module.database, "update_manifest_draft_content", fake_update_content
+    )
+
+    new_yaml = "datasetTitle: Foo\ntemporalCoverage: 2019-06-30\ntables: {}\n"
+    service.update_draft_content(str(draft.draft_id), new_yaml)
+
+    assert recorded["draft_json"]["temporalCoverage"] == "2019-06-30"
+    assert isinstance(recorded["draft_json"]["temporalCoverage"], str)
+
+
+def test_update_draft_content_reorders_keys_to_canonical_order(monkeypatch):
+    """A full-manifest save (e.g. the Draft Review screen's numeric-field
+    "Apply" action, or a raw YAML edit) submits draft_json in whatever key
+    order it happened to come back in from the DB's JSONB column, which
+    does not preserve insertion order - both the persisted draft_json and
+    the regenerated draft_yaml must come back in the same canonical order
+    every real metadata.yaml uses (datasetTitle, ..., source, ..., tables).
+    """
+    service = _make_service()
+    draft = _fake_draft(draft_json={"datasetTitle": "Foo", "tables": {}})
+    monkeypatch.setattr(service_module.database, "get_manifest_draft", lambda draft_id: draft)
+
+    class FakeValidator:
+        def validate_tabular(self, *, manifest, data_files, deep_check, full_scan):
+            return ValidationResult(dataset_kind="tabular")
+
+    monkeypatch.setattr(service_module, "DataIOValidator", FakeValidator)
+
+    recorded = {}
+
+    def fake_update_content(draft_id, *, draft_yaml, draft_json, validation_result=None):
+        recorded["draft_yaml"] = draft_yaml
+        recorded["draft_json"] = draft_json
+        return _fake_draft(draft_yaml=draft_yaml, draft_json=draft_json)
+
+    monkeypatch.setattr(
+        service_module.database, "update_manifest_draft_content", fake_update_content
+    )
+
+    # Keys deliberately out of canonical order, as a JSONB round-trip would
+    # scramble them.
+    scrambled_yaml = "tables: {}\nsource: []\ndatasetTitle: Foo\n"
+    service.update_draft_content(str(draft.draft_id), scrambled_yaml)
+
+    assert list(recorded["draft_json"].keys()) == ["datasetTitle", "source", "tables"]
+    assert recorded["draft_yaml"].index("datasetTitle") < recorded["draft_yaml"].index("source")
+    assert recorded["draft_yaml"].index("source") < recorded["draft_yaml"].index("tables")
+
+
+def test_update_draft_content_restores_data_dictionary_column_and_field_order(
+    monkeypatch, tmp_path
+):
+    """The same JSONB-order-loss problem hits nested structure too: a
+    data_dictionary's column order and each field's own key order (e.g.
+    "min" ending up before "type") both get scrambled by a round-trip. The
+    fix re-derives column order from the table's own CSV header (the true
+    source of "natural" order) and re-canonicalizes each field's own keys.
+    """
+    service = _make_service()
+    csv_path = tmp_path / "main.csv"
+    csv_path.write_text("state.ID,year,species,count\n", encoding="utf-8")
+    draft = _fake_draft(
+        source_csv_path=f'{{"main": "{csv_path.as_posix()}"}}',
+        draft_json={
+            "datasetTitle": "Foo",
+            "tables": {
+                "main": {
+                    "description": "d",
+                    "data_dictionary": {
+                        # Deliberately out of CSV-header order, and each
+                        # field's own keys deliberately scrambled too.
+                        "count": {"min": 0, "type": "int", "additive": True},
+                        "state.ID": {"nullable": False, "type": "regionID"},
+                        "species": {"type": "enum", "enumRef": "speciesEnum"},
+                        "year": {"type": "date", "format": "%Y"},
+                    },
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(service_module.database, "get_manifest_draft", lambda draft_id: draft)
+
+    class FakeValidator:
+        def validate_tabular(self, *, manifest, data_files, deep_check, full_scan):
+            return ValidationResult(dataset_kind="tabular")
+
+    monkeypatch.setattr(service_module, "DataIOValidator", FakeValidator)
+
+    recorded = {}
+
+    def fake_update_content(draft_id, *, draft_yaml, draft_json, validation_result=None):
+        recorded["draft_json"] = draft_json
+        return _fake_draft(draft_yaml=draft_yaml, draft_json=draft_json)
+
+    monkeypatch.setattr(
+        service_module.database, "update_manifest_draft_content", fake_update_content
+    )
+
+    service.update_draft_content(str(draft.draft_id), yaml.safe_dump(draft.draft_json))
+
+    data_dictionary = recorded["draft_json"]["tables"]["main"]["data_dictionary"]
+    assert list(data_dictionary.keys()) == ["state.ID", "year", "species", "count"]
+    assert list(data_dictionary["count"].keys()) == ["type", "additive", "min"]
+
+
+def test_update_draft_content_rejects_invalid_yaml(monkeypatch):
+    service = _make_service()
+    draft = _fake_draft()
+    monkeypatch.setattr(service_module.database, "get_manifest_draft", lambda draft_id: draft)
+
+    with pytest.raises(HTTPException) as exc_info:
+        service.update_draft_content(str(draft.draft_id), "not: valid: yaml: at: all:")
+    assert exc_info.value.status_code == 400
+
+
+def test_update_draft_content_rejects_non_mapping_yaml(monkeypatch):
+    service = _make_service()
+    draft = _fake_draft()
+    monkeypatch.setattr(service_module.database, "get_manifest_draft", lambda draft_id: draft)
+
+    with pytest.raises(HTTPException) as exc_info:
+        service.update_draft_content(str(draft.draft_id), "- just\n- a\n- list\n")
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.parametrize("status", [DatasetManifestDraftStatus.APPROVED, DatasetManifestDraftStatus.REJECTED])
+def test_update_draft_content_rejects_editing_approved_or_rejected_draft(monkeypatch, status):
+    service = _make_service()
+    draft = _fake_draft(status=status)
+    monkeypatch.setattr(service_module.database, "get_manifest_draft", lambda draft_id: draft)
+
+    with pytest.raises(HTTPException) as exc_info:
+        service.update_draft_content(str(draft.draft_id), "datasetTitle: Foo\n")
+    assert exc_info.value.status_code == 400
+
+
 def test_get_draft_reports_whether_reserved_dataset_id_already_exists(monkeypatch):
     service = _make_service()
     draft = _fake_draft(dataset_id="CS0007DS0113")
@@ -426,6 +621,169 @@ def test_generate_draft_from_upload_wraps_failures_as_502(monkeypatch):
             created_by="engineer@artpark.in",
         )
     assert exc_info.value.status_code == 502
+
+
+def _valid_curator_input(**overrides) -> dict:
+    defaults = dict(
+        datasetDescription="desc",
+        spatialCoverage="India",
+        spatialResolution="state",
+        temporalCoverage="1997-2019",
+        temporalResolution="annual",
+        updateFrequency="annual",
+    )
+    defaults.update(overrides)
+    return defaults
+
+
+def test_generate_deterministic_draft_from_upload_saves_files_and_calls_generator(monkeypatch):
+    import io
+
+    from fastapi import UploadFile
+
+    service = _make_service()
+    saved_paths = iter(["/tmp/csv-abc.csv"])
+    monkeypatch.setattr(service_module, "save_upload", lambda upload_file: next(saved_paths))
+
+    recorded = {}
+
+    def fake_generate_deterministic_draft(**kwargs):
+        recorded.update(kwargs)
+        return SimpleNamespace(model_dump=lambda: {"draft_id": "new-draft-id", "status": "pending"})
+
+    monkeypatch.setattr(
+        "dataio.api.services.deterministic_draft_service.generate_deterministic_draft",
+        fake_generate_deterministic_draft,
+    )
+
+    result = service.generate_deterministic_draft_from_upload(
+        csv_files=[UploadFile(filename="data.csv", file=io.BytesIO(b"a,b\n1,2\n"))],
+        category_id="CS",
+        collection_id="CS0007",
+        data_owner_name="DAHD",
+        created_by="engineer@artpark.in",
+        curator_input=_valid_curator_input(),
+    )
+
+    assert recorded["csv_paths"] == ["/tmp/csv-abc.csv"]
+    assert recorded["curator_input"].datasetDescription == "desc"
+    assert result["draft_id"] == "new-draft-id"
+
+
+def test_generate_deterministic_draft_from_upload_rejects_invalid_curator_input(monkeypatch):
+    service = _make_service()
+
+    with pytest.raises(HTTPException) as exc_info:
+        service.generate_deterministic_draft_from_upload(
+            csv_files=[],
+            category_id="CS",
+            collection_id="CS0007",
+            data_owner_name="DAHD",
+            created_by="engineer@artpark.in",
+            curator_input={},  # missing every required field
+        )
+    assert exc_info.value.status_code == 400
+
+
+def test_generate_deterministic_draft_from_upload_wraps_failures_as_502(monkeypatch):
+    import io
+
+    from fastapi import UploadFile
+
+    service = _make_service()
+    monkeypatch.setattr(service_module, "save_upload", lambda upload_file: "/tmp/csv-abc.csv")
+
+    def failing_generate(**kwargs):
+        raise RuntimeError("profiling blew up")
+
+    monkeypatch.setattr(
+        "dataio.api.services.deterministic_draft_service.generate_deterministic_draft",
+        failing_generate,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        service.generate_deterministic_draft_from_upload(
+            csv_files=[UploadFile(filename="data.csv", file=io.BytesIO(b"a,b\n1,2\n"))],
+            category_id="CS",
+            collection_id="CS0007",
+            data_owner_name="DAHD",
+            created_by="engineer@artpark.in",
+            curator_input=_valid_curator_input(),
+        )
+    assert exc_info.value.status_code == 502
+
+
+def test_regenerate_draft_dispatches_to_deterministic_path_when_llm_model_id_is_none(monkeypatch):
+    """A draft with llm_model_id=None was produced by the deterministic
+    path (see generate_deterministic_draft_from_upload), so regenerating it
+    must reconstruct a CuratorMetadataInput from the original draft_json and
+    re-run generate_deterministic_draft - not the LLM's generate_draft.
+    """
+    service = _make_service()
+    original = _fake_draft(
+        llm_model_id=None,
+        raw_dataset_id="CSRDS0016",
+        draft_json={
+            "datasetTitle": "Foo",
+            "datasetDescription": "desc",
+            "source": ["https://example.com"],
+            "references": [],
+            "tags": {"concept": ["livestock"], "epiType": []},
+            "spatialCoverage": "India",
+            "spatialResolution": "state",
+            "temporalCoverage": "1997-2019",
+            "temporalResolution": "annual",
+            "updateFrequency": "annual",
+            "joinKeys": ["state.ID", "year"],
+            # A region-history comment must NOT round-trip verbatim -
+            # generate_deterministic_draft recomputes and re-appends those
+            # fresh, so carrying the old one forward would duplicate it.
+            "comments": ["curator note", "[region history] Telangana was carved out of Andhra Pradesh..."],
+            "tables": {"main": {"description": "d", "data_dictionary": {"count": {"type": "int"}}}},
+        },
+    )
+    monkeypatch.setattr(service_module.database, "get_manifest_draft", lambda draft_id: original)
+    monkeypatch.setattr(
+        service_module.database, "update_manifest_draft_status",
+        lambda draft_id, status, **kw: None,
+    )
+    monkeypatch.setattr(
+        "dataio.api.services.draft_service.decode_csv_paths",
+        lambda source_csv_path, table_names=None: {"main": "foo.csv"},
+    )
+
+    recorded = {}
+
+    def fake_generate_deterministic_draft(**kwargs):
+        recorded.update(kwargs)
+        return SimpleNamespace(model_dump=lambda: {"draft_id": "new-draft-id", "status": "pending"})
+
+    monkeypatch.setattr(
+        "dataio.api.services.deterministic_draft_service.generate_deterministic_draft",
+        fake_generate_deterministic_draft,
+    )
+
+    result = service.regenerate_draft(str(original.draft_id), "reviewer@artpark.in")
+
+    assert recorded["raw_dataset_id"] == "CSRDS0016"
+    assert recorded["curator_input"].comments == ["curator note"]
+    assert recorded["curator_input"].joinKeyColumns == ["state.ID", "year"]
+    assert recorded["curator_input"].tableDescriptions == {"main": "d"}
+    assert recorded["curator_input"].datasetTitle == "Foo"
+    assert result["draft_id"] == "new-draft-id"
+
+
+def test_classify_columns_splits_fixed_and_needs_description():
+    service = _make_service()
+
+    result = service.classify_columns(
+        column_names=[
+            "state.ID", "state.name", "state.lgd_code", "sourceDocument", "species", "count",
+        ],
+    )
+
+    assert set(result["fixed"]) == {"state.ID", "state.name", "state.lgd_code", "sourceDocument"}
+    assert set(result["needsDescription"]) == {"species", "count"}
 
 
 def test_flag_field_delegates_to_db_function(monkeypatch):

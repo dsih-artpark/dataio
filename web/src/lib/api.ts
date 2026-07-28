@@ -23,6 +23,7 @@ import type {
   CollectionsResponse,
   DatasetDownloadUrls,
   ValidationResult,
+  CuratorMetadataInput,
   ManifestDraftDetail,
   ManifestDraftSummary,
 } from './types';
@@ -1146,6 +1147,40 @@ class ApiClient {
     });
   }
 
+  async adminGenerateDeterministicManifestDraft(params: {
+    csvFiles: File[];
+    categoryId: string;
+    collectionId: string;
+    dataOwnerName: string;
+    curatorInput: CuratorMetadataInput;
+    datasetId?: string;
+  }) {
+    const formData = new FormData();
+    for (const file of params.csvFiles) {
+      formData.append('csv_files', file);
+    }
+    formData.append('category_id', params.categoryId);
+    formData.append('collection_id', params.collectionId);
+    formData.append('data_owner_name', params.dataOwnerName);
+    formData.append('curator_input', JSON.stringify(params.curatorInput));
+    if (params.datasetId) formData.append('dataset_id', params.datasetId);
+
+    return this.request<ManifestDraftDetail>('/admin/manifest-drafts/generate-deterministic', {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  async adminClassifyColumns(params: { tableName: string; columnNames: string[] }) {
+    return this.request<{ fixed: string[]; needsDescription: string[] }>(
+      '/admin/manifest-drafts/classify-columns',
+      {
+        method: 'POST',
+        body: JSON.stringify({ table_name: params.tableName, column_names: params.columnNames }),
+      }
+    );
+  }
+
   async adminListManifestDrafts(params?: { status?: string; datasetId?: string; limit?: number; offset?: number }) {
     const query = new URLSearchParams();
     if (params?.status) query.set('status', params.status);
@@ -1188,6 +1223,13 @@ class ApiClient {
     return this.request<ManifestDraftDetail>(`/admin/manifest-drafts/${encodeURIComponent(draftId)}/flag-field`, {
       method: 'POST',
       body: JSON.stringify({ field_path: fieldPath, note }),
+    });
+  }
+
+  async adminUpdateManifestDraftContent(draftId: string, draftYaml: string) {
+    return this.request<ManifestDraftDetail>(`/admin/manifest-drafts/${encodeURIComponent(draftId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ draft_yaml: draftYaml }),
     });
   }
 

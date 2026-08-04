@@ -31,6 +31,25 @@ function statusClasses(status: ManifestDraftStatus) {
   return 'bg-slate-100 text-slate-700 ring-slate-200';
 }
 
+// Backend timestamps (e.g. draft.created_at) are naive UTC - Python's
+// datetime.utcnow().isoformat() has no trailing "Z"/offset. A bare
+// date-time string with no timezone designator is parsed by JS `Date` as
+// *local* time, not UTC, so without this the displayed time is the raw
+// UTC clock reading mislabeled as local (off by the viewer's UTC offset -
+// e.g. ~5.5 hours early in IST). Appending "Z" (only if not already
+// timezone-qualified) makes the browser convert it correctly.
+function formatUtcTimestamp(isoString: string): string {
+  const hasTimezone = /[zZ]|[+-]\d\d:?\d\d$/.test(isoString);
+  const date = new Date(hasTimezone ? isoString : `${isoString}Z`);
+  return date.toLocaleString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 function severityClasses(severity: string) {
   if (severity === 'error') return 'bg-red-50 text-red-700 ring-red-200';
   if (severity === 'warning') return 'bg-amber-50 text-amber-700 ring-amber-200';
@@ -517,55 +536,6 @@ function GenerateDeterministicDraftForm({ onGenerated }: { onGenerated: () => vo
           ) : null}
         </label>
 
-        {tableNames.length > 0 ? (
-          <div class="space-y-4 md:col-span-2">
-            {classifyError ? (
-              <div class="rounded-lg bg-red-50 p-2 text-xs text-red-700 ring-1 ring-red-200">{classifyError}</div>
-            ) : null}
-            {tableNames.map((name) => (
-              <div key={name} class="space-y-2 rounded-xl border border-slate-100 p-3">
-                <label class="block text-xs font-medium text-slate-600">
-                  <span>Table description — {name}</span>
-                  <textarea
-                    class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                    rows={2}
-                    value={tableDescriptions[name] || ''}
-                    placeholder="e.g. State-level livestock population counts disaggregated by species, breed, sex, age group, utility, and locality."
-                    onInput={(e) =>
-                      setTableDescriptions((prev) => ({ ...prev, [name]: (e.target as HTMLTextAreaElement).value }))
-                    }
-                  />
-                </label>
-
-                {(columnsByTable[name] || []).length > 0 ? (
-                  <div class="space-y-1.5 pl-3">
-                    <p class="text-[11px] font-medium uppercase tracking-wide text-slate-400">
-                      Column descriptions — {name}
-                    </p>
-                    {(columnsByTable[name] || []).map((col) => (
-                      <label key={col} class="block text-xs font-medium text-slate-600">
-                        {col}
-                        <input
-                          class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                          value={columnDescriptions[name]?.[col] || ''}
-                          placeholder={`e.g. what the '${col}' column represents and its allowed values`}
-                          onInput={(e) => {
-                            const value = (e.target as HTMLInputElement).value;
-                            setColumnDescriptions((prev) => ({
-                              ...prev,
-                              [name]: { ...prev[name], [col]: value },
-                            }));
-                          }}
-                        />
-                      </label>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        ) : null}
-
         <label class="block text-xs font-medium text-slate-600">
           Category
           <select
@@ -741,6 +711,55 @@ function GenerateDeterministicDraftForm({ onGenerated }: { onGenerated: () => vo
             onInput={(e) => setJoinKeyColumns((e.target as HTMLInputElement).value)}
           />
         </label>
+
+        {tableNames.length > 0 ? (
+          <div class="space-y-4 md:col-span-2">
+            {classifyError ? (
+              <div class="rounded-lg bg-red-50 p-2 text-xs text-red-700 ring-1 ring-red-200">{classifyError}</div>
+            ) : null}
+            {tableNames.map((name) => (
+              <div key={name} class="space-y-2 rounded-xl border border-slate-100 p-3">
+                <label class="block text-xs font-medium text-slate-600">
+                  <span>Table description — {name}</span>
+                  <textarea
+                    class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                    rows={2}
+                    value={tableDescriptions[name] || ''}
+                    placeholder="e.g. State-level livestock population counts disaggregated by species, breed, sex, age group, utility, and locality."
+                    onInput={(e) =>
+                      setTableDescriptions((prev) => ({ ...prev, [name]: (e.target as HTMLTextAreaElement).value }))
+                    }
+                  />
+                </label>
+
+                {(columnsByTable[name] || []).length > 0 ? (
+                  <div class="space-y-1.5 pl-3">
+                    <p class="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                      Column descriptions — {name}
+                    </p>
+                    {(columnsByTable[name] || []).map((col) => (
+                      <label key={col} class="block text-xs font-medium text-slate-600">
+                        {col}
+                        <input
+                          class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                          value={columnDescriptions[name]?.[col] || ''}
+                          placeholder={`e.g. what the '${col}' column represents and its allowed values`}
+                          onInput={(e) => {
+                            const value = (e.target as HTMLInputElement).value;
+                            setColumnDescriptions((prev) => ({
+                              ...prev,
+                              [name]: { ...prev[name], [col]: value },
+                            }));
+                          }}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <button
@@ -827,7 +846,7 @@ function DraftQueue() {
                 </div>
                 <div class="mt-1 text-xs text-slate-500">
                   {draft.llm_model_id || 'Deterministic (rule-based)'} · created by {draft.created_by}
-                  {draft.created_at ? ` · ${new Date(draft.created_at).toLocaleString()}` : ''}
+                  {draft.created_at ? ` · ${formatUtcTimestamp(draft.created_at)}` : ''}
                 </div>
               </div>
               <div class="flex items-center gap-3">

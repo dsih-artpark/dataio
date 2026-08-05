@@ -107,6 +107,12 @@ class ManifestDraftEdit(BaseModel):
     draft_yaml: str = Field(..., description="Full replacement manifest YAML, curator-edited")
 
 
+class ManifestDraftInfoYamlRequest(BaseModel):
+    access_level: AccessLevel = Field(
+        ..., description="Access level for the generated info.yml - not derivable from the draft"
+    )
+
+
 class ClassifyColumnsRequest(BaseModel):
     table_name: str = Field(..., description="Name of the table (CSV filename stem)")
     column_names: List[str] = Field(

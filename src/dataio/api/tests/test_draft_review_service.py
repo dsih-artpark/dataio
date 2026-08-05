@@ -428,6 +428,79 @@ def test_update_draft_content_rejects_editing_approved_or_rejected_draft(monkeyp
     assert exc_info.value.status_code == 400
 
 
+def test_generate_info_yaml_passes_draft_fields_to_the_builder(monkeypatch):
+    service = _make_service()
+    draft = _fake_draft(
+        dataset_id="CS0007DS0119",
+        collection_id="CS0007",
+        raw_dataset_id="CS0007RDS0005",
+        status=DatasetManifestDraftStatus.APPROVED,
+        draft_json={"datasetTitle": "Foo", "tables": {}},
+    )
+    monkeypatch.setattr(service_module.database, "get_manifest_draft", lambda draft_id: draft)
+
+    recorded = {}
+
+    def fake_build(draft_json, *, dataset_id, collection_id, raw_dataset_id, access_level):
+        recorded.update(
+            draft_json=draft_json, dataset_id=dataset_id, collection_id=collection_id,
+            raw_dataset_id=raw_dataset_id, access_level=access_level,
+        )
+        return "ds_id: CS0007DS0119\n"
+
+    monkeypatch.setattr("dataio.api.services.info_yaml_builder.build_info_yaml", fake_build)
+
+    result = service.generate_info_yaml(str(draft.draft_id), "DOWNLOAD")
+
+    assert recorded["draft_json"] == {"datasetTitle": "Foo", "tables": {}}
+    assert recorded["dataset_id"] == "CS0007DS0119"
+    assert recorded["collection_id"] == "CS0007"
+    assert recorded["raw_dataset_id"] == "CS0007RDS0005"
+    assert recorded["access_level"] == "DOWNLOAD"
+    assert result == {"info_yaml": "ds_id: CS0007DS0119\n"}
+
+
+def test_generate_info_yaml_does_not_persist_anything(monkeypatch):
+    """Same non-persisting contract as update_draft_content/revalidate_draft
+    - this only returns text for the curator to download.
+    """
+    service = _make_service()
+    draft = _fake_draft(
+        status=DatasetManifestDraftStatus.APPROVED,
+        draft_json={"datasetTitle": "Foo", "tables": {}},
+    )
+    monkeypatch.setattr(service_module.database, "get_manifest_draft", lambda draft_id: draft)
+
+    def fail_if_called(*a, **kw):
+        raise AssertionError("generate_info_yaml must not write to the database")
+
+    monkeypatch.setattr(service_module.database, "update_manifest_draft_content", fail_if_called)
+    monkeypatch.setattr(service_module.database, "update_manifest_draft_status", fail_if_called)
+
+    result = service.generate_info_yaml(str(draft.draft_id), "NONE")
+
+    assert "access_level: NONE" in result["info_yaml"]
+
+
+@pytest.mark.parametrize(
+    "status",
+    [DatasetManifestDraftStatus.PENDING, DatasetManifestDraftStatus.FLAGGED, DatasetManifestDraftStatus.REJECTED],
+)
+def test_generate_info_yaml_rejects_a_draft_that_is_not_yet_approved(monkeypatch, status):
+    """info.yml must reflect the curator's *final* review, not a draft
+    that's still changeable - only generate it once approve_draft has
+    frozen the manifest (update_draft_content already refuses further
+    edits at that point).
+    """
+    service = _make_service()
+    draft = _fake_draft(status=status)
+    monkeypatch.setattr(service_module.database, "get_manifest_draft", lambda draft_id: draft)
+
+    with pytest.raises(HTTPException) as exc_info:
+        service.generate_info_yaml(str(draft.draft_id), "NONE")
+    assert exc_info.value.status_code == 400
+
+
 def test_get_draft_reports_whether_reserved_dataset_id_already_exists(monkeypatch):
     service = _make_service()
     draft = _fake_draft(dataset_id="CS0007DS0113")

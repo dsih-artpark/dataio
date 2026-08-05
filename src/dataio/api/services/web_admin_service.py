@@ -1680,6 +1680,12 @@ class WebAdminService(BaseService):
         self._require_admin(admin_user)
         return self.draft_review_service.regenerate_draft(draft_id, admin_user.email)
 
+    def generate_manifest_draft_info_yaml(
+        self, admin_user: User, draft_id: str, access_level: str
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.generate_info_yaml(draft_id, access_level)
+
     def validate_dataset(
         self,
         admin_user: User,

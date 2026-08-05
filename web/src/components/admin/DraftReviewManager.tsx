@@ -3,6 +3,7 @@ import { stringify as stringifyYaml } from 'yaml';
 
 import { ApiRequestError, api } from '../../lib/api';
 import type {
+  AccessLevel,
   Collection,
   CuratorMetadataInput,
   DataOwner,
@@ -74,7 +75,15 @@ function GenerateDraftForm({ onGenerated }: { onGenerated: () => void }) {
   const [dataOwnerName, setDataOwnerName] = useState('');
   const [datasetId, setDatasetId] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!submitting) return;
+    setElapsedSeconds(0);
+    const interval = setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
+    return () => clearInterval(interval);
+  }, [submitting]);
 
   useEffect(() => {
     if (!open || collections.length > 0) return;
@@ -254,8 +263,25 @@ function GenerateDraftForm({ onGenerated }: { onGenerated: () => void }) {
         disabled={submitting || csvFiles.length === 0 || !categoryId || !collectionId || !dataOwnerName}
         class="w-full rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
       >
-        {submitting ? 'Generating… (this calls the LLM, may take a moment)' : 'Generate draft'}
+        {submitting ? 'Generating…' : 'Generate draft'}
       </button>
+      {submitting ? (
+        <div class="space-y-1.5">
+          <div class="h-1.5 w-full overflow-hidden rounded-full bg-emerald-100">
+            <div class="h-full w-1/3 animate-[llm-progress_1.4s_ease-in-out_infinite] rounded-full bg-emerald-500" />
+          </div>
+          <p class="text-center text-[11px] text-slate-500">
+            Calling the LLM — this reads the full CSV(s), so it can take a while. {elapsedSeconds}s elapsed…
+          </p>
+        </div>
+      ) : null}
+      <style>{`
+        @keyframes llm-progress {
+          0% { margin-left: 0%; }
+          50% { margin-left: 67%; }
+          100% { margin-left: 0%; }
+        }
+      `}</style>
     </form>
   );
 }
@@ -936,6 +962,9 @@ function DraftDetail({ draftId }: { draftId: string }) {
   const [editing, setEditing] = useState(false);
   const [editedYaml, setEditedYaml] = useState('');
   const [numericFields, setNumericFields] = useState<NumericFieldEntry[]>([]);
+  const [infoYamlAccessLevel, setInfoYamlAccessLevel] = useState<AccessLevel>('NONE');
+  const [infoYamlBusy, setInfoYamlBusy] = useState(false);
+  const [infoYamlError, setInfoYamlError] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -993,6 +1022,26 @@ function DraftDetail({ draftId }: { draftId: string }) {
       }
       await api.adminUpdateManifestDraftContent(draftId, stringifyYaml(updated));
     });
+  };
+
+  const downloadInfoYaml = async () => {
+    if (!draft) return;
+    setInfoYamlBusy(true);
+    setInfoYamlError('');
+    try {
+      const result = await api.adminGenerateManifestDraftInfoYaml(draftId, infoYamlAccessLevel);
+      const blob = new Blob([result.info_yaml], { type: 'application/x-yaml' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'info.yml';
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setInfoYamlError(errorMessage(err, 'Failed to generate info.yml'));
+    } finally {
+      setInfoYamlBusy(false);
+    }
   };
 
   if (loading) {
@@ -1235,6 +1284,42 @@ function DraftDetail({ draftId }: { draftId: string }) {
           </div>
         </div>
       ) : null}
+
+      <div class="rounded-2xl border border-slate-200 bg-white p-4">
+        <div class="mb-2 flex items-center justify-between gap-3">
+          <div>
+            <h3 class="text-sm font-semibold text-slate-900">Generate info.yml</h3>
+            <p class="mt-1 text-xs text-slate-500">
+              {draft.status === 'approved'
+                ? "The second file the real dataset import needs, alongside metadata.yaml - derived from this draft's reviewed fields. Access level isn't captured anywhere upstream, so pick it here before downloading."
+                : 'Available once this draft is approved, so info.yml reflects the final reviewed manifest rather than a still-changeable draft. Approve it above first.'}
+            </p>
+          </div>
+          <div class="flex shrink-0 items-center gap-2">
+            <select
+              class="rounded-lg border border-slate-300 px-2 py-1 text-xs disabled:opacity-50"
+              value={infoYamlAccessLevel}
+              disabled={draft.status !== 'approved'}
+              onChange={(e) => setInfoYamlAccessLevel((e.target as HTMLSelectElement).value as AccessLevel)}
+            >
+              <option value="NONE">NONE</option>
+              <option value="VIEW">VIEW</option>
+              <option value="DOWNLOAD">DOWNLOAD</option>
+            </select>
+            <button
+              type="button"
+              disabled={infoYamlBusy || draft.status !== 'approved'}
+              onClick={downloadInfoYaml}
+              class="rounded-lg bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-50"
+            >
+              {infoYamlBusy ? 'Generating…' : 'Download info.yml'}
+            </button>
+          </div>
+        </div>
+        {infoYamlError ? (
+          <div class="rounded-lg bg-red-50 p-2 text-xs text-red-700 ring-1 ring-red-200">{infoYamlError}</div>
+        ) : null}
+      </div>
 
       <div class="rounded-2xl border border-slate-200 bg-white p-4">
         <div class="mb-2 flex items-center justify-between">

@@ -3,6 +3,7 @@
  */
 
 import type {
+  AccessLevel,
   AdminDatasetDetail,
   AdminDatasetPackagePreview,
   AdminDatasetSummary,
@@ -1243,6 +1244,13 @@ class ApiClient {
     return this.request<{ message: string; draft_id: string }>(
       `/admin/manifest-drafts/${encodeURIComponent(draftId)}`,
       { method: 'DELETE' }
+    );
+  }
+
+  async adminGenerateManifestDraftInfoYaml(draftId: string, accessLevel: AccessLevel) {
+    return this.request<{ info_yaml: string }>(
+      `/admin/manifest-drafts/${encodeURIComponent(draftId)}/info-yaml`,
+      { method: 'POST', body: JSON.stringify({ access_level: accessLevel }) }
     );
   }
 }

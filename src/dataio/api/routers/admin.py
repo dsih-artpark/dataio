@@ -9,6 +9,7 @@ from dataio.api.models import (
     DatasetCreate,
     ManifestDraftEdit,
     ManifestDraftFlagField,
+    ManifestDraftInfoYamlRequest,
     ManifestDraftReject,
     User,
     UserCreate,
@@ -334,6 +335,17 @@ async def regenerate_manifest_draft(
     draft_review_service: DraftReviewService = Depends(DraftReviewService),
 ):
     return draft_review_service.regenerate_draft(draft_id, user.email)
+
+
+@admin_router.post("/manifest-drafts/{draft_id}/info-yaml", tags=["admin/manifest-drafts"])
+@admin_required
+async def generate_manifest_draft_info_yaml(
+    draft_id: str,
+    body: ManifestDraftInfoYamlRequest,
+    user: User = Depends(get_user),
+    draft_review_service: DraftReviewService = Depends(DraftReviewService),
+):
+    return draft_review_service.generate_info_yaml(draft_id, body.access_level.value)
 
 
 @admin_router.delete(

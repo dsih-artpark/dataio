@@ -39,6 +39,7 @@ from dataio.api.models import (
     DatasetUpdate,
     ManifestDraftEdit,
     ManifestDraftFlagField,
+    ManifestDraftInfoYamlRequest,
     ManifestDraftReject,
     RawDatasetCreate,
     RawDatasetUpdate,
@@ -1758,6 +1759,18 @@ async def web_regenerate_manifest_draft(
     admin_service: WebAdminService = Depends(WebAdminService),
 ):
     return admin_service.regenerate_manifest_draft(user, draft_id)
+
+
+@web_router.post(
+    "/admin/manifest-drafts/{draft_id}/info-yaml", tags=["web-admin/manifest-drafts"]
+)
+async def web_generate_manifest_draft_info_yaml(
+    draft_id: str,
+    body: ManifestDraftInfoYamlRequest,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.generate_manifest_draft_info_yaml(user, draft_id, body.access_level.value)
 
 
 @web_router.get("/admin/documentation-sync", tags=["web-admin/datasets"])

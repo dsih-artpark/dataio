@@ -271,6 +271,37 @@ class DraftReviewService(BaseService):
         )
         return _draft_to_dict(updated)
 
+    def generate_info_yaml(self, draft_id: str, access_level: str) -> dict:
+        """Backs the Draft Review screen's "Generate info.yml" action -
+        derives the second file (alongside metadata.yaml) the real
+        dataset-import step expects from fields already on this draft
+        (see info_yaml_builder for what's derived vs. what access_level
+        alone supplies). Deliberately non-persisting, same as
+        suggest_draft_descriptions used to be - just returns text for the
+        curator to download; nothing is saved on the draft itself.
+
+        Only allowed once a draft is approved - the manifest is frozen at
+        that point (update_draft_content refuses further edits), so this
+        is the first moment info.yml's derived fields are guaranteed to
+        reflect the curator's actual final review rather than a
+        still-changeable in-progress draft.
+        """
+        from dataio.api.services.info_yaml_builder import build_info_yaml
+
+        draft = self._get_draft_or_404(draft_id)
+        if draft.status.value != "approved":
+            raise HTTPException(
+                status_code=400, detail="Approve this draft before generating info.yml."
+            )
+        info_yaml = build_info_yaml(
+            draft.draft_json,
+            dataset_id=draft.dataset_id,
+            collection_id=draft.collection_id,
+            raw_dataset_id=draft.raw_dataset_id,
+            access_level=access_level,
+        )
+        return {"info_yaml": info_yaml}
+
     def _release_reservations(self, draft) -> None:
         """Releases draft.dataset_id and draft.raw_dataset_id, but only the
         ones that are still just reservations (no real Dataset/RawDataset

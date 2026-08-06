@@ -1,0 +1,50 @@
+# Fixed cross-dataset canonicalEnumDefinitions registries every real
+# dataset in this system reuses verbatim - lifted out of draft_prompt.py's
+# LLM instruction ("ESTABLISHED REGISTRY... reuse it verbatim, do not
+# invent a new block or ID") into real structured data, so a deterministic
+# generator can look these up by column-name match instead of an LLM
+# recalling the instruction. See field_inference.lookup_canonical_enum_definitions.
+#
+# `matchColumnNameContains` is checked against the column's bare (last
+# dotted segment) name, case-insensitively. Add new registries here as new
+# cross-dataset concepts are established - never change an existing `id`
+# or `block` name, since datasets already reference these verbatim.
+schemaVersion: "1.0"
+registries:
+  - id: INL-98
+    block: canonicalSpecies
+    matchColumnNameContains: [species]
+    definition:
+      description: >-
+        Cross-dataset canonical species vocabulary (INL-98). Resolve
+        species series by this canonical key rather than dataset-local
+        literal strings.
+      values:
+        cattle: {grain: leaf}
+        buffalo: {grain: leaf}
+        goat: {grain: leaf}
+        sheep: {grain: leaf}
+        pig: {grain: leaf}
+        poultry: {grain: leaf}
+        bovine: {grain: group, components: [cattle, buffalo]}
+        ovine_and_other_mammals: {grain: group, components: [sheep, goat]}
+        others: {grain: residual}
+
+  - id: INL-98
+    block: canonicalBreed
+    matchColumnNameContains: [breed]
+    definition:
+      description: >-
+        Cross-dataset canonical breed vocabulary (INL-98). Census reports
+        the combined grain (crossbred_exotic); milk reports the split
+        grain (exotic, crossbred). For cross-dataset joins, match on
+        canonicalRollup; for fine within-dataset analysis, use canonical.
+      values:
+        crossbred_exotic: {grain: coarse, components: [exotic, crossbred]}
+        exotic: {grain: leaf, rollup: crossbred_exotic}
+        crossbred: {grain: leaf, rollup: crossbred_exotic}
+        indigenous: {grain: leaf}
+        non_descript: {grain: leaf}
+        indigenous_non_descript: {grain: coarse, components: [indigenous, non_descript]}
+        none: {grain: na}
+        unspecified: {grain: unknown}

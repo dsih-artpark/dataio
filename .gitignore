@@ -146,6 +146,9 @@ dmypy.json
 *.csv
 *.yaml
 !.env.example
+# Reference data the API reads at runtime (region history, canonical enum
+# registries) - not generated dataset output, must stay tracked.
+!src/dataio/api/reference_data/*.yaml
 data/*
 staging-data/*
 ARTPARK Data Catalogue

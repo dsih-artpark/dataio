@@ -261,20 +261,133 @@ function GenerateDraftForm({ onGenerated }: { onGenerated: () => void }) {
   );
 }
 
+function FieldHint({ text }: { text: string }) {
+  return (
+    <span
+      title={text}
+      class="ml-1 inline-flex h-3.5 w-3.5 shrink-0 cursor-help items-center justify-center rounded-full bg-slate-200 text-[9px] font-bold leading-none text-slate-500 hover:bg-slate-300"
+    >
+      ?
+    </span>
+  );
+}
+
+function AutoDetectedBadge() {
+  return (
+    <span
+      title="Filled in automatically from the uploaded CSV(s) - please check it's right, and edit it if not."
+      class="ml-1.5 shrink-0 rounded bg-emerald-50 px-1 py-0.5 text-[9px] font-medium leading-none text-emerald-600 ring-1 ring-emerald-200"
+    >
+      auto-detected — verify
+    </span>
+  );
+}
+
+// Predefined options are drawn from what real ARTPARK datasets actually use
+// (checked across data/*/metadata.yaml) - "Other" stays available since a
+// few real datasets use genuinely bespoke phrasing (e.g. "Survey-round
+// basis (not annual)") that a closed dropdown would otherwise block.
+const OTHER_OPTION = '__other__';
+const TEMPORAL_RESOLUTION_OPTIONS = [
+  'Annual', 'Quinquennial', 'Decadal', 'Monthly', 'Weekly', 'Daily', 'Semester',
+  'Survey round (single cross-section)',
+];
+const UPDATE_FREQUENCY_OPTIONS = [
+  'One-time', 'Annual', 'Quinquennial', 'Biannual', 'Monthly', 'Weekly', 'Daily', 'Adhoc',
+];
+
+function PresetSelectField({
+  label,
+  hint,
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  label: string;
+  hint: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+  placeholder: string;
+}) {
+  // Computed once at mount - this component is inside a form that fully
+  // unmounts on close/reopen (see GenerateDeterministicDraftForm's `if
+  // (!open) return ...` early return), so there's no stale-value case to
+  // reconcile after a submit-triggered reset.
+  const [customMode, setCustomMode] = useState(value !== '' && !options.includes(value));
+
+  return (
+    <label class="block text-xs font-medium text-slate-600">
+      <span class="inline-flex items-center">
+        {label}
+        <FieldHint text={hint} />
+      </span>
+      {customMode ? (
+        <div class="mt-1 flex gap-1.5">
+          <input
+            class="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+            value={value}
+            placeholder={placeholder}
+            onInput={(e) => onChange((e.target as HTMLInputElement).value)}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              setCustomMode(false);
+              onChange('');
+            }}
+            class="shrink-0 rounded-lg px-2 text-[11px] font-medium text-slate-500 hover:text-slate-700"
+          >
+            Use list
+          </button>
+        </div>
+      ) : (
+        <select
+          class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+          value={value}
+          onChange={(e) => {
+            const next = (e.target as HTMLSelectElement).value;
+            if (next === OTHER_OPTION) {
+              setCustomMode(true);
+              onChange('');
+            } else {
+              onChange(next);
+            }
+          }}
+        >
+          <option value="">Select…</option>
+          {options.map((opt) => (
+            <option key={opt} value={opt}>
+              {opt}
+            </option>
+          ))}
+          <option value={OTHER_OPTION}>Other (type my own)…</option>
+        </select>
+      )}
+    </label>
+  );
+}
+
 function RepeatableTextList({
   label,
+  hint,
   values,
   onChange,
   placeholder,
 }: {
   label: string;
+  hint?: string;
   values: string[];
   onChange: (values: string[]) => void;
   placeholder?: string;
 }) {
   return (
     <div class="block text-xs font-medium text-slate-600">
-      {label}
+      <span class="inline-flex items-center">
+        {label}
+        {hint ? <FieldHint text={hint} /> : null}
+      </span>
       <div class="mt-1 space-y-1.5">
         {values.map((value, idx) => (
           <div key={idx} class="flex gap-1.5">
@@ -338,8 +451,14 @@ function GenerateDeterministicDraftForm({ onGenerated }: { onGenerated: () => vo
   const [columnsByTable, setColumnsByTable] = useState<Record<string, string[]>>({});
   const [columnDescriptions, setColumnDescriptions] = useState<Record<string, Record<string, string>>>({});
   const [classifyError, setClassifyError] = useState('');
+  const [coverageAutoFilled, setCoverageAutoFilled] = useState<Record<string, boolean>>({});
+  const [coverageInferError, setCoverageInferError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  const clearAutoFilled = (field: string) => {
+    setCoverageAutoFilled((prev) => (prev[field] ? { ...prev, [field]: false } : prev));
+  };
 
   const tableNames = useMemo(() => csvFiles.map((f) => f.name.replace(/\.csv$/i, '')), [csvFiles]);
 
@@ -363,6 +482,49 @@ function GenerateDeterministicDraftForm({ onGenerated }: { onGenerated: () => vo
       })
       .catch((err) => {
         if (!cancelled) setClassifyError(errorMessage(err, 'Failed to classify CSV columns'));
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [csvFiles]);
+
+  // Auto-detects spatialCoverage/spatialResolution/temporalCoverage from
+  // the CSVs' own column names/values (e.g. a "state.name" column implies
+  // India + state-level; a year-typed column's observed values become the
+  // temporal coverage list) - a starting point only, never overwrites a
+  // value the curator already typed, and stays a normal editable field.
+  useEffect(() => {
+    if (csvFiles.length === 0) return;
+    let cancelled = false;
+    setCoverageInferError('');
+    api
+      .adminInferDatasetCoverage(csvFiles)
+      .then((result) => {
+        if (cancelled) return;
+        const filled: Record<string, boolean> = {};
+        if (result.spatialCoverage && !spatialCoverage) {
+          setSpatialCoverage(result.spatialCoverage);
+          filled.spatialCoverage = true;
+        }
+        if (result.spatialResolution && !spatialResolution) {
+          setSpatialResolution(result.spatialResolution);
+          filled.spatialResolution = true;
+        }
+        if (result.temporalCoverage && !temporalCoverage) {
+          setTemporalCoverage(result.temporalCoverage);
+          filled.temporalCoverage = true;
+        }
+        if (Object.keys(filled).length > 0) {
+          setCoverageAutoFilled((prev) => ({ ...prev, ...filled }));
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setCoverageInferError(
+            errorMessage(err, 'Could not auto-detect coverage fields — fill them in manually below.')
+          );
+        }
       });
     return () => {
       cancelled = true;
@@ -522,7 +684,10 @@ function GenerateDeterministicDraftForm({ onGenerated }: { onGenerated: () => vo
 
       <div class="grid gap-3 md:grid-cols-2">
         <label class="block text-xs font-medium text-slate-600 md:col-span-2">
-          Raw CSV(s) — select more than one for a multi-table dataset
+          <span class="inline-flex items-center">
+            Raw CSV(s) — select more than one for a multi-table dataset
+            <FieldHint text="The actual data file(s) for this dataset. Upload one CSV per table — if you select more than one, each becomes its own table inside a single multi-table dataset." />
+          </span>
           <input
             type="file"
             accept=".csv"
@@ -538,7 +703,10 @@ function GenerateDeterministicDraftForm({ onGenerated }: { onGenerated: () => vo
         </label>
 
         <label class="block text-xs font-medium text-slate-600">
-          Category
+          <span class="inline-flex items-center">
+            Category
+            <FieldHint text="The top-level subject area this dataset belongs to, e.g. 'Census and Surveys'. Pick the closest match — this decides where the dataset is filed in the catalog." />
+          </span>
           <select
             class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
             value={categoryId}
@@ -556,7 +724,10 @@ function GenerateDeterministicDraftForm({ onGenerated }: { onGenerated: () => vo
           </select>
         </label>
         <label class="block text-xs font-medium text-slate-600">
-          Collection
+          <span class="inline-flex items-center">
+            Collection
+            <FieldHint text="The specific group of related datasets this one belongs to within the category above, e.g. 'Livestock Census'." />
+          </span>
           <select
             class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
             value={collectionId}
@@ -572,7 +743,10 @@ function GenerateDeterministicDraftForm({ onGenerated }: { onGenerated: () => vo
           </select>
         </label>
         <label class="block text-xs font-medium text-slate-600">
-          Data owner
+          <span class="inline-flex items-center">
+            Data owner
+            <FieldHint text="The organisation or person responsible for this data — who to credit, and who to contact with questions about it." />
+          </span>
           <select
             class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
             value={dataOwnerName}
@@ -587,7 +761,10 @@ function GenerateDeterministicDraftForm({ onGenerated }: { onGenerated: () => vo
           </select>
         </label>
         <label class="block text-xs font-medium text-slate-600">
-          Existing dataset ID (optional — leave blank to auto-assign the next available ID)
+          <span class="inline-flex items-center">
+            Existing dataset ID (optional — leave blank to auto-assign the next available ID)
+            <FieldHint text="Only fill this in if you're replacing/updating a dataset that's already published. For a brand-new dataset, leave this blank — an ID is assigned automatically." />
+          </span>
           <input
             class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
             value={datasetId}
@@ -596,7 +773,10 @@ function GenerateDeterministicDraftForm({ onGenerated }: { onGenerated: () => vo
         </label>
         {csvFiles.length > 1 ? (
           <label class="block text-xs font-medium text-slate-600 md:col-span-2">
-            Dataset title — required with multiple CSVs (a single CSV is always named after its own filename)
+            <span class="inline-flex items-center">
+              Dataset title — required with multiple CSVs (a single CSV is always named after its own filename)
+              <FieldHint text="A short, URL-friendly name for the dataset as a whole (not any single table), e.g. 'bahs-milk-production-statistics-1950-2024'. Only needed when you've uploaded more than one CSV." />
+            </span>
             <input
               class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
               value={datasetTitle}
@@ -607,7 +787,10 @@ function GenerateDeterministicDraftForm({ onGenerated }: { onGenerated: () => vo
         ) : null}
 
         <label class="block text-xs font-medium text-slate-600 md:col-span-2">
-          Dataset description
+          <span class="inline-flex items-center">
+            Dataset description
+            <FieldHint text="A plain-language summary of what this dataset contains: what each row represents, and what it's broken down by (e.g. state x year x species)." />
+          </span>
           <textarea
             class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
             rows={2}
@@ -619,6 +802,7 @@ function GenerateDeterministicDraftForm({ onGenerated }: { onGenerated: () => vo
         <div class="md:col-span-2">
           <RepeatableTextList
             label="Source document(s) — optional, one citation per entry"
+            hint="Where this data originally came from — the report, survey, or publication it was extracted from, e.g. '16th Livestock Census 1997 – Department of Animal Husbandry'."
             values={source}
             onChange={setSource}
             placeholder="e.g. 16th Livestock Census 1997 – Department of Animal Husbandry, Dairying & Fisheries, Government of India"
@@ -627,13 +811,17 @@ function GenerateDeterministicDraftForm({ onGenerated }: { onGenerated: () => vo
         <div class="md:col-span-2">
           <RepeatableTextList
             label="References / URLs — optional, one per entry"
+            hint="Links to the original source document(s) online, if publicly available, so a future user can go look them up."
             values={references}
             onChange={setReferences}
             placeholder="e.g. https://dahd.gov.in/sites/default/files/2019-12/16thLivestockCensusBook.pdf"
           />
         </div>
         <label class="block text-xs font-medium text-slate-600">
-          Tags — concept (comma-separated)
+          <span class="inline-flex items-center">
+            Tags — concept (comma-separated)
+            <FieldHint text="Keywords describing the subject matter, used to help people find this dataset when searching or browsing the catalog, e.g. 'livestock, cattle, buffalo'." />
+          </span>
           <input
             class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
             value={tagsConcept}
@@ -642,7 +830,10 @@ function GenerateDeterministicDraftForm({ onGenerated }: { onGenerated: () => vo
           />
         </label>
         <label class="block text-xs font-medium text-slate-600">
-          Tags — epiType (comma-separated)
+          <span class="inline-flex items-center">
+            Tags — epiType (comma-separated)
+            <FieldHint text="The kind of measurement this dataset records, e.g. 'population', 'incidence', 'mortality'." />
+          </span>
           <input
             class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
             value={tagsEpiType}
@@ -651,60 +842,88 @@ function GenerateDeterministicDraftForm({ onGenerated }: { onGenerated: () => vo
           />
         </label>
         <label class="block text-xs font-medium text-slate-600">
-          Spatial coverage
+          <span class="inline-flex items-center">
+            Spatial coverage
+            <FieldHint text="The geographic area this dataset covers, e.g. 'India', or a specific state/region. Auto-detected as 'India' when a state/UT-level region column is found - check it's right." />
+            {coverageAutoFilled.spatialCoverage ? <AutoDetectedBadge /> : null}
+          </span>
           <input
             class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
             value={spatialCoverage}
             placeholder="e.g. india"
-            onInput={(e) => setSpatialCoverage((e.target as HTMLInputElement).value)}
+            onInput={(e) => {
+              setSpatialCoverage((e.target as HTMLInputElement).value);
+              clearAutoFilled('spatialCoverage');
+            }}
           />
         </label>
         <label class="block text-xs font-medium text-slate-600">
-          Spatial resolution
+          <span class="inline-flex items-center">
+            Spatial resolution
+            <FieldHint text="The smallest geographic unit each row represents, e.g. 'state', 'district', or 'village'. Auto-detected from the finest-grained region column found - check it's right." />
+            {coverageAutoFilled.spatialResolution ? <AutoDetectedBadge /> : null}
+          </span>
           <input
             class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
             value={spatialResolution}
             placeholder="e.g. state"
-            onInput={(e) => setSpatialResolution((e.target as HTMLInputElement).value)}
+            onInput={(e) => {
+              setSpatialResolution((e.target as HTMLInputElement).value);
+              clearAutoFilled('spatialResolution');
+            }}
           />
         </label>
         <label class="block text-xs font-medium text-slate-600">
-          Temporal coverage
+          <span class="inline-flex items-center">
+            Temporal coverage
+            <FieldHint text="The years or time period this dataset covers, e.g. '1997, 2003, 2007, 2012, 2019' for irregular census years, or '1950-2024' for a continuous range. Auto-detected from a year-typed column's observed values - check it's right." />
+            {coverageAutoFilled.temporalCoverage ? <AutoDetectedBadge /> : null}
+          </span>
           <input
             class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
             value={temporalCoverage}
             placeholder="e.g. 1997, 2003, 2007, 2012, 2019"
-            onInput={(e) => setTemporalCoverage((e.target as HTMLInputElement).value)}
+            onInput={(e) => {
+              setTemporalCoverage((e.target as HTMLInputElement).value);
+              clearAutoFilled('temporalCoverage');
+            }}
           />
         </label>
-        <label class="block text-xs font-medium text-slate-600">
-          Temporal resolution
-          <input
-            class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-            value={temporalResolution}
-            placeholder="e.g. quinquennial"
-            onInput={(e) => setTemporalResolution((e.target as HTMLInputElement).value)}
-          />
-        </label>
-        <label class="block text-xs font-medium text-slate-600">
-          Update frequency
-          <input
-            class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-            value={updateFrequency}
-            placeholder="e.g. quinquennial"
-            onInput={(e) => setUpdateFrequency((e.target as HTMLInputElement).value)}
-          />
-        </label>
+        {coverageInferError ? (
+          <div class="rounded-lg bg-amber-50 p-2 text-[11px] text-amber-700 ring-1 ring-amber-200 md:col-span-2">
+            {coverageInferError}
+          </div>
+        ) : null}
+        <PresetSelectField
+          label="Temporal resolution"
+          hint="How often the data is recorded/reported, e.g. 'Annual', 'Quinquennial' (every 5 years), 'Monthly'."
+          value={temporalResolution}
+          onChange={setTemporalResolution}
+          options={TEMPORAL_RESOLUTION_OPTIONS}
+          placeholder="e.g. survey round (single cross-section)"
+        />
+        <PresetSelectField
+          label="Update frequency"
+          hint="How often this dataset itself is expected to be refreshed with new data going forward, e.g. 'Annual', 'Quinquennial', 'One-time'."
+          value={updateFrequency}
+          onChange={setUpdateFrequency}
+          options={UPDATE_FREQUENCY_OPTIONS}
+          placeholder="e.g. Survey-round basis (not annual)"
+        />
         <div class="md:col-span-2">
           <RepeatableTextList
             label="Comments — optional analyst notes, one per entry (region-history notes are added automatically, no need to repeat them here)"
+            hint="Any other useful fact about the data a future user should know — units used, known gaps, caveats, or how a value was derived. One distinct fact per entry."
             values={comments}
             onChange={setComments}
             placeholder="e.g. The 'total' locality row equals rural + urban exactly for every observation."
           />
         </div>
         <label class="block text-xs font-medium text-slate-600 md:col-span-2">
-          Join key columns (comma-separated, optional — leave blank to accept the auto-suggested candidates)
+          <span class="inline-flex items-center">
+            Join key columns (comma-separated, optional — leave blank to accept the auto-suggested candidates)
+            <FieldHint text="The column(s) that together uniquely identify each row and would be used to combine/join this data with other datasets, e.g. 'state.ID, year'. Leave blank to accept the automatically-suggested columns." />
+          </span>
           <input
             class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
             value={joinKeyColumns}
@@ -721,7 +940,10 @@ function GenerateDeterministicDraftForm({ onGenerated }: { onGenerated: () => vo
             {tableNames.map((name) => (
               <div key={name} class="space-y-2 rounded-xl border border-slate-100 p-3">
                 <label class="block text-xs font-medium text-slate-600">
-                  <span>Table description — {name}</span>
+                  <span class="inline-flex items-center">
+                    Table description — {name}
+                    <FieldHint text="A plain-language summary of what this specific table/CSV contains — if the dataset has multiple tables, how this one differs from the others." />
+                  </span>
                   <textarea
                     class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
                     rows={2}
@@ -740,7 +962,10 @@ function GenerateDeterministicDraftForm({ onGenerated }: { onGenerated: () => vo
                     </p>
                     {(columnsByTable[name] || []).map((col) => (
                       <label key={col} class="block text-xs font-medium text-slate-600">
-                        {col}
+                        <span class="inline-flex items-center">
+                          {col}
+                          <FieldHint text="Explain in plain language what this column represents and what its values mean — this column's type/format was already worked out automatically, only a human-readable description is needed here." />
+                        </span>
                         <input
                           class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
                           value={columnDescriptions[name]?.[col] || ''}
@@ -940,6 +1165,11 @@ function DraftDetail({ draftId }: { draftId: string }) {
   const [infoYamlAccessLevel, setInfoYamlAccessLevel] = useState<AccessLevel>('NONE');
   const [infoYamlBusy, setInfoYamlBusy] = useState(false);
   const [infoYamlError, setInfoYamlError] = useState('');
+  const [uploadAccessLevel, setUploadAccessLevel] = useState<AccessLevel>('NONE');
+  const [uploadBucketType, setUploadBucketType] = useState('STANDARDISED');
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [uploadResult, setUploadResult] = useState<{ dataset_id: string; uploaded_tables: string[] } | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -1016,6 +1246,21 @@ function DraftDetail({ draftId }: { draftId: string }) {
       setInfoYamlError(errorMessage(err, 'Failed to generate info.yml'));
     } finally {
       setInfoYamlBusy(false);
+    }
+  };
+
+  const uploadDatasetNow = async () => {
+    setUploadBusy(true);
+    setUploadError('');
+    setUploadResult(null);
+    try {
+      const result = await api.adminImportDatasetFromDraft(draftId, uploadAccessLevel, uploadBucketType);
+      setUploadResult({ dataset_id: result.dataset_id, uploaded_tables: result.uploaded_tables });
+      await load(); // refreshes draft.dataset_exists now that it's live
+    } catch (err) {
+      setUploadError(errorMessage(err, 'Failed to upload dataset'));
+    } finally {
+      setUploadBusy(false);
     }
   };
 
@@ -1266,7 +1511,7 @@ function DraftDetail({ draftId }: { draftId: string }) {
             <h3 class="text-sm font-semibold text-slate-900">Generate info.yml</h3>
             <p class="mt-1 text-xs text-slate-500">
               {draft.status === 'approved'
-                ? "The second file the real dataset import needs, alongside metadata.yaml - derived from this draft's reviewed fields. Access level isn't captured anywhere upstream, so pick it here before downloading."
+                ? "info.yml is the second file, alongside metadata.yaml, that the dataset import step needs to turn this draft into a real, live dataset. It carries the catalog-level fields metadata.yaml doesn't - dataset ID, collection, title, data owner, description, temporal coverage & resolution, spatial resolution, and the raw dataset's ID & source - plus access level (who can view/download this dataset), which isn't captured anywhere upstream, so pick it here before generating. metadata.yaml + info.yml together are exactly what the Import / Create Dataset tab (or the \"Upload dataset now\" button below) needs."
                 : 'Available once this draft is approved, so info.yml reflects the final reviewed manifest rather than a still-changeable draft. Approve it above first.'}
             </p>
           </div>
@@ -1379,6 +1624,63 @@ function DraftDetail({ draftId }: { draftId: string }) {
           {findingRows(draft.validation_result.findings)}
         </div>
       ) : null}
+
+      <div class="rounded-2xl border border-slate-200 bg-white p-4">
+        <div class="mb-2 flex items-center justify-between gap-3">
+          <div>
+            <h3 class="text-sm font-semibold text-slate-900">Upload dataset now</h3>
+            <p class="mt-1 text-xs text-slate-500">
+              {draft.status !== 'approved'
+                ? 'Available once this draft is approved. Approve it above first.'
+                : draft.dataset_exists === true || uploadResult
+                  ? 'This draft has already been uploaded to the DataIO catalog. To make further changes to the live dataset, use the Import / Create Dataset tab.'
+                  : 'Publishes this approved draft straight to the DataIO catalog - the same process as the Import / Create Dataset tab, without the manual download-and-re-upload step. Use this right after generating a draft’s metadata. For uploads later on, or from outside this draft flow, use the Import / Create Dataset tab instead.'}
+            </p>
+          </div>
+          <div class="flex shrink-0 items-center gap-2">
+            <select
+              class="rounded-lg border border-slate-300 px-2 py-1 text-xs disabled:opacity-50"
+              value={uploadAccessLevel}
+              disabled={uploadBusy || draft.status !== 'approved' || draft.dataset_exists === true || !!uploadResult}
+              onChange={(e) => setUploadAccessLevel((e.target as HTMLSelectElement).value as AccessLevel)}
+            >
+              <option value="NONE">NONE</option>
+              <option value="VIEW">VIEW</option>
+              <option value="DOWNLOAD">DOWNLOAD</option>
+            </select>
+            <select
+              class="rounded-lg border border-slate-300 px-2 py-1 text-xs disabled:opacity-50"
+              value={uploadBucketType}
+              disabled={uploadBusy || draft.status !== 'approved' || draft.dataset_exists === true || !!uploadResult}
+              onChange={(e) => setUploadBucketType((e.target as HTMLSelectElement).value)}
+            >
+              <option value="STANDARDISED">STANDARDISED</option>
+              <option value="PREPROCESSED">PREPROCESSED</option>
+            </select>
+            <button
+              type="button"
+              disabled={uploadBusy || draft.status !== 'approved' || draft.dataset_exists === true || !!uploadResult}
+              onClick={uploadDatasetNow}
+              class="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {uploadBusy
+                ? 'Uploading…'
+                : draft.dataset_exists === true || uploadResult
+                  ? 'Already uploaded'
+                  : 'Upload dataset now'}
+            </button>
+          </div>
+        </div>
+        {uploadResult ? (
+          <div class="rounded-lg bg-emerald-50 p-2 text-xs text-emerald-700 ring-1 ring-emerald-200">
+            Uploaded dataset <span class="font-mono">{uploadResult.dataset_id}</span> ({uploadResult.uploaded_tables.length}{' '}
+            table{uploadResult.uploaded_tables.length === 1 ? '' : 's'}).
+          </div>
+        ) : null}
+        {uploadError ? (
+          <div class="rounded-lg bg-red-50 p-2 text-xs text-red-700 ring-1 ring-red-200">{uploadError}</div>
+        ) : null}
+      </div>
     </div>
   );
 }

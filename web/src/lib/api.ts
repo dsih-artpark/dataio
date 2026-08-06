@@ -1182,6 +1182,18 @@ class ApiClient {
     );
   }
 
+  async adminInferDatasetCoverage(csvFiles: File[]) {
+    const formData = new FormData();
+    for (const file of csvFiles) {
+      formData.append('csv_files', file);
+    }
+    return this.request<{
+      spatialCoverage: string | null;
+      spatialResolution: string | null;
+      temporalCoverage: string | null;
+    }>('/admin/manifest-drafts/infer-coverage', { method: 'POST', body: formData });
+  }
+
   async adminListManifestDrafts(params?: { status?: string; datasetId?: string; limit?: number; offset?: number }) {
     const query = new URLSearchParams();
     if (params?.status) query.set('status', params.status);
@@ -1252,6 +1264,18 @@ class ApiClient {
       `/admin/manifest-drafts/${encodeURIComponent(draftId)}/info-yaml`,
       { method: 'POST', body: JSON.stringify({ access_level: accessLevel }) }
     );
+  }
+
+  async adminImportDatasetFromDraft(draftId: string, accessLevel: AccessLevel, bucketType: string) {
+    return this.request<{
+      dataset_id: string;
+      bucket_type: string;
+      uploaded_tables: string[];
+      manifest_uploaded: boolean;
+    }>(`/admin/manifest-drafts/${encodeURIComponent(draftId)}/import`, {
+      method: 'POST',
+      body: JSON.stringify({ access_level: accessLevel, bucket_type: bucketType }),
+    });
   }
 }
 

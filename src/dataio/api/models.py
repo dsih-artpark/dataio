@@ -113,6 +113,15 @@ class ManifestDraftInfoYamlRequest(BaseModel):
     )
 
 
+class ManifestDraftImportRequest(BaseModel):
+    access_level: AccessLevel = Field(
+        ..., description="Access level for the info.yml generated as part of the import"
+    )
+    bucket_type: VersionType = Field(
+        default=VersionType.STANDARDISED, description="Filestore bucket to upload the tables into"
+    )
+
+
 class ClassifyColumnsRequest(BaseModel):
     table_name: str = Field(..., description="Name of the table (CSV filename stem)")
     column_names: List[str] = Field(

@@ -7,7 +7,9 @@ permissions, manifests, and validation through the web interface.
 
 import logging
 import json
+import os
 import re
+import tempfile
 from io import BytesIO
 from pathlib import Path
 from typing import List, Optional
@@ -1429,6 +1431,57 @@ class WebAdminService(BaseService):
             "manifest_uploaded": True,
         }
 
+    def import_dataset_from_draft(
+        self,
+        admin_user: User,
+        draft_id: str,
+        access_level: str,
+        bucket_type: VersionType = VersionType.STANDARDISED,
+    ) -> dict:
+        """Skips the manual "download draft_yaml + info.yml, re-upload
+        through the Import Dataset Package tool" handoff (see
+        DatasetManifestDraft's docstring) by driving import_dataset_package
+        directly from an approved draft's own already-stored fields - same
+        validation, same S3/Postgres writes as the Import tab, just without
+        a curator round-tripping files through their own machine first.
+        """
+        self._require_admin(admin_user)
+        draft = self.draft_review_service._get_draft_or_404(draft_id)
+        if draft.status.value != "approved":
+            raise HTTPException(status_code=400, detail="Approve this draft before uploading it.")
+
+        info_yaml = self.draft_review_service.generate_info_yaml(draft_id, access_level)["info_yaml"]
+
+        # Local import matches regenerate_draft's own convention
+        # (draft_review_service.py) for reaching into draft_service.py.
+        from dataio.api.services.draft_service import decode_csv_paths
+
+        table_names = list((draft.draft_json or {}).get("tables", {}).keys())
+        csv_paths_by_table = decode_csv_paths(draft.source_csv_path, table_names)
+
+        csv_files = []
+        for table_name, path in csv_paths_by_table.items():
+            try:
+                with open(path, "rb") as f:
+                    csv_files.append(UploadFile(filename=f"{table_name}.csv", file=BytesIO(f.read())))
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not read stored CSV for table '{table_name}': {exc}",
+                ) from exc
+
+        info_file = UploadFile(filename="info.yml", file=BytesIO(info_yaml.encode("utf-8")))
+        metadata_file = UploadFile(filename="metadata.yaml", file=BytesIO(draft.draft_yaml.encode("utf-8")))
+
+        return self.import_dataset_package(
+            admin_user,
+            info_file,
+            metadata_file,
+            csv_files,
+            dataset_override={"existing_dataset_id": draft.dataset_id},
+            bucket_type=bucket_type,
+        )
+
     def initiate_dataset_deletion(self, admin_user: User, dataset_id: str) -> dict:
         self._require_admin(admin_user)
         if not database.check_if_dataset_exists(dataset_id):
@@ -1634,6 +1687,28 @@ class WebAdminService(BaseService):
     def classify_columns(self, admin_user: User, column_names: list) -> dict:
         self._require_admin(admin_user)
         return self.draft_review_service.classify_columns(column_names=column_names)
+
+    def infer_dataset_coverage(self, admin_user: User, csv_files: List) -> dict:
+        """Writes each uploaded CSV to a throwaway temp file (this runs
+        before any draft exists - there's nothing to persist to, unlike
+        draft_upload_storage.save_upload) just long enough to profile it,
+        then cleans up regardless of outcome.
+        """
+        self._require_admin(admin_user)
+        temp_paths: List[str] = []
+        try:
+            for file in csv_files:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
+                    file.file.seek(0)
+                    tmp.write(file.file.read())
+                    temp_paths.append(tmp.name)
+            return self.draft_review_service.infer_dataset_coverage(temp_paths)
+        finally:
+            for path in temp_paths:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
 
     def list_manifest_drafts(
         self,

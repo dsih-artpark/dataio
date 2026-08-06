@@ -198,6 +198,56 @@ class DraftReviewService(BaseService):
         needs_description = [name for name in column_names if name not in fixed]
         return {"fixed": fixed, "needsDescription": needs_description}
 
+    def infer_dataset_coverage(self, csv_paths: list[str]) -> dict:
+        """Suggests spatialCoverage/spatialResolution/temporalCoverage for
+        the deterministic intake form, from the CSVs' own profiled
+        structure (field_inference.py) - a deterministic starting point
+        the curator reviews and can freely edit or correct on the form;
+        generate_deterministic_draft never re-derives these itself, only
+        ever uses whatever the curator actually submitted. None for a
+        field this couldn't confidently derive - the curator fills that
+        one in manually, same as before this existed. Combines across
+        multiple CSVs (a multi-table dataset): spatialCoverage is "India"
+        if any table has one; spatialResolution is the single finest
+        resolution found across every table; temporalCoverage is the
+        union of every table's observed years.
+        """
+        from dataio.api.services.csv_profiler import profile_csv
+        from dataio.api.services.field_inference import (
+            SPATIAL_RESOLUTION_RANK,
+            infer_data_dictionary,
+            suggest_spatial_coverage,
+            suggest_spatial_resolution,
+            suggest_temporal_coverage,
+        )
+
+        spatial_coverage: str | None = None
+        resolutions: list[str] = []
+        years: set[str] = set()
+        for path in csv_paths:
+            data_dictionary, _ = infer_data_dictionary(profile_csv(path))
+            spatial_coverage = spatial_coverage or suggest_spatial_coverage(data_dictionary)
+            resolution = suggest_spatial_resolution(data_dictionary)
+            if resolution:
+                resolutions.append(resolution)
+            coverage = suggest_temporal_coverage(data_dictionary)
+            if coverage:
+                years.update(y.strip() for y in coverage.split(","))
+
+        # Unrecognized prefixes rank as finer than any known one (matches
+        # suggest_spatial_resolution's own convention within a single table).
+        unknown_rank = max(SPATIAL_RESOLUTION_RANK.values()) + 1
+        spatial_resolution = (
+            max(resolutions, key=lambda r: SPATIAL_RESOLUTION_RANK.get(r, unknown_rank)) if resolutions else None
+        )
+        temporal_coverage = ", ".join(sorted(years)) if years else None
+
+        return {
+            "spatialCoverage": spatial_coverage,
+            "spatialResolution": spatial_resolution,
+            "temporalCoverage": temporal_coverage,
+        }
+
     def revalidate_draft(self, draft_id: str) -> dict:
         """Re-runs the same conversion + existing-DataIOValidator check
         generate_draft() used, in case the CSV(s) or the manifest have

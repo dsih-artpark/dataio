@@ -384,3 +384,89 @@ def infer_table_structure(
     region_gap_comments = list(detect_region_gaps_for_table(csv_path, data_dictionary))
 
     return data_dictionary, join_key_columns, region_gap_comments
+
+
+# Coarse-to-fine administrative granularity ranking for the region-name
+# column prefixes real datasets in this system actually use (the LGD
+# convention - see infer_fixed_column_description). Used to pick the
+# FINEST spatial resolution actually present in a table when suggesting
+# spatialResolution to the curator (see suggest_spatial_resolution) - not
+# an exhaustive list of every possible administrative unit, just the ones
+# seen in practice, so an unrecognized prefix still gets returned as its
+# own bare word (see suggest_spatial_resolution), just not preferred over
+# a recognized finer one.
+SPATIAL_RESOLUTION_RANK: dict[str, int] = {
+    "country": 0,
+    "state": 1,
+    "ut": 1,
+    "district": 2,
+    "subdistrict": 3,
+    "block": 3,
+    "taluk": 3,
+    "tehsil": 3,
+    "municipality": 4,
+    "ulb": 4,
+    "town": 5,
+    "village": 5,
+    "ward": 6,
+    "prabhag": 6,
+}
+# Any prefix not in the ranking above is assumed to be at least as fine as
+# the finest recognized one - an unfamiliar administrative unit name is
+# more likely to be a further subdivision this list hasn't caught up with
+# yet than a coarser one, in a system whose real datasets are already
+# state/district-level or finer.
+_UNKNOWN_PREFIX_RANK = max(SPATIAL_RESOLUTION_RANK.values()) + 1
+
+
+def suggest_spatial_resolution(data_dictionary: dict[str, dict]) -> str | None:
+    """Suggests spatialResolution from the finest-grained regionName column
+    actually present (e.g. a "district.name" column present alongside
+    "state.name" means district-level data) - a deterministic starting
+    point for the curator to confirm or correct on the intake form, never
+    trusted as final (generate_deterministic_draft only ever uses the
+    curator's own submitted value, never re-derives this itself). Returns
+    None when no regionName column is present at all.
+    """
+    candidates: list[tuple[int, str]] = []
+    for column_name, field in data_dictionary.items():
+        if field.get("type") != "regionName":
+            continue
+        prefix = column_name.rsplit(".", 1)[0].lower()
+        candidates.append((SPATIAL_RESOLUTION_RANK.get(prefix, _UNKNOWN_PREFIX_RANK), prefix))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda candidate: candidate[0], reverse=True)
+    return candidates[0][1]
+
+
+def suggest_spatial_coverage(data_dictionary: dict[str, dict]) -> str | None:
+    """"India" whenever a state/UT-level region column (regionID or
+    regionName) is present - every real dataset in this system uses the
+    India-specific LGD convention (see infer_fixed_column_description,
+    region_history.yaml). Returns None (curator fills in manually) when no
+    state/UT-level region column is found, rather than guessing at a
+    narrower or altogether different coverage a bare column-name/type
+    check has no real basis for determining.
+    """
+    for column_name, field in data_dictionary.items():
+        if field.get("type") not in ("regionID", "regionName"):
+            continue
+        prefix = column_name.rsplit(".", 1)[0].lower()
+        if prefix in ("state", "ut"):
+            return "India"
+    return None
+
+
+def suggest_temporal_coverage(data_dictionary: dict[str, dict]) -> str | None:
+    """Every actually-observed year, comma-joined - the exact convention
+    real metadata.yaml files use (e.g. "1997, 2003, 2007, 2012, 2019" for
+    irregular census years), read directly off the year-typed column's
+    already-computed allowedValues (see infer_column_type's
+    looks_like_year branch) rather than re-scanning anything. Returns None
+    when no year-typed (date, format "%Y") column is present.
+    """
+    for field in data_dictionary.values():
+        if field.get("type") == "date" and field.get("format") == "%Y" and field.get("allowedValues"):
+            return ", ".join(field["allowedValues"])
+    return None

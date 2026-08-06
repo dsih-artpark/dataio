@@ -39,6 +39,7 @@ from dataio.api.models import (
     DatasetUpdate,
     ManifestDraftEdit,
     ManifestDraftFlagField,
+    ManifestDraftImportRequest,
     ManifestDraftInfoYamlRequest,
     ManifestDraftReject,
     RawDatasetCreate,
@@ -1673,6 +1674,19 @@ async def web_classify_columns(
     return admin_service.classify_columns(user, body.column_names)
 
 
+@web_router.post("/admin/manifest-drafts/infer-coverage", tags=["web-admin/manifest-drafts"])
+async def web_infer_dataset_coverage(
+    csv_files: List[UploadFile] = File(...),
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Suggests spatialCoverage/spatialResolution/temporalCoverage for the
+    deterministic-draft intake form, from the CSVs' own profiled structure
+    - a starting point the curator reviews and can edit, never silently
+    trusted as final."""
+    return admin_service.infer_dataset_coverage(user, csv_files)
+
+
 @web_router.get("/admin/manifest-drafts", tags=["web-admin/manifest-drafts"])
 async def web_list_manifest_drafts(
     status: Optional[str] = None,
@@ -1771,6 +1785,22 @@ async def web_generate_manifest_draft_info_yaml(
     admin_service: WebAdminService = Depends(WebAdminService),
 ):
     return admin_service.generate_manifest_draft_info_yaml(user, draft_id, body.access_level.value)
+
+
+@web_router.post(
+    "/admin/manifest-drafts/{draft_id}/import", tags=["web-admin/manifest-drafts"]
+)
+async def web_import_dataset_from_draft(
+    draft_id: str,
+    body: ManifestDraftImportRequest,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Publishes an approved draft straight to the catalog - the same
+    import_dataset_package pipeline the Import Dataset Package tool uses,
+    driven directly from the draft's own stored fields instead of a manual
+    download/re-upload round-trip."""
+    return admin_service.import_dataset_from_draft(user, draft_id, body.access_level.value, body.bucket_type)
 
 
 @web_router.get("/admin/documentation-sync", tags=["web-admin/datasets"])

@@ -10,6 +10,9 @@ from dataio.api.services.field_inference import (
     infer_join_key_candidates,
     lookup_canonical_enum_definitions,
     match_canonical_values,
+    suggest_spatial_coverage,
+    suggest_spatial_resolution,
+    suggest_temporal_coverage,
 )
 
 
@@ -334,3 +337,52 @@ def test_match_canonical_values_defaults_rollup_to_own_key_when_no_rollup_field(
     result = match_canonical_values(["indigenous"], canonical_definition)
 
     assert result["indigenous"] == {"canonical": "indigenous", "canonicalRollup": "indigenous"}
+
+
+def test_suggest_spatial_coverage_is_india_for_state_region_column():
+    data_dictionary = {"state.name": {"type": "regionName"}, "count": {"type": "int"}}
+
+    assert suggest_spatial_coverage(data_dictionary) == "India"
+
+
+def test_suggest_spatial_coverage_none_without_state_or_ut_column():
+    data_dictionary = {"district.name": {"type": "regionName"}, "count": {"type": "int"}}
+
+    assert suggest_spatial_coverage(data_dictionary) is None
+
+
+def test_suggest_spatial_resolution_picks_finest_grain_present():
+    data_dictionary = {
+        "state.name": {"type": "regionName"},
+        "district.name": {"type": "regionName"},
+        "count": {"type": "int"},
+    }
+
+    assert suggest_spatial_resolution(data_dictionary) == "district"
+
+
+def test_suggest_spatial_resolution_none_without_region_name_column():
+    data_dictionary = {"state.ID": {"type": "regionID"}, "count": {"type": "int"}}
+
+    assert suggest_spatial_resolution(data_dictionary) is None
+
+
+def test_suggest_spatial_resolution_unrecognized_prefix_still_returned():
+    data_dictionary = {"block.name": {"type": "regionName"}}
+
+    assert suggest_spatial_resolution(data_dictionary) == "block"
+
+
+def test_suggest_temporal_coverage_joins_observed_years():
+    data_dictionary = {
+        "year": {"type": "date", "format": "%Y", "allowedValues": ["1997", "2003", "2019"]},
+        "count": {"type": "int"},
+    }
+
+    assert suggest_temporal_coverage(data_dictionary) == "1997, 2003, 2019"
+
+
+def test_suggest_temporal_coverage_none_without_year_column():
+    data_dictionary = {"count": {"type": "int"}}
+
+    assert suggest_temporal_coverage(data_dictionary) is None

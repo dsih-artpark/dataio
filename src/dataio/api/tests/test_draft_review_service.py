@@ -859,6 +859,48 @@ def test_classify_columns_splits_fixed_and_needs_description():
     assert set(result["needsDescription"]) == {"species", "count"}
 
 
+def test_infer_dataset_coverage_suggests_all_three_fields_from_real_csv(tmp_path):
+    csv_path = tmp_path / "main.csv"
+    csv_path.write_text(
+        "state.ID,state.name,year,count\n"
+        "state_KA,Karnataka,1997,10\n"
+        "state_KL,Kerala,2003,20\n"
+        "state_KA,Karnataka,2019,30\n",
+        encoding="utf-8",
+    )
+    service = _make_service()
+
+    result = service.infer_dataset_coverage([str(csv_path)])
+
+    assert result["spatialCoverage"] == "India"
+    assert result["spatialResolution"] == "state"
+    assert result["temporalCoverage"] == "1997, 2003, 2019"
+
+
+def test_infer_dataset_coverage_combines_across_multiple_tables(tmp_path):
+    coarse_csv = tmp_path / "coarse.csv"
+    coarse_csv.write_text("state.name,year,count\nKarnataka,1997,10\n", encoding="utf-8")
+    fine_csv = tmp_path / "fine.csv"
+    fine_csv.write_text("district.name,year,count\nBengaluru,2019,5\n", encoding="utf-8")
+    service = _make_service()
+
+    result = service.infer_dataset_coverage([str(coarse_csv), str(fine_csv)])
+
+    # finest resolution across both tables wins, and years union across both
+    assert result["spatialResolution"] == "district"
+    assert result["temporalCoverage"] == "1997, 2019"
+
+
+def test_infer_dataset_coverage_returns_none_when_nothing_detected(tmp_path):
+    csv_path = tmp_path / "plain.csv"
+    csv_path.write_text("indicator,count\nfoo,1\n", encoding="utf-8")
+    service = _make_service()
+
+    result = service.infer_dataset_coverage([str(csv_path)])
+
+    assert result == {"spatialCoverage": None, "spatialResolution": None, "temporalCoverage": None}
+
+
 def test_flag_field_delegates_to_db_function(monkeypatch):
     service = _make_service()
     draft = _fake_draft()

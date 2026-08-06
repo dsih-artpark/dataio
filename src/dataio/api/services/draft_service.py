@@ -26,9 +26,15 @@ from dataio.api.database.functions import (
     suggest_next_dataset_id,
 )
 from dataio.api.database.rds_id_helpers import resolve_rds_id
-from dataio.api.services.csv_profiler import CsvProfile, profile_csv, read_full_csv_text
+from dataio.api.services.csv_profiler import CsvProfile, profile_csv
 from dataio.api.services.digitization_log import load_digitization_log
-from dataio.api.services.draft_prompt import build_batch_prompt, build_prompt, parse_llm_output
+from dataio.api.services.draft_prompt import (
+    build_batch_prompt,
+    build_prompt,
+    estimate_table_context_size,
+    parse_llm_output,
+)
+from dataio.api.services.field_inference import infer_fixed_column_description, infer_table_structure
 from dataio.api.services.manifest_v2_conversion import convert_v2_manifest_to_contract
 from dataio.api.services.openrouter_draft_client import OpenRouterDraftClient
 from dataio.validate.sdk import DataIOValidator
@@ -197,32 +203,34 @@ def _complete_with_retry(client: OpenRouterDraftClient, system_prompt: str, user
     raise last_error  # every attempt failed to parse; surface the last error
 
 
-# Target combined full-CSV-text size per LLM call, well under Claude Sonnet
-# 5's ~200K token (~800K char) context window - leaves generous headroom for
-# the fixed system prompt (~21K chars), each table's profile overhead
-# (column stats, distinct-value lists), and the completion itself. A
-# dataset whose combined full-CSV-text exceeds this is split into multiple
-# calls (see _batch_tables) rather than any table's content ever being
-# summarized away - every table's real content always reaches the LLM.
+# Target combined per-table prompt-context size per LLM call, well under
+# Claude Sonnet 5's ~200K token (~800K char) context window - leaves
+# generous headroom for the fixed system prompt and the completion itself.
+# Each table's context (see draft_prompt.estimate_table_context_size) is
+# bounded by CsvProfile's own caps (up to 200 distinct values, 20 sample
+# rows) regardless of the table's real row count - unlike the raw full-CSV
+# text this budget used to measure, so multi-batch splitting (see
+# _batch_tables) should now only matter for datasets with unusually many
+# tables/columns, not large row counts.
 BATCH_CHAR_BUDGET = 400_000
 
 
 def _batch_tables(
-    table_names: list[str], full_csv_texts: dict[str, str], char_budget: int = BATCH_CHAR_BUDGET
+    table_names: list[str], context_sizes: dict[str, int], char_budget: int = BATCH_CHAR_BUDGET
 ) -> list[list[str]]:
     """Greedily groups table names (in their given order) into batches so
-    each batch's combined full-CSV-text size stays under char_budget. Never
-    drops or shrinks a table's content - only limits how many tables share
-    one LLM call. A single table whose own full text alone exceeds
-    char_budget still gets its own solo batch (its full content is sent
-    regardless, even if that one call ends up over budget - there's no
-    smaller-than-one-table granularity to split further).
+    each batch's combined prompt-context size stays under char_budget.
+    Never drops or shrinks a table's context - only limits how many tables
+    share one LLM call. A single table whose own context alone exceeds
+    char_budget still gets its own solo batch (sent regardless, even if
+    that one call ends up over budget - there's no smaller-than-one-table
+    granularity to split further).
     """
     batches: list[list[str]] = []
     current: list[str] = []
     current_size = 0
     for table_name in table_names:
-        size = len(full_csv_texts.get(table_name, ""))
+        size = context_sizes.get(table_name, 0)
         if current and current_size + size > char_budget:
             batches.append(current)
             current = []
@@ -509,6 +517,109 @@ def _finalize_draft(
     )
 
 
+def _infer_deterministic_base(
+    csv_profiles: dict[str, CsvProfile], csv_paths_by_table: dict[str, str]
+) -> dict:
+    """Runs the same deterministic structure inference the fully rule-based
+    drafter uses (field_inference.infer_table_structure) for every table,
+    before the LLM is ever called - type/nullable/format/joinKeys/
+    canonicalEnumDefinitions/canonical-value-matching and region-history
+    comments are all mechanical functions of the column profile stats
+    profile_csv already computed, not something an LLM needs to read raw
+    CSV text to guess at. Only per-column `description` is left as None
+    here for columns with no fixed, structural description (see
+    infer_fixed_column_description) - the LLM's narrative pass fills those
+    in afterward (see _merge_narrative_into_base).
+    """
+    tables: dict[str, dict] = {}
+    dataset_enum_definitions: dict[str, dict] = {}
+    dataset_canonical_enum_definitions: dict[str, dict] = {}
+    region_gap_comments: list[str] = []
+
+    for table_name, profile in csv_profiles.items():
+        data_dictionary, join_keys, table_region_comments = infer_table_structure(
+            profile,
+            csv_paths_by_table[table_name],
+            dataset_enum_definitions,
+            dataset_canonical_enum_definitions,
+        )
+        for comment in table_region_comments:
+            if comment not in region_gap_comments:
+                region_gap_comments.append(comment)
+
+        for column_name, field in data_dictionary.items():
+            field["description"] = infer_fixed_column_description(column_name)
+
+        tables[table_name] = {"joinKeys": join_keys, "data_dictionary": data_dictionary}
+
+    dataset_join_keys = sorted({column for table in tables.values() for column in table["joinKeys"]})
+
+    return {
+        "tables": tables,
+        "enum_definitions": dataset_enum_definitions,
+        "canonical_enum_definitions": dataset_canonical_enum_definitions,
+        "join_keys": dataset_join_keys,
+        "region_gap_comments": region_gap_comments,
+    }
+
+
+def _merge_narrative_into_base(base: dict, narrative_manifest: dict) -> dict:
+    """Overlays the LLM's narrative-only output (descriptions, enum
+    definitions, dataset/table-level fields, comments) onto `base` - the
+    deterministic type/joinKeys/canonicalEnumDefinitions/region-comments
+    skeleton from _infer_deterministic_base. Column description precedence:
+    a fixed structural description (already set in `base`) always wins;
+    otherwise the LLM's description is used; otherwise a generic stub
+    (matching infer_data_dictionary's own placeholder shape) in case the
+    LLM omits a column it wasn't specifically asked to redo work on.
+    """
+    merged = dict(narrative_manifest)
+    merged["joinKeys"] = base["join_keys"]
+    if base["canonical_enum_definitions"]:
+        merged["canonicalEnumDefinitions"] = base["canonical_enum_definitions"]
+    merged["comments"] = [*base["region_gap_comments"], *(narrative_manifest.get("comments") or [])]
+
+    narrative_tables = narrative_manifest.get("tables") or {}
+    merged_tables: dict[str, dict] = {}
+    for table_name, base_table in base["tables"].items():
+        narrative_table = narrative_tables.get(table_name) or {}
+        data_dictionary = base_table["data_dictionary"]
+        narrative_data_dictionary = narrative_table.get("data_dictionary") or {}
+        for column_name, field in data_dictionary.items():
+            if field.get("description"):
+                continue
+            llm_description = (narrative_data_dictionary.get(column_name) or {}).get("description")
+            field["description"] = llm_description or f"'{column_name}' column."
+        merged_tables[table_name] = {
+            "description": narrative_table.get("description", ""),
+            "source": narrative_table.get("source", ""),
+            "joinKeys": base_table["joinKeys"],
+            "data_dictionary": data_dictionary,
+        }
+    merged["tables"] = merged_tables
+
+    if base["enum_definitions"]:
+        narrative_enum_defs = narrative_manifest.get("enumDefinitions") or {}
+        merged_enum_defs: dict[str, dict] = {}
+        for block, base_def in base["enum_definitions"].items():
+            narrative_def = narrative_enum_defs.get(block) or {}
+            narrative_values = narrative_def.get("values") or {}
+            values = {}
+            for value, base_value in base_def["values"].items():
+                llm_value_description = (narrative_values.get(value) or {}).get("description")
+                values[value] = {
+                    **base_value,
+                    "description": llm_value_description or base_value["description"],
+                }
+            merged_enum_defs[block] = {
+                "description": narrative_def.get("description") or base_def["description"],
+                "values": values,
+            }
+        merged["enumDefinitions"] = merged_enum_defs
+
+    return merged
+
+
 def generate_draft(
     *,
     csv_paths: list[str],
@@ -531,11 +642,19 @@ def generate_draft(
     csv_profiles = {table_name: profile_csv(p) for table_name, p in csv_paths_by_table.items()}
     digitization_log = load_digitization_log(digitization_log_path)
 
-    # Every table's full CSV content is always sent to the LLM, never
-    # summarized - a dataset too large for one call's context budget is
-    # split across multiple calls instead (see _batch_tables).
-    full_csv_texts = {table_name: read_full_csv_text(p) for table_name, p in csv_paths_by_table.items()}
-    batches = _batch_tables(list(csv_paths_by_table.keys()), full_csv_texts, BATCH_CHAR_BUDGET)
+    # Type/nullable/joinKeys/canonicalEnumDefinitions/region-history
+    # comments are all decided deterministically from the column profile
+    # stats before the LLM is ever called - the LLM only drafts
+    # descriptions and enum definitions (see _merge_narrative_into_base).
+    # This also bounds prompt size per table regardless of row count, since
+    # raw CSV text is never sent at all anymore (see estimate_table_context_size).
+    deterministic_base = _infer_deterministic_base(csv_profiles, csv_paths_by_table)
+
+    table_context_sizes = {
+        table_name: estimate_table_context_size(table_name, profile, deterministic_base["tables"][table_name])
+        for table_name, profile in csv_profiles.items()
+    }
+    batches = _batch_tables(list(csv_paths_by_table.keys()), table_context_sizes, BATCH_CHAR_BUDGET)
 
     client = OpenRouterDraftClient()
     try:
@@ -543,7 +662,7 @@ def generate_draft(
             system_prompt, user_prompt = build_prompt(
                 csv_profiles=csv_profiles,
                 digitization_log=digitization_log,
-                full_csv_texts=full_csv_texts,
+                deterministic_base=deterministic_base,
             )
             batch_results = [_complete_with_retry(client, system_prompt, user_prompt)]
         else:
@@ -552,7 +671,7 @@ def generate_draft(
                 system_prompt, user_prompt = build_batch_prompt(
                     csv_profiles=csv_profiles,
                     digitization_log=digitization_log,
-                    full_csv_texts=full_csv_texts,
+                    deterministic_base=deterministic_base,
                     batch_table_names=batch_table_names,
                     include_dataset_level_fields=(batch_index == 0),
                 )
@@ -560,7 +679,8 @@ def generate_draft(
     finally:
         client.close()
 
-    manifest_dict, flags = _merge_batch_manifests(batch_results)
+    narrative_manifest, flags = _merge_batch_manifests(batch_results)
+    manifest_dict = _merge_narrative_into_base(deterministic_base, narrative_manifest)
 
     return _finalize_draft(
         manifest_dict=manifest_dict,

@@ -17,6 +17,7 @@ from typing import Any
 
 from dataio.api.services.csv_profiler import ColumnProfile, CsvProfile
 from dataio.api.services.reference_data import load_canonical_enum_registry
+from dataio.api.services.region_gap_detector import detect_region_gaps_for_table
 
 _REGION_ID_VALUE_RE = re.compile(r"^[a-z]+_[A-Za-z0-9]+$")
 _YEAR_VALUE_RE = re.compile(r"^\d{4}$")
@@ -308,3 +309,78 @@ def apply_join_keys(
         is_temporal = field.get("type") in {"date", "dateTime"}
         field["joinKeyType"] = "temporal" if is_temporal else "compositeComponent"
     return data_dictionary
+
+
+def infer_table_structure(
+    profile: CsvProfile,
+    csv_path: str,
+    dataset_enum_definitions: dict[str, dict],
+    dataset_canonical_enum_definitions: dict[str, dict],
+    join_key_columns_override: list[str] | None = None,
+) -> tuple[dict[str, dict], list[str], list[str]]:
+    """Returns (data_dictionary, join_keys, region_gap_comments) for one
+    table - every deterministic structure-inference step shared by both the
+    fully-deterministic drafter (generate_deterministic_draft) and the LLM
+    drafter's pre-pass (draft_service._infer_deterministic_base): type
+    inference, enum-block collision-safe merging, canonical-registry
+    cross-linking, join-key resolution, and region-history gap detection.
+    Only per-column `description` text differs between the two callers
+    (curator-supplied vs. LLM-supplied) - left unset here for the caller to
+    fill in afterward.
+
+    Mutates dataset_enum_definitions and dataset_canonical_enum_definitions
+    in place with this table's contributions (collision-safe rename on a
+    genuine enum-block conflict between tables, same as before). Returned
+    region_gap_comments are deduplicated within this table only - a caller
+    combining multiple tables' results is responsible for cross-table
+    dedup, same as before.
+    """
+    data_dictionary, enum_definitions = infer_data_dictionary(profile)
+
+    # Merge this table's enum definitions into the dataset-wide block. Only
+    # rename on a genuine collision (same ref, different values) - two
+    # different tables with a same-named column (e.g. every table has its
+    # own "indicator"/"units"/"sourceTableID") would otherwise silently
+    # overwrite each other's values, failing validation for the earlier
+    # table's rows even though the value was real.
+    for column_name, field in data_dictionary.items():
+        if field.get("type") != "enum":
+            continue
+        enum_ref = field["enumRef"]
+        definition = enum_definitions[enum_ref]
+        existing = dataset_enum_definitions.get(enum_ref)
+        if existing is not None and existing != definition:
+            suffix = 2
+            candidate = f"{enum_ref}{suffix}"
+            while candidate in dataset_enum_definitions and dataset_enum_definitions[candidate] != definition:
+                suffix += 1
+                candidate = f"{enum_ref}{suffix}"
+            enum_ref = candidate
+            field["enumRef"] = enum_ref
+        dataset_enum_definitions[enum_ref] = definition
+
+    column_names = [column.name for column in profile.columns]
+    dataset_canonical_enum_definitions.update(lookup_canonical_enum_definitions(column_names))
+
+    # Cross-link each enum column's observed values to the canonical block
+    # matched for its own name (if any) - e.g. "species" values get
+    # canonical/canonicalRollup keys pointing into
+    # canonicalEnumDefinitions.canonicalSpecies. Values with no normalized
+    # match are left untouched (see match_canonical_values).
+    for column_name, field in data_dictionary.items():
+        if field.get("type") != "enum":
+            continue
+        enum_values = dataset_enum_definitions.get(field["enumRef"], {}).get("values", {})
+        for canonical_definition in lookup_canonical_enum_definitions([column_name]).values():
+            for value, canonical_fields in match_canonical_values(
+                list(enum_values.keys()), canonical_definition
+            ).items():
+                enum_values[value].update(canonical_fields)
+
+    join_key_columns = join_key_columns_override or infer_join_key_candidates(profile, data_dictionary)
+    join_key_columns = [name for name in join_key_columns if name in data_dictionary]
+    apply_join_keys(data_dictionary, join_key_columns)
+
+    region_gap_comments = list(detect_region_gaps_for_table(csv_path, data_dictionary))
+
+    return data_dictionary, join_key_columns, region_gap_comments

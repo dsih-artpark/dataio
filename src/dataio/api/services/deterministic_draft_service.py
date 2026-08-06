@@ -20,15 +20,7 @@ from pydantic import BaseModel, Field
 
 from dataio.api.services import draft_service
 from dataio.api.services.csv_profiler import profile_csv
-from dataio.api.services.field_inference import (
-    apply_join_keys,
-    infer_data_dictionary,
-    infer_fixed_column_description,
-    infer_join_key_candidates,
-    lookup_canonical_enum_definitions,
-    match_canonical_values,
-)
-from dataio.api.services.region_gap_detector import detect_region_gaps_for_table
+from dataio.api.services.field_inference import infer_fixed_column_description, infer_table_structure
 
 
 class TagsInput(BaseModel):
@@ -125,35 +117,23 @@ def generate_deterministic_draft(
     missing_column_descriptions: list[str] = []
 
     for table_name, profile in csv_profiles.items():
-        data_dictionary, enum_definitions = infer_data_dictionary(profile)
-
-        # Merge this table's enum definitions into the dataset-wide block.
-        # _enum_ref_name only sees one column at a time, so two different
-        # tables with a same-named column (e.g. every table has its own
-        # "indicator"/"units"/"sourceTableID") get the same enumRef even
-        # though their observed values are entirely different - blindly
-        # `.update()`-ing would let the later table silently overwrite the
-        # earlier one's values, so every row of the earlier table then
-        # fails validation ("value does not satisfy type 'enum'") even
-        # though the value was real. Only rename on a genuine collision
-        # (same ref, different values) - identical enums shared across
-        # tables (e.g. a common locality: rural/urban/total) still merge
-        # under the one name, same as before.
-        for column_name, field in data_dictionary.items():
-            if field.get("type") != "enum":
-                continue
-            enum_ref = field["enumRef"]
-            definition = enum_definitions[enum_ref]
-            existing = dataset_enum_definitions.get(enum_ref)
-            if existing is not None and existing != definition:
-                suffix = 2
-                candidate = f"{enum_ref}{suffix}"
-                while candidate in dataset_enum_definitions and dataset_enum_definitions[candidate] != definition:
-                    suffix += 1
-                    candidate = f"{enum_ref}{suffix}"
-                enum_ref = candidate
-                field["enumRef"] = enum_ref
-            dataset_enum_definitions[enum_ref] = definition
+        # The curator confirms/adjusts join keys once, dataset-wide (see
+        # CuratorMetadataInput docstring) - a table only gets the subset of
+        # those columns it actually has (infer_table_structure handles the
+        # filtering). Type inference, enum-block collision-safe merging,
+        # canonical-registry cross-linking, and region-gap detection are
+        # all shared with the LLM drafter's pre-pass - see
+        # field_inference.infer_table_structure.
+        data_dictionary, table_join_keys, table_region_comments = infer_table_structure(
+            profile,
+            csv_paths_by_table[table_name],
+            dataset_enum_definitions,
+            dataset_canonical_enum_definitions,
+            join_key_columns_override=curator_input.joinKeyColumns,
+        )
+        for comment in table_region_comments:
+            if comment not in region_gap_comments:
+                region_gap_comments.append(comment)
 
         curator_column_descriptions = curator_input.columnDescriptions.get(table_name, {})
         for column_name, field in data_dictionary.items():
@@ -166,38 +146,6 @@ def generate_deterministic_draft(
                 field["description"] = curator_description
             else:
                 missing_column_descriptions.append(f"{table_name}.{column_name}")
-
-        column_names = [column.name for column in profile.columns]
-        dataset_canonical_enum_definitions.update(lookup_canonical_enum_definitions(column_names))
-
-        # Cross-link each enum column's observed values to the canonical
-        # block matched for its own name (if any) - e.g. "species" values
-        # get canonical/canonicalRollup keys pointing into
-        # canonicalEnumDefinitions.canonicalSpecies. Values with no
-        # normalized match are left untouched (see match_canonical_values).
-        for column_name, field in data_dictionary.items():
-            if field.get("type") != "enum":
-                continue
-            enum_values = dataset_enum_definitions.get(field["enumRef"], {}).get("values", {})
-            for canonical_definition in lookup_canonical_enum_definitions([column_name]).values():
-                for value, canonical_fields in match_canonical_values(
-                    list(enum_values.keys()), canonical_definition
-                ).items():
-                    enum_values[value].update(canonical_fields)
-
-        # The curator confirms/adjusts join keys once, dataset-wide (see
-        # CuratorMetadataInput docstring) - a table only gets the subset of
-        # those columns it actually has.
-        table_join_keys = curator_input.joinKeyColumns or infer_join_key_candidates(
-            profile, data_dictionary
-        )
-        table_join_keys = [name for name in table_join_keys if name in data_dictionary]
-        apply_join_keys(data_dictionary, table_join_keys)
-
-        table_csv_path = csv_paths_by_table[table_name]
-        for comment in detect_region_gaps_for_table(table_csv_path, data_dictionary):
-            if comment not in region_gap_comments:
-                region_gap_comments.append(comment)
 
         tables[table_name] = {
             "description": curator_input.tableDescriptions[table_name],

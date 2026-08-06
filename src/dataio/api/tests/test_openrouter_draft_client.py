@@ -52,3 +52,17 @@ def test_complete_raises_on_non_200():
 
     with pytest.raises(httpx.HTTPStatusError):
         client.complete(system_prompt="be terse", user_prompt="draft it")
+
+
+def test_complete_raises_readable_error_on_200_with_no_choices():
+    def no_choices_response(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"error": {"message": "upstream provider overloaded"}})
+
+    client = OpenRouterDraftClient()
+    client._client = httpx.Client(
+        base_url=client._client.base_url,
+        transport=httpx.MockTransport(no_choices_response),
+    )
+
+    with pytest.raises(RuntimeError, match="upstream provider overloaded"):
+        client.complete(system_prompt="be terse", user_prompt="draft it")

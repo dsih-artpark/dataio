@@ -75,15 +75,7 @@ function GenerateDraftForm({ onGenerated }: { onGenerated: () => void }) {
   const [dataOwnerName, setDataOwnerName] = useState('');
   const [datasetId, setDatasetId] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (!submitting) return;
-    setElapsedSeconds(0);
-    const interval = setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
-    return () => clearInterval(interval);
-  }, [submitting]);
 
   useEffect(() => {
     if (!open || collections.length > 0) return;
@@ -263,25 +255,8 @@ function GenerateDraftForm({ onGenerated }: { onGenerated: () => void }) {
         disabled={submitting || csvFiles.length === 0 || !categoryId || !collectionId || !dataOwnerName}
         class="w-full rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
       >
-        {submitting ? 'Generating…' : 'Generate draft'}
+        {submitting ? 'Generating… (this calls the LLM, may take a moment)' : 'Generate draft'}
       </button>
-      {submitting ? (
-        <div class="space-y-1.5">
-          <div class="h-1.5 w-full overflow-hidden rounded-full bg-emerald-100">
-            <div class="h-full w-1/3 animate-[llm-progress_1.4s_ease-in-out_infinite] rounded-full bg-emerald-500" />
-          </div>
-          <p class="text-center text-[11px] text-slate-500">
-            Calling the LLM — this reads the full CSV(s), so it can take a while. {elapsedSeconds}s elapsed…
-          </p>
-        </div>
-      ) : null}
-      <style>{`
-        @keyframes llm-progress {
-          0% { margin-left: 0%; }
-          50% { margin-left: 67%; }
-          100% { margin-left: 0%; }
-        }
-      `}</style>
     </form>
   );
 }

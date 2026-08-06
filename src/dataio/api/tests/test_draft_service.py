@@ -12,14 +12,14 @@ os.environ.setdefault("DB_NAME", "catalogue")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
 from dataio.api.services import draft_service
-from dataio.api.services.csv_profiler import CsvProfile
+from dataio.api.services.csv_profiler import ColumnProfile, CsvProfile
 from dataio.validate.reports.models import ValidationResult
 
 LLM_RESPONSE = """---MANIFEST---
 datasetTitle: Foo Dataset
 datasetSlug: foo-dataset
 tables:
-  main:
+  foo:
     description: table
 ---FLAGS---
 flags:
@@ -56,7 +56,6 @@ class FakeOpenRouterClient:
 def _patch_common(monkeypatch, missing_source_columns=None):
     monkeypatch.setattr(draft_service, "profile_csv", lambda path: _stub_csv_profile(missing_source_columns))
     monkeypatch.setattr(draft_service, "load_digitization_log", lambda path: None)
-    monkeypatch.setattr(draft_service, "read_full_csv_text", lambda path: "a,b\n1,2\n")
     monkeypatch.setattr(draft_service, "OpenRouterDraftClient", FakeOpenRouterClient)
     monkeypatch.setattr(
         draft_service, "_validate_manifest",
@@ -267,28 +266,28 @@ def test_generate_draft_flags_missing_source_columns(monkeypatch):
 
 
 def test_batch_tables_groups_by_cumulative_size():
-    full_csv_texts = {"a": "x" * 40, "b": "x" * 40, "c": "x" * 40}
+    context_sizes = {"a": 40, "b": 40, "c": 40}
 
-    batches = draft_service._batch_tables(["a", "b", "c"], full_csv_texts, char_budget=100)
+    batches = draft_service._batch_tables(["a", "b", "c"], context_sizes, char_budget=100)
 
     # a+b = 80 (fits), c alone starts a new batch (80 + 40 > 100)
     assert batches == [["a", "b"], ["c"]]
 
 
 def test_batch_tables_puts_oversized_single_table_in_its_own_batch():
-    full_csv_texts = {"huge": "x" * 500, "small": "x" * 10}
+    context_sizes = {"huge": 500, "small": 10}
 
-    batches = draft_service._batch_tables(["huge", "small"], full_csv_texts, char_budget=100)
+    batches = draft_service._batch_tables(["huge", "small"], context_sizes, char_budget=100)
 
     # "huge" alone already exceeds the budget, but is never dropped/split -
-    # it still gets its own solo batch with its full content intact.
+    # it still gets its own solo batch with its full context intact.
     assert batches == [["huge"], ["small"]]
 
 
 def test_batch_tables_single_table_under_budget_is_one_batch():
-    full_csv_texts = {"only": "x" * 10}
+    context_sizes = {"only": 10}
 
-    assert draft_service._batch_tables(["only"], full_csv_texts, char_budget=100) == [["only"]]
+    assert draft_service._batch_tables(["only"], context_sizes, char_budget=100) == [["only"]]
 
 
 def test_merge_batch_manifests_single_batch_passes_through_unchanged():
@@ -365,17 +364,17 @@ def test_merge_batch_manifests_unions_tags_and_enum_definitions():
 
 
 def test_generate_draft_splits_dataset_into_multiple_batches_when_over_char_budget(monkeypatch):
-    """A dataset whose combined full-CSV-text exceeds BATCH_CHAR_BUDGET must
-    be drafted over multiple LLM calls (one per table here, given the tiny
-    monkeypatched budget) rather than one oversized call - and the batches'
-    results must be merged into one manifest.
+    """A dataset whose combined prompt-context size exceeds BATCH_CHAR_BUDGET
+    must be drafted over multiple LLM calls (one per table here, given the
+    tiny monkeypatched budget) rather than one oversized call - and the
+    batches' results must be merged into one manifest.
     """
     _patch_common(monkeypatch)
     monkeypatch.setattr(draft_service, "suggest_next_dataset_id", lambda collection_id: "CS0007DS0999")
     monkeypatch.setattr(draft_service, "create_reserved_dataset_id", lambda *a, **kw: None)
     monkeypatch.setattr(draft_service, "create_reserved_raw_dataset_id", lambda *a, **kw: None)
     monkeypatch.setattr(draft_service, "BATCH_CHAR_BUDGET", 10)
-    monkeypatch.setattr(draft_service, "read_full_csv_text", lambda path: "x" * 20)
+    monkeypatch.setattr(draft_service, "estimate_table_context_size", lambda table_name, profile, table_base=None: 20)
 
     calls = []
 
@@ -421,6 +420,208 @@ def test_generate_draft_splits_dataset_into_multiple_batches_when_over_char_budg
     assert set(result.draft_json["tables"].keys()) == {"foo", "bar", "baz"}
     assert result.draft_json["datasetDescription"] == "shared description"  # only the first batch supplied it
     assert {f["field"] for f in result.flagged_fields} == {"foo_col", "bar_col", "baz_col"}
+
+
+def test_infer_deterministic_base_types_columns_and_matches_canonical_enum():
+    profile = CsvProfile(
+        path="fake.csv",
+        row_count=10,
+        columns=[
+            ColumnProfile(
+                name="species", dtype="object", null_count=0, null_fraction=0.0,
+                distinct_count=2, sample_values=["cattle", "buffalo"],
+                all_distinct_values=["cattle", "buffalo"],
+            ),
+            ColumnProfile(
+                name="count", dtype="int64", null_count=1, null_fraction=0.1,
+                distinct_count=5, sample_values=["1", "2"],
+            ),
+        ],
+        sample_rows_csv="species,count\ncattle,1\n",
+    )
+
+    base = draft_service._infer_deterministic_base({"main": profile}, {"main": "fake.csv"})
+
+    data_dictionary = base["tables"]["main"]["data_dictionary"]
+    assert data_dictionary["species"]["type"] == "enum"
+    assert data_dictionary["species"]["enumRef"] == "speciesEnum"
+    assert data_dictionary["species"]["description"] is None  # no fixed description; LLM fills it in
+    assert data_dictionary["count"]["type"] == "int"
+    assert data_dictionary["count"]["nullable"] is True
+
+    assert "canonicalSpecies" in base["canonical_enum_definitions"]
+    assert base["enum_definitions"]["speciesEnum"]["values"]["cattle"]["canonical"] == "cattle"
+
+
+def test_infer_deterministic_base_fills_fixed_structural_descriptions():
+    profile = CsvProfile(
+        path="fake.csv",
+        row_count=10,
+        columns=[
+            ColumnProfile(
+                name="state.ID", dtype="object", null_count=0, null_fraction=0.0,
+                distinct_count=2, sample_values=["state_KA"], all_distinct_values=["state_KA", "state_29"],
+            ),
+        ],
+        sample_rows_csv="state.ID\nstate_KA\n",
+    )
+
+    base = draft_service._infer_deterministic_base({"main": profile}, {"main": "fake.csv"})
+
+    field = base["tables"]["main"]["data_dictionary"]["state.ID"]
+    assert field["type"] == "regionID"
+    assert field["description"] == (
+        "LGD-based region identifier in the format state_<lgd_code> for states or "
+        "ut_<lgd_code> for union territories (e.g., state_28, ut_1)."
+    )
+
+
+def test_merge_narrative_into_base_overlays_descriptions_and_keeps_fixed_ones():
+    base = {
+        "tables": {
+            "main": {
+                "joinKeys": ["state.ID"],
+                "data_dictionary": {
+                    "state.ID": {"type": "regionID", "nullable": False, "description": "fixed description"},
+                    "count": {"type": "int", "nullable": True, "description": None},
+                },
+            }
+        },
+        "enum_definitions": {},
+        "canonical_enum_definitions": {},
+        "join_keys": ["state.ID"],
+        "region_gap_comments": ["[region history] Telangana was carved out of Andhra Pradesh."],
+    }
+    narrative = {
+        "datasetDescription": "A dataset.",
+        "comments": ["units are counts"],
+        "tables": {
+            "main": {
+                "description": "table narrative",
+                "source": "some source",
+                "data_dictionary": {
+                    "state.ID": {"description": "LLM should not override this"},
+                    "count": {"description": "Number of animals counted."},
+                },
+            }
+        },
+    }
+
+    merged = draft_service._merge_narrative_into_base(base, narrative)
+
+    assert merged["datasetDescription"] == "A dataset."
+    assert merged["joinKeys"] == ["state.ID"]
+    assert merged["comments"] == ["[region history] Telangana was carved out of Andhra Pradesh.", "units are counts"]
+    assert merged["tables"]["main"]["description"] == "table narrative"
+    assert merged["tables"]["main"]["source"] == "some source"
+    assert merged["tables"]["main"]["data_dictionary"]["state.ID"]["description"] == "fixed description"
+    assert merged["tables"]["main"]["data_dictionary"]["count"]["description"] == "Number of animals counted."
+
+
+def test_merge_narrative_into_base_falls_back_to_stub_when_llm_omits_a_description():
+    base = {
+        "tables": {"main": {"joinKeys": [], "data_dictionary": {"count": {"type": "int", "description": None}}}},
+        "enum_definitions": {},
+        "canonical_enum_definitions": {},
+        "join_keys": [],
+        "region_gap_comments": [],
+    }
+    narrative = {"tables": {"main": {"data_dictionary": {}}}}
+
+    merged = draft_service._merge_narrative_into_base(base, narrative)
+
+    assert merged["tables"]["main"]["data_dictionary"]["count"]["description"] == "'count' column."
+
+
+def test_merge_narrative_into_base_overlays_enum_definitions_preserving_canonical_matches():
+    base = {
+        "tables": {"main": {"joinKeys": [], "data_dictionary": {}}},
+        "enum_definitions": {
+            "speciesEnum": {
+                "description": "Values observed in the 'species' column.",
+                "values": {"cattle": {"description": "cattle", "canonical": "cattle", "canonicalRollup": "cattle"}},
+            }
+        },
+        "canonical_enum_definitions": {"canonicalSpecies": {"description": "x", "values": {}}},
+        "join_keys": [],
+        "region_gap_comments": [],
+    }
+    narrative = {
+        "enumDefinitions": {
+            "speciesEnum": {
+                "description": "Livestock species.",
+                "values": {"cattle": {"description": "Domestic cattle."}},
+            }
+        }
+    }
+
+    merged = draft_service._merge_narrative_into_base(base, narrative)
+
+    assert merged["enumDefinitions"]["speciesEnum"]["description"] == "Livestock species."
+    value = merged["enumDefinitions"]["speciesEnum"]["values"]["cattle"]
+    assert value["description"] == "Domestic cattle."
+    assert value["canonical"] == "cattle"  # deterministic linkage preserved through the merge
+    assert merged["canonicalEnumDefinitions"] == {"canonicalSpecies": {"description": "x", "values": {}}}
+
+
+def test_generate_draft_prompt_size_does_not_scale_with_row_count(monkeypatch):
+    """Reproduces the fix for the real production bug: a table with a huge
+    row_count (the actual cause of a ~2M-token prompt that blew past the
+    model's 1M-token cap) must not blow up prompt size anymore, since the
+    LLM is never shown raw row data - only the bounded profile summary
+    (sample_rows_csv is always <=20 rows, all_distinct_values is capped),
+    regardless of the file's real row count.
+    """
+    huge_profile = CsvProfile(
+        path="huge.csv", row_count=5_000_000, columns=[], missing_source_columns=[],
+        sample_rows_csv="a,b\n1,2\n" * 20,
+    )
+    monkeypatch.setattr(draft_service, "profile_csv", lambda path: huge_profile)
+    monkeypatch.setattr(draft_service, "load_digitization_log", lambda path: None)
+    monkeypatch.setattr(
+        draft_service, "_validate_manifest",
+        lambda manifest_dict, csv_path: ValidationResult(dataset_kind="tabular"),
+    )
+    monkeypatch.setattr(
+        "dataio.api.database.rds_id_helpers.suggest_next_raw_dataset_id_for_category",
+        lambda category_id: "CSRDS0099",
+    )
+    monkeypatch.setattr(draft_service, "get_collection_by_identifier", lambda collection_id: FAKE_COLLECTION)
+    monkeypatch.setattr(draft_service, "suggest_next_dataset_id", lambda collection_id: "CS0007DS0999")
+    monkeypatch.setattr(draft_service, "create_reserved_dataset_id", lambda *a, **kw: None)
+    monkeypatch.setattr(draft_service, "create_reserved_raw_dataset_id", lambda *a, **kw: None)
+
+    captured_prompts = []
+
+    class RecordingClient:
+        model_id = "anthropic/claude-3.5-sonnet"
+
+        def __init__(self, *a, **kw):
+            pass
+
+        def complete(self, *, system_prompt, user_prompt):
+            captured_prompts.append(user_prompt)
+            return SimpleNamespace(text=LLM_RESPONSE, model=self.model_id, prompt_tokens=1, completion_tokens=1)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(draft_service, "OpenRouterDraftClient", RecordingClient)
+    monkeypatch.setattr(draft_service.database, "create_manifest_draft", lambda **kwargs: SimpleNamespace(
+        draft_id="1", status=SimpleNamespace(value="pending"),
+        draft_yaml=kwargs["draft_yaml"], draft_json=kwargs["draft_json"], flagged_fields=kwargs["flagged_fields"],
+    ))
+
+    draft_service.generate_draft(
+        csv_paths=["foo.csv"], category_id="CS", collection_id="CS0007", created_by="engineer@artpark.in",
+        data_owner_name="DAHD",
+    )
+
+    assert len(captured_prompts) == 1
+    # A 5M-row table's prompt must stay small (well under 50KB) - if this
+    # ever regresses back to embedding full CSV text, this assertion fails
+    # loudly instead of only surfacing as a real production 502.
+    assert len(captured_prompts[0]) < 50_000
 
 
 def test_generate_draft_raises_when_collection_does_not_exist(monkeypatch):

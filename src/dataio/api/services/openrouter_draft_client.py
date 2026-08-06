@@ -85,6 +85,12 @@ class OpenRouterDraftClient:
                 response=exc.response,
             ) from exc
         body = response.json()
+        if "choices" not in body:
+            # OpenRouter can return HTTP 200 with no "choices" key when the
+            # upstream provider fails after accepting the request (e.g. a
+            # provider-side error or moderation block) - the failure reason
+            # lives in body["error"], not in the HTTP status.
+            raise RuntimeError(f"OpenRouter returned no choices: {body.get('error', body)}")
         choice = body["choices"][0]["message"]
         usage = body.get("usage", {})
         return DraftCompletion(

@@ -4,6 +4,18 @@ decided rule from the metadata-architecture memo (LLM = Claude via
 OpenRouter, access_level not requested, dates best-effort not parsed,
 source facts never invented, gap explanations from general knowledge into
 comments, digitization-log-covered items never re-flagged).
+
+Column typing (type/nullable/format/allowedValues/enumRef/isJoinKey/
+joinKeyType), joinKeys, canonicalEnumDefinitions, and region-history
+comments are all decided deterministically before the LLM is ever called
+(see draft_service._infer_deterministic_base, field_inference.py) - the
+LLM only drafts genuinely natural-language content: descriptions, enum
+value/block definitions, dataset/table narrative fields, and comment
+categories no rule can derive (null-value semantics, units, redundant
+columns, completeness math, naming, source-to-year mapping, digitization
+log items). It never sees a table's raw CSV content, only the bounded
+per-column profile summary (stats + up to 200 distinct values + 20 sample
+rows) - so prompt size no longer scales with a table's row count.
 """
 
 from __future__ import annotations
@@ -13,19 +25,14 @@ import yaml
 from dataio.api.services.csv_profiler import CsvProfile
 from dataio.api.services.digitization_log import DigitizationLog
 
-# The exact, complete set of type keywords the validator recognizes -
-# anything else is a hard validation error, so the LLM must be given this
-# literal list rather than free-text examples it might paraphrase (e.g.
-# "integer" instead of "int").
-SUPPORTED_FIELD_TYPES = ("string", "boolean", "int", "float", "enum", "regionID", "regionName", "date", "dateTime")
-
-# A real, trimmed metadata.yaml (condensed from the actual CS0007DS0112 and
-# CS0026DS0111 datasets in data/) shown to the LLM verbatim as a structural
-# template - not to copy the content, but so the exact skeleton (key names,
-# nesting depth, list-vs-dict shape, the two-table convention) stays fixed
-# across every generation instead of drifting run to run. Enum value lists
-# and comments are trimmed to a representative few - real datasets are
-# denser than this, per the "Categories to check" list under `comments` below.
+# A real, trimmed metadata.yaml (condensed from the actual CS0007DS0112
+# dataset in data/) shown to the LLM verbatim as a structural template - not
+# to copy the content, but so the exact skeleton (key names, nesting depth,
+# list-vs-dict shape, the two-table convention) stays fixed across every
+# generation instead of drifting run to run. Trimmed to only the fields the
+# LLM is actually asked to produce (type/nullable/joinKeys/
+# canonicalEnumDefinitions and most data_dictionary columns are decided
+# deterministically - see module docstring - so they're absent here too).
 REFERENCE_METADATA_EXAMPLE = """
 datasetDescription: 'State-level livestock population counts from India''s 16th through
   20th Livestock Censuses (1997-2019), disaggregated by species, breed, sex, age group,
@@ -50,20 +57,6 @@ spatialResolution: state
 temporalCoverage: 1997, 2003, 2007, 2012, 2019
 temporalResolution: quinquennial
 updateFrequency: Quinquennial
-canonicalEnumDefinitions:
-  canonicalSpecies:
-    description: 'Cross-dataset canonical species vocabulary. Resolve species series
-      by this canonical key rather than dataset-local literal strings.'
-    values:
-      cattle:
-        grain: leaf
-      buffalo:
-        grain: leaf
-      bovine:
-        grain: group
-        components:
-        - cattle
-        - buffalo
 enumDefinitions:
   livestockSpecies:
     description: Canonical livestock species vocabulary for this dataset.
@@ -71,29 +64,13 @@ enumDefinitions:
       cattle:
         description: Domestic cattle. Includes both crossbred/exotic and indigenous
           breeds.
-        canonical: cattle
       buffalo:
         description: Domestic water buffalo.
-        canonical: buffalo
-  livestockSourceTableID:
-    description: Source table identifier within the livestock census publications.
-    values:
-      'Table 15R: Buffaloes Male Rural':
-        description: 'Source table: Table 15R: Buffaloes Male Rural'
-joinKeys:
-- state.lgd_code
-- state.ID
-- year
-- species
 comments:
-- Data covers cattle and buffalo only. Other species (sheep, goat, pig, etc.) are
-  not included.
 - Values are in actual animal counts (not thousands). Source PDFs report values in
   thousands; conversion to actual counts was applied during extraction.
-- Telangana is absent from 1997-2012 data (it was part of Andhra Pradesh until 2014).
-  It appears as a separate state from 2019 onwards.
-- state.lgd_code stores the numeric LGD code extracted from state.ID for both states
-  and union territories.
+- Count is null for state x year x species combinations where no census enumeration
+  occurred, not zero population - a blank means "not counted", not "counted as none".
 references:
 - https://dahd.gov.in/sites/default/files/2019-12/16thLivestockCensusBook.pdf
 tables:
@@ -103,63 +80,14 @@ tables:
 
       '
     source: 16th-20th Livestock Census PDFs (DAHD, Government of India)
-    joinKeys:
-    - state.lgd_code
-    - state.ID
-    - year
-    - species
     data_dictionary:
-      state.lgd_code:
-        type: int
-        description: 'Numeric LGD code extracted from state.ID for the state or union
-          territory.
-
-          '
-        nullable: false
-        isJoinKey: true
-        joinKeyType: compositeComponent
-      state.ID:
-        type: regionID
-        description: 'Prefixed LGD identifier for the state or union territory. Uses
-          ''state_'' for states and ''ut_'' for union territories.
-
-          '
-        nullable: false
-        isJoinKey: true
-        joinKeyType: compositeComponent
-      state.name:
-        type: regionName
-        description: State or union territory name standardised to LGD classification.
-        nullable: false
-      year:
-        type: date
-        format: '%Y'
-        description: Census reference year.
-        nullable: false
-        isJoinKey: true
-        joinKeyType: temporal
-      species:
-        type: enum
-        description: Livestock species. Either 'cattle' or 'buffalo'.
-        nullable: false
-        isJoinKey: true
-        joinKeyType: compositeComponent
-        enumRef: livestockSpecies
       count:
-        type: int
         description: 'Number of livestock of this species in the state for the given
           census year.
 
           '
-        nullable: true
-        additive: true
-        aggregation: sum
-      sourceTableID:
-        type: enum
-        description: Identifier of the specific table within the source PDF from which
-          this row was extracted.
-        nullable: true
-        enumRef: livestockSourceTableID
+      species:
+        description: Livestock species. Either 'cattle' or 'buffalo'.
   another-example-table-from-a-second-csv-in-this-dataset:
     description: 'Second table present ONLY when more than one CSV was uploaded for this
       dataset (e.g. a per-species yield table alongside a production table) - each
@@ -168,17 +96,12 @@ tables:
 
       '
     source: Same or a different source document, as appropriate for that table
-    joinKeys:
-    - state.lgd_code
-    - state.ID
-    - year
     data_dictionary:
-      state.lgd_code:
-        type: int
-        description: Numeric LGD code, same convention as the first table.
-        nullable: false
-        isJoinKey: true
-        joinKeyType: compositeComponent
+      indicator:
+        description: Example column that still needs a description - most columns
+          (region identifiers, source-provenance columns, year/date columns) already
+          have a fixed or deterministically-typed description and won't appear here
+          at all; only genuinely domain-specific columns do.
 """
 
 # This is the REAL, established metadata.yaml schema ("v2") used by every
@@ -187,7 +110,7 @@ tables:
 # dataDictionary). manifest_v2_conversion.py converts between the two for
 # validation - the exact same conversion the platform's own dataset-import
 # flow already uses.
-MANIFEST_SCHEMA_HINT = f"""
+MANIFEST_SCHEMA_HINT = """
 Produce a YAML document matching the real, established metadata.yaml schema (schema
 version "v2") used across every existing ARTPARK dataset. Do NOT produce datasetID,
 datasetSlug, metadataSpecVersion, category, collection, datasetOwner, or lastUpdated -
@@ -199,18 +122,26 @@ INCLUDE datasetTitle yourself: a short kebab-case, dataset-level name describing
 collection of tables (not any single table's name), since with multiple tables there's no
 one filename the system can safely default to.
 
+ALSO do NOT produce joinKeys or canonicalEnumDefinitions at any level, and do NOT include
+type, nullable, format, allowedValues, enumRef, isJoinKey, or joinKeyType inside any
+data_dictionary column entry - the system already decided all of that deterministically
+from the column statistics (shown below for context only) before calling you. Each table's
+"columns needing a `description`" section below tells you exactly which columns still need
+one and lists each one's already-decided type/enumRef as read-only context - do not restate
+it, only provide `description`. A column not listed there already has a description; do not
+add a data_dictionary entry for it at all.
+
 FIXED TOP-LEVEL KEYS - every one of the following MUST appear in your MANIFEST output
 (some may hold an empty list/dict when genuinely inapplicable, but the key itself must
 never be omitted): datasetDescription, source, tags (with both concept and epiType),
 spatialCoverage, spatialResolution, temporalCoverage, temporalResolution, updateFrequency,
-joinKeys, comments, references, tables. (datasetTitle, datasetSlug, datasetID,
-metadataSpecVersion, category, collection, datasetOwner, lastUpdated are also fixed keys,
-but the system fills those in for you - see above.) enumDefinitions and
-canonicalEnumDefinitions are conditionally-fixed: include enumDefinitions whenever any
-column is typed enum (nearly always), omit canonicalEnumDefinitions only when no column's
-values are worth rolling up cross-dataset. This is the exact same fixed-key set documented
-in metadata_field_reference.md - do not invent additional top-level keys and do not drop any
-of these.
+comments, references, tables. (datasetTitle, datasetSlug, datasetID, metadataSpecVersion,
+category, collection, datasetOwner, lastUpdated, joinKeys, and canonicalEnumDefinitions are
+also fixed keys, but the system fills those in for you - see above.) enumDefinitions is
+conditionally-fixed: include it whenever a table's "enum blocks needing definitions"
+section below is non-empty, omit it entirely otherwise. This is the same fixed-key set
+documented in metadata_field_reference.md - do not invent additional top-level keys and
+do not drop any of the keys listed above.
 
 datasetDescription: str (required) - narrative description of the dataset
 source: list of str (required) - one citation per source document/report
@@ -225,82 +156,24 @@ temporalCoverage: str (required) - free text describing the years/period covered
   separate start/end date fields.
 temporalResolution: str (required) - free text, e.g. "quinquennial", "annual", "monthly"
 updateFrequency: str (required) - e.g. "Quinquennial", "Annual", "One-time", "Adhoc"
-joinKeys: list of str (required) - dotted column names that together form this dataset's
-  composite key across its table(s). CRITICAL: whenever a `regionID`-typed column (e.g.
-  `state.ID`, `district.ID`) is part of the join key, its paired LGD code column (e.g.
-  `state.lgd_code`, `district.lgd_code`) MUST be included alongside it if that column exists
-  in the data - every real dataset in this system pairs the two together (e.g.
-  `["state.lgd_code", "state.ID", "year", ...]`), never the regionID alone.
-canonicalEnumDefinitions: optional - only include this block if this dataset has an enum
-  column whose values are worth rolling up to a broader, cross-dataset-joinable category
-  (e.g. a `species` column with "cattle" and "buffalo" both being kinds of "bovine"), so
-  that a curator can later join this dataset against others on the shared broader concept.
-  ESTABLISHED REGISTRY - livestock species/breed: every real dataset in this system with a
-  species or breed column uses this EXACT existing registry (ID "INL-98") - reuse it
-  verbatim, do not invent a new block or ID for this concept:
-    canonicalSpecies:
-      description: 'Cross-dataset canonical species vocabulary (INL-98). Resolve species
-        series by this canonical key rather than dataset-local literal strings.'
-      values:
-        cattle: {{grain: leaf}}
-        buffalo: {{grain: leaf}}
-        goat: {{grain: leaf}}
-        sheep: {{grain: leaf}}
-        pig: {{grain: leaf}}
-        poultry: {{grain: leaf}}
-        bovine: {{grain: group, components: [cattle, buffalo]}}
-        ovine_and_other_mammals: {{grain: group, components: [sheep, goat]}}
-        others: {{grain: residual}}
-    canonicalBreed:
-      description: 'Cross-dataset canonical breed vocabulary (INL-98). Census reports the
-        combined grain (crossbred_exotic); milk reports the split grain (exotic,
-        crossbred). For cross-dataset joins, match on canonicalRollup; for fine
-        within-dataset analysis, use canonical.'
-      values:
-        crossbred_exotic: {{grain: coarse, components: [exotic, crossbred]}}
-        exotic: {{grain: leaf, rollup: crossbred_exotic}}
-        crossbred: {{grain: leaf, rollup: crossbred_exotic}}
-        indigenous: {{grain: leaf}}
-        non_descript: {{grain: leaf}}
-        indigenous_non_descript: {{grain: coarse, components: [indigenous, non_descript]}}
-        none: {{grain: na}}
-        unspecified: {{grain: unknown}}
-  Include only the species/breed values this dataset actually needs (a dataset with no
-  breed column omits canonicalBreed entirely), but never rename the block, never rename a
-  value, and never invent a different ID for this same concept.
-  For any OTHER cross-dataset concept (not livestock species/breed): do NOT invent a registry ID
-  for the block (e.g. do not make up something like "INL-99") - name the block descriptively
-  instead and let the curator assign a real registry ID during review, since you have no way
-  of knowing whether one already exists for that other concept.
-    <canonicalBlockName>:
-      description: str
-      values:
-        <leafValue>:
-          grain: str - "leaf" for a value with no further breakdown
-        <groupValue>:
-          grain: str - "group" (or "coarse" for a rollup of leaf values) - a broader
-            category this dataset's own enum values roll up into
-          components: list of str - the sibling values (from this same block) that
-            make up this group
-        <valueThatRollsUp>:
-          grain: leaf
-          rollup: str - name of the group/coarse value (in this same block) that this
-            leaf value belongs to, when relevant
 enumDefinitions:
   <enumBlockName>:
     description: str
     values:
       <value>:
-        description: str
+        description: str - explain what this specific value actually MEANS, not just
+          restate the value literal (e.g. for value "crossbred/exotic": "Cattle/buffalo
+          resulting from cross-breeding indigenous with exotic breeds, or purebred exotic
+          stock" - not "crossbred/exotic animals").
 comments: list of str (required) - one distinct, plainly-stated FACT or documented decision
   about the DATA per list item (NOT a single paragraph - do not join everything into one
   string, and NOT meta-commentary about your own confidence as the drafter - see rule 2).
   Real metadata.yaml files are dense with these; match that density rather than settling for
-  one or two generic lines. Categories to check for on every dataset:
-    - Geographic entity history: which states/UTs/districts are absent in which years and
-      why (bifurcations, mergers, renamings), naming the specific years/dates involved.
+  one or two generic lines. Categories to check for on every dataset (region-history/
+  bifurcation gaps are already covered automatically - do not duplicate those here):
     - Null-value semantics: what a null/blank in a specific column actually means (not
-      reported vs. structurally not applicable vs. aggregated elsewhere).
+      reported vs. structurally not applicable vs. aggregated elsewhere) - reason only from
+      the null-count/sample-values context given per column, not from data you can't see.
     - Year/date column definition: whether "year" is the calendar year, the starting or
       ending year of an agricultural/financial year, a vaccination year vs. a report year, etc.
     - Source-to-year mapping: when different year ranges were extracted from different
@@ -320,24 +193,10 @@ tables: (required) - EXACTLY one entry per CSV table shown below, no more, no fe
   <tableName>:
     description: str
     source: str
-    joinKeys: list of str - same composite key columns, scoped to this table
     data_dictionary:
-      <columnName>:   # must exactly match the CSV's column header, verbatim
-        type: str - MUST be exactly one of: {", ".join(SUPPORTED_FIELD_TYPES)}. No other
-          value is accepted (e.g. "integer" is invalid - use "int").
+      <columnName>:   # ONLY for columns listed under this table's "columns needing a
+                       # `description`" section below - omit every other column entirely
         description: str
-        nullable: bool
-        isJoinKey: bool - true if this column is part of the composite key (omit otherwise)
-        joinKeyType: str - "compositeComponent" or "temporal", present only when isJoinKey is true
-        format: str - required for date/dateTime types, a strftime format (e.g. "%Y" for a
-          bare calendar year, "%Y-%m-%d" for a full date)
-        enumRef: str - name of an entry in enumDefinitions, for enum-type columns. STRONGLY
-          prefer this over allowedValues - a real enumDefinitions block with a per-value
-          description is far more useful to a curator than a bare list of values.
-        allowedValues: list - only if enumRef genuinely doesn't apply. Either way, every
-          distinct value this column actually takes in the data must be covered (see the
-          "all distinct values" list per column below where provided) - a value present in
-          the data but missing from the enum makes every row with that value fail validation.
 """
 
 RULES = """
@@ -352,9 +211,9 @@ Rules you must follow exactly:
    missing because it genuinely doesn't apply to how this dataset was digitized (e.g. no
    page-level reference for a single Excel workbook), say so in the flag rather than treating it
    as an error.
-2. If you notice a genuine gap in the data (a missing year, a missing region, etc.), explain it
-   using your own general/historical/administrative knowledge (e.g. a region absent from before
-   a certain year because of a state reorganization) as its own item in `comments`, stated
+2. If you notice a genuine gap in the data not already covered by an automatic region-history
+   comment (e.g. a missing year, a missing category due to a survey methodology change),
+   explain it using your own general/domain knowledge as its own item in `comments`, stated
    plainly as documented fact - never fold it into `datasetDescription`. `comments` documents
    the data, not the drafting process: never write things like "I am not fully confident" or
    "please verify this explanation" inside a comment. If you are not confident in an
@@ -366,37 +225,16 @@ Rules you must follow exactly:
    as its own item, prefixed with "[digitization log]".
 4. Anything listed under "Flagged by the digitization log as unresolved" should still be
    surfaced - the engineer noticed it but did not resolve it.
-5. Any column representing a calendar year or date MUST be typed `date` (or `dateTime`) with a
-   `format` containing `%Y` (e.g. `"%Y"` for a bare year column) - NOT `int` or `string`.
-6. Only use type `regionID` for a column whose values already look like `<lowercase-word>_<code>`
-   (e.g. `state_KA`). If the column is a plain code or name (a numeric LGD code, a state name,
-   etc.) that doesn't already follow that exact shape, use `string` or `int` instead. When a
-   `regionID` column is paired with a separate human-readable name column for the same place
-   (e.g. `state.ID` and `state.name`), type that name column `regionName`, not `string`.
-7. Whenever a `regionID` column (e.g. `state.ID`, `district.ID`) is part of the composite join
-   key, and a matching LGD code column for that same entity exists in the data (e.g.
-   `state.lgd_code`, `district.lgd_code`), that LGD code column MUST also be added to `joinKeys`
-   (both at the top level and in the table's own `joinKeys`) and marked `isJoinKey: true` with
-   `joinKeyType: compositeComponent` - never include the regionID alone. Every real dataset in
-   this system pairs them this way (e.g. `state.lgd_code` always appears next to `state.ID`).
-8. Prefer `enum` over `string`/`int` for ANY column with a small, closed set of distinct values
-   in the data - not just the columns that are obviously categorical. This absolutely includes
-   `sourceDocument` and `sourceTableID` when they only take a handful of distinct values (one
-   source PDF per year, a fixed set of table titles, etc.) - declare a real `enumDefinitions`
-   entry for them with a description per value, exactly like any other enum column, rather than
-   leaving them as plain `string`. Check the "all distinct values" list per column below: if it's
-   short, that column is very likely an enum candidate even if its name suggests free text.
-9. Do not raise a flag or comment just to ask the curator to "verify" something that isn't
+5. Do not raise a flag or comment just to ask the curator to "verify" something that isn't
    actually a problem:
    - Do not question whether a code column (an LGD code, a state ID, etc.) matches some
      external official registry - take the CSV's values at face value.
    - Do not flag inconsistent formatting in a free-text/string-typed column (e.g. sourceTableID)
-     as a caveat. Only raise a flag about a column's values if that column is typed `enum` and
-     some of its actual values aren't covered by the enum you declared.
+     as a caveat.
    - Do not flag a real-world name (a place name, an organization name, etc.) as "unusual" or
      "worth checking" just because it's long, verbose, or unfamiliar-looking. Long official
      names are common and are not evidence of a digitization error.
-10. YAML syntax safety - your output is parsed by a strict YAML parser, not read by a human:
+6. YAML syntax safety - your output is parsed by a strict YAML parser, not read by a human:
    double-quote (") any string value that contains a colon followed by a space (e.g. a table
    title like "Table 15R: Buffaloes Male Rural"), since an unquoted colon+space inside a plain
    scalar is parsed as a new mapping key and breaks the whole document. This applies to every
@@ -404,7 +242,7 @@ Rules you must follow exactly:
    value descriptions, flag reasons - anything that isn't a short bare keyword. When in doubt,
    double-quote the value. Never let a multi-line value span two physical lines without either
    quoting it onto one line or using a `|`/`>` block scalar.
-11. Output ONLY two YAML blocks, in this exact order, and nothing else:
+7. Output ONLY two YAML blocks, in this exact order, and nothing else:
    ---MANIFEST---
    <the manifest YAML>
    ---FLAGS---
@@ -435,6 +273,68 @@ def _format_csv_profile(table_name: str, profile: CsvProfile) -> str:
     lines.append("\nSample rows (CSV):")
     lines.append(profile.sample_rows_csv)
     return "\n".join(lines)
+
+
+def _format_deterministic_context(table_name: str, table_base: dict) -> str:
+    """Lists this table's columns that still need an LLM-authored
+    `description` - a column with a fixed structural description (region
+    identifiers, source-provenance columns - see
+    field_inference.infer_fixed_column_description) is already filled in
+    and omitted here entirely, so the LLM never wastes a turn re-describing
+    it. Each listed column's already-decided `type`/`enumRef` (from
+    field_inference.infer_column_type) is shown as read-only context to
+    help write an accurate description - the LLM is told not to restate it.
+    """
+    lines = [f"Table '{table_name}' - columns needing a `description` (type already decided, do not restate it):"]
+    any_needed = False
+    for column_name, field in table_base["data_dictionary"].items():
+        if field.get("description") is not None:
+            continue
+        any_needed = True
+        type_info = f"type={field.get('type')}"
+        if field.get("enumRef"):
+            type_info += f", enumRef={field['enumRef']}"
+        lines.append(f"  - {column_name}: {type_info}")
+    if not any_needed:
+        lines.append("  (none - every column in this table already has a fixed description)")
+    return "\n".join(lines)
+
+
+def _format_enum_context(table_base: dict, enum_definitions: dict) -> str:
+    """Lists the enum blocks this table's columns actually use (derived
+    from data_dictionary's own enumRef fields) that still need an
+    LLM-authored block description and per-value definitions - the
+    canonical/canonicalRollup linkage on each value (if any) is already
+    resolved deterministically (field_inference.match_canonical_values) and
+    not shown here, since the LLM isn't asked to reproduce it.
+    """
+    enum_refs = sorted(
+        {field["enumRef"] for field in table_base["data_dictionary"].values() if field.get("type") == "enum"}
+    )
+    if not enum_refs:
+        return ""
+    lines = [
+        "Enum blocks used by this table needing definitions - write a block-level "
+        "`description` and one `description` per value (explain what each value "
+        "actually MEANS, don't just restate the value literal):"
+    ]
+    for enum_ref in enum_refs:
+        values = list(enum_definitions.get(enum_ref, {}).get("values", {}).keys())
+        lines.append(f"  - {enum_ref}: values = {values}")
+    return "\n".join(lines)
+
+
+def estimate_table_context_size(table_name: str, profile: CsvProfile, table_base: dict | None = None) -> int:
+    """Character length of this table's prompt section - used by
+    draft_service._batch_tables to decide whether a dataset's tables fit in
+    one LLM call. Bounded by CsvProfile's own caps (up to 200 distinct
+    values, 20 sample rows) regardless of the table's real row count,
+    unlike the old full-CSV-text sizing this replaced.
+    """
+    size = len(_format_csv_profile(table_name, profile))
+    if table_base is not None:
+        size += len(_format_deterministic_context(table_name, table_base))
+    return size
 
 
 def _build_system_prompt() -> str:
@@ -474,11 +374,24 @@ def _digitization_log_sections(digitization_log: DigitizationLog | None) -> list
     return sections
 
 
+def _deterministic_context_sections(table_name: str, deterministic_base: dict | None) -> list[str]:
+    if deterministic_base is None:
+        return []
+    table_base = deterministic_base.get("tables", {}).get(table_name)
+    if table_base is None:
+        return []
+    sections = [_format_deterministic_context(table_name, table_base)]
+    enum_context = _format_enum_context(table_base, deterministic_base.get("enum_definitions", {}))
+    if enum_context:
+        sections.append(enum_context)
+    return sections
+
+
 def build_prompt(
     *,
     csv_profiles: dict[str, CsvProfile],
     digitization_log: DigitizationLog | None,
-    full_csv_texts: dict[str, str] | None = None,
+    deterministic_base: dict | None = None,
 ) -> tuple[str, str]:
     """Returns (system_prompt, user_prompt). `csv_profiles` maps table name
     (the uploaded CSV's filename stem) to its profile - one CSV upload per
@@ -486,19 +399,22 @@ def build_prompt(
     (see web_admin_service._parse_dataset_package's csv_by_stem). A single
     upload is just the len(csv_profiles) == 1 case, not a special path.
 
+    `deterministic_base` (see draft_service._infer_deterministic_base) is
+    the deterministically-inferred type/joinKeys/canonicalEnumDefinitions
+    skeleton - its per-table "columns needing a description"/"enum blocks
+    needing definitions" context replaces raw CSV row data in the prompt
+    entirely, so prompt size is bounded regardless of row count.
+
     Single LLM call, all tables at once - used when the dataset's combined
-    full-CSV-text fits one call's context budget. Datasets too large for
-    that use build_batch_prompt instead (see draft_service._batch_tables).
+    prompt-context size fits one call's context budget. Datasets too large
+    for that use build_batch_prompt instead (see draft_service._batch_tables).
     """
     system_prompt = _build_system_prompt()
 
-    full_csv_texts = full_csv_texts or {}
     sections = [f"This dataset has {len(csv_profiles)} table(s), one per uploaded CSV:"]
     for table_name, profile in csv_profiles.items():
         sections.append(_format_csv_profile(table_name, profile))
-        full_csv_text = full_csv_texts.get(table_name)
-        if full_csv_text is not None:
-            sections.append(f"Full CSV contents for table '{table_name}':\n" + full_csv_text)
+        sections.extend(_deterministic_context_sections(table_name, deterministic_base))
 
     sections.extend(_digitization_log_sections(digitization_log))
 
@@ -510,18 +426,17 @@ def build_batch_prompt(
     *,
     csv_profiles: dict[str, CsvProfile],
     digitization_log: DigitizationLog | None,
-    full_csv_texts: dict[str, str],
+    deterministic_base: dict,
     batch_table_names: list[str],
     include_dataset_level_fields: bool,
 ) -> tuple[str, str]:
     """Same task rules/schema as build_prompt (the system prompt never
-    changes per batch) - used when a dataset has too many/large CSVs for
+    changes per batch) - used when a dataset has too many/large tables for
     one call's context budget (see draft_service._batch_tables). Every
     table in the dataset is listed by name for cross-table context (so
-    joinKeys/comments/tags stay consistent across calls), but full CSV
-    content - and a `tables:` entry - is requested only for
-    batch_table_names; every table's real content still reaches the LLM,
-    just split across separate calls instead of ever being summarized away.
+    comments/tags stay consistent across calls), but a `tables:` entry -
+    and per-table description/enum-definition context - is requested only
+    for batch_table_names.
 
     Dataset-wide narrative fields (datasetDescription, source, etc.) are
     requested only when include_dataset_level_fields is True - normally
@@ -537,34 +452,31 @@ def build_batch_prompt(
         f"This dataset has {len(all_table_names)} table(s) total: {', '.join(all_table_names)}.",
         f"This call covers {len(batch_table_names)} of them: {', '.join(batch_table_names)}. "
         "Produce a `tables:` entry ONLY for these - the rest are listed below for "
-        "cross-table context (so your joinKeys/comments/tags stay consistent with the "
-        "rest of the dataset) but are drafted in separate calls; do not invent a "
+        "cross-table context (so your comments/tags stay consistent with the rest "
+        "of the dataset) but are drafted in separate calls; do not invent a "
         "`tables:` entry for any table not in this list.",
     ]
     if include_dataset_level_fields:
         sections.append(
             "This is the FIRST call for this dataset - also produce the dataset-wide "
             "fields (datasetDescription, source, spatialCoverage, spatialResolution, "
-            "temporalCoverage, temporalResolution, updateFrequency, references, "
-            "canonicalEnumDefinitions) as normal, based on the tables shown to you here."
+            "temporalCoverage, temporalResolution, updateFrequency, references) as "
+            "normal, based on the tables shown to you here."
         )
     else:
         sections.append(
             "This is NOT the first call for this dataset - a separate call already "
             "produced datasetDescription, source, spatialCoverage, spatialResolution, "
             "temporalCoverage, temporalResolution, updateFrequency, and references. Omit "
-            "those keys entirely from your MANIFEST output. You MAY still include "
-            "joinKeys, tags, comments, and enumDefinitions/canonicalEnumDefinitions "
-            "scoped to the tables shown to you here - these will be merged with the "
-            "other calls' contributions afterward."
+            "those keys entirely from your MANIFEST output. You MAY still include tags "
+            "and comments scoped to the tables shown to you here - these will be merged "
+            "with the other calls' contributions afterward."
         )
 
     for table_name, profile in csv_profiles.items():
         if table_name in batch_set:
             sections.append(_format_csv_profile(table_name, profile))
-            full_csv_text = full_csv_texts.get(table_name)
-            if full_csv_text is not None:
-                sections.append(f"Full CSV contents for table '{table_name}':\n" + full_csv_text)
+            sections.extend(_deterministic_context_sections(table_name, deterministic_base))
         else:
             column_names = [col.name for col in profile.columns]
             sections.append(

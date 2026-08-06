@@ -345,3 +345,78 @@ export interface ValidationResult {
   findings: ValidationFinding[];
   inferred: Record<string, unknown>;
 }
+
+export interface ManifestDraftFlaggedField {
+  field: string;
+  reason: string;
+}
+
+export interface ManifestDraftReviewerNote {
+  field?: string;
+  note: string;
+  by: string;
+}
+
+export type ManifestDraftStatus = 'pending' | 'approved' | 'rejected' | 'flagged';
+
+export interface ManifestDraftSummary {
+  draft_id: string;
+  dataset_id: string | null;
+  collection_id: string;
+  category_id: string;
+  status: ManifestDraftStatus;
+  // null for a deterministic (rule-based, no-LLM) draft - see
+  // adminGenerateDeterministicManifestDraft.
+  llm_model_id: string | null;
+  created_by: string;
+  created_at: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  superseded_by_draft_id: string | null;
+}
+
+// The manifest fields no deterministic rule can derive from the CSV alone -
+// supplied directly by the curator through the intake form. Mirrors
+// dataio.api.services.deterministic_draft_service.CuratorMetadataInput.
+export interface CuratorMetadataInput {
+  datasetDescription: string;
+  source: string[];
+  references: string[];
+  tags: { concept: string[]; epiType: string[] };
+  spatialCoverage: string;
+  spatialResolution: string;
+  temporalCoverage: string;
+  temporalResolution: string;
+  updateFrequency: string;
+  comments: string[];
+  // The curator's confirmed/edited subset of the auto-suggested join-key
+  // candidates - leave empty to accept the backend's own suggestion.
+  joinKeyColumns: string[];
+  // Required, one entry per table (keyed by table name - the CSV filename
+  // without its extension). No rule can derive real table-level narrative
+  // from a CSV alone.
+  tableDescriptions: Record<string, string>;
+  // Required, one entry per column not classified as "fixed" by
+  // /admin/manifest-drafts/classify-columns (keyed table name -> column
+  // name). Region-identifier and source/provenance columns are excluded -
+  // those are auto-filled server-side.
+  columnDescriptions: Record<string, Record<string, string>>;
+  // Only meaningful (and required) with 2+ CSVs - a single-CSV dataset is
+  // always named after that CSV's own filename regardless of this value.
+  datasetTitle: string;
+}
+
+export interface ManifestDraftDetail extends ManifestDraftSummary {
+  // Whether dataset_id (a reserved ID, always set) already corresponds to
+  // a real Dataset row - a draft with dataset_id set could still be for a
+  // brand-new dataset, since the ID gets reserved before the dataset
+  // actually exists.
+  dataset_exists: boolean | null;
+  source_csv_path: string;
+  digitization_log_path: string | null;
+  draft_yaml: string;
+  draft_json: Record<string, unknown>;
+  flagged_fields: ManifestDraftFlaggedField[];
+  reviewer_notes: ManifestDraftReviewerNote[];
+  validation_result: ValidationResult | null;
+}

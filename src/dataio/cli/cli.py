@@ -1,5 +1,6 @@
 import typer
 
+from dataio.cli.draft import app as draft_app
 from dataio.cli.user import app as user_app
 from dataio.cli.validate import app as validate_app
 
@@ -16,6 +17,7 @@ app.add_typer(
     "Using this sub-app is optional, and the recommended way to interact with the root dataio command.",
 )
 app.add_typer(validate_app, name="validate", help="Validate manifests and data files locally.")
+app.add_typer(draft_app, name="draft", help="Draft dataset metadata.yaml using an LLM, for curator review.")
 
 if __name__ == "__main__":
     app()

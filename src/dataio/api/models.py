@@ -94,6 +94,41 @@ class DatasetDocumentationUpdate(BaseModel):
     )
 
 
+class ManifestDraftReject(BaseModel):
+    reason: Optional[str] = Field(None, description="Why this draft was rejected")
+
+
+class ManifestDraftFlagField(BaseModel):
+    field_path: str = Field(..., description="Dotted path or column name being flagged")
+    note: str = Field(..., description="Why this field needs curator attention")
+
+
+class ManifestDraftEdit(BaseModel):
+    draft_yaml: str = Field(..., description="Full replacement manifest YAML, curator-edited")
+
+
+class ManifestDraftInfoYamlRequest(BaseModel):
+    access_level: AccessLevel = Field(
+        ..., description="Access level for the generated info.yml - not derivable from the draft"
+    )
+
+
+class ManifestDraftImportRequest(BaseModel):
+    access_level: AccessLevel = Field(
+        ..., description="Access level for the info.yml generated as part of the import"
+    )
+    bucket_type: VersionType = Field(
+        default=VersionType.STANDARDISED, description="Filestore bucket to upload the tables into"
+    )
+
+
+class ClassifyColumnsRequest(BaseModel):
+    table_name: str = Field(..., description="Name of the table (CSV filename stem)")
+    column_names: List[str] = Field(
+        ..., description="Column names read from the CSV header - schema only"
+    )
+
+
 class User(BaseModel):
     email: str
     is_group: bool

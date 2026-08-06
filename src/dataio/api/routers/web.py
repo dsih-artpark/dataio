@@ -33,9 +33,15 @@ from dataio.api.database.enums import VersionType
 from dataio.api.database.models import User
 from dataio.api.auth.jwt import REFRESH_COOKIE_NAME, get_current_web_user
 from dataio.api.models import (
+    ClassifyColumnsRequest,
     DatasetCreate,
     DatasetDocumentationUpdate,
     DatasetUpdate,
+    ManifestDraftEdit,
+    ManifestDraftFlagField,
+    ManifestDraftImportRequest,
+    ManifestDraftInfoYamlRequest,
+    ManifestDraftReject,
     RawDatasetCreate,
     RawDatasetUpdate,
 )
@@ -1613,14 +1619,202 @@ async def admin_upsert_dataset_manifest(
     )
 
 
-@web_router.get("/admin/documentation-sync", tags=["web-admin/datasets"])
-async def admin_check_documentation_sync(
-    dataset_id: Optional[str] = None,
+@web_router.post("/admin/manifest-drafts/generate", tags=["web-admin/manifest-drafts"])
+async def web_generate_manifest_draft(
+    csv_files: List[UploadFile] = File(...),
+    category_id: str = Form(...),
+    collection_id: str = Form(...),
+    data_owner_name: str = Form(...),
+    dataset_id: Optional[str] = Form(None),
+    digitization_log_file: Optional[UploadFile] = File(None),
     user: User = Depends(get_current_web_user),
     admin_service: WebAdminService = Depends(WebAdminService),
 ):
-    """Check which datasets have documentation out of sync with filestore."""
-    return admin_service.check_dataset_documentation_sync(user, dataset_id)
+    return admin_service.generate_manifest_draft(
+        user,
+        csv_files,
+        category_id,
+        collection_id,
+        data_owner_name,
+        dataset_id=dataset_id,
+        digitization_log_file=digitization_log_file,
+    )
+
+
+@web_router.post(
+    "/admin/manifest-drafts/generate-deterministic", tags=["web-admin/manifest-drafts"]
+)
+async def web_generate_deterministic_manifest_draft(
+    csv_files: List[UploadFile] = File(...),
+    category_id: str = Form(...),
+    collection_id: str = Form(...),
+    data_owner_name: str = Form(...),
+    curator_input: str = Form(...),
+    dataset_id: Optional[str] = Form(None),
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.generate_deterministic_manifest_draft(
+        user,
+        csv_files,
+        category_id,
+        collection_id,
+        data_owner_name,
+        json.loads(curator_input),
+        dataset_id=dataset_id,
+    )
+
+
+@web_router.post("/admin/manifest-drafts/classify-columns", tags=["web-admin/manifest-drafts"])
+async def web_classify_columns(
+    body: ClassifyColumnsRequest,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.classify_columns(user, body.column_names)
+
+
+@web_router.post("/admin/manifest-drafts/infer-coverage", tags=["web-admin/manifest-drafts"])
+async def web_infer_dataset_coverage(
+    csv_files: List[UploadFile] = File(...),
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Suggests spatialCoverage/spatialResolution/temporalCoverage for the
+    deterministic-draft intake form, from the CSVs' own profiled structure
+    - a starting point the curator reviews and can edit, never silently
+    trusted as final."""
+    return admin_service.infer_dataset_coverage(user, csv_files)
+
+
+@web_router.get("/admin/manifest-drafts", tags=["web-admin/manifest-drafts"])
+async def web_list_manifest_drafts(
+    status: Optional[str] = None,
+    dataset_id: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.list_manifest_drafts(user, status=status, dataset_id=dataset_id, limit=limit, offset=offset)
+
+
+@web_router.get("/admin/manifest-drafts/{draft_id}", tags=["web-admin/manifest-drafts"])
+async def web_get_manifest_draft(
+    draft_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.get_manifest_draft(user, draft_id)
+
+
+@web_router.delete("/admin/manifest-drafts/{draft_id}", tags=["web-admin/manifest-drafts"])
+async def web_delete_manifest_draft(
+    draft_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    admin_service.delete_manifest_draft(user, draft_id)
+    return {"message": "Manifest draft deleted", "draft_id": draft_id}
+
+
+@web_router.post("/admin/manifest-drafts/{draft_id}/validate", tags=["web-admin/manifest-drafts"])
+async def web_revalidate_manifest_draft(
+    draft_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.revalidate_manifest_draft(user, draft_id)
+
+
+@web_router.post("/admin/manifest-drafts/{draft_id}/approve", tags=["web-admin/manifest-drafts"])
+async def web_approve_manifest_draft(
+    draft_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.approve_manifest_draft(user, draft_id)
+
+
+@web_router.post("/admin/manifest-drafts/{draft_id}/reject", tags=["web-admin/manifest-drafts"])
+async def web_reject_manifest_draft(
+    draft_id: str,
+    body: ManifestDraftReject,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.reject_manifest_draft(user, draft_id, reason=body.reason)
+
+
+@web_router.put("/admin/manifest-drafts/{draft_id}", tags=["web-admin/manifest-drafts"])
+async def web_update_manifest_draft(
+    draft_id: str,
+    body: ManifestDraftEdit,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.update_manifest_draft_content(user, draft_id, body.draft_yaml)
+
+
+@web_router.post("/admin/manifest-drafts/{draft_id}/flag-field", tags=["web-admin/manifest-drafts"])
+async def web_flag_manifest_draft_field(
+    draft_id: str,
+    body: ManifestDraftFlagField,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.flag_manifest_draft_field(user, draft_id, body.field_path, body.note)
+
+
+@web_router.post("/admin/manifest-drafts/{draft_id}/regenerate", tags=["web-admin/manifest-drafts"])
+async def web_regenerate_manifest_draft(
+    draft_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.regenerate_manifest_draft(user, draft_id)
+
+
+@web_router.post(
+    "/admin/manifest-drafts/{draft_id}/info-yaml", tags=["web-admin/manifest-drafts"]
+)
+async def web_generate_manifest_draft_info_yaml(
+    draft_id: str,
+    body: ManifestDraftInfoYamlRequest,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.generate_manifest_draft_info_yaml(user, draft_id, body.access_level.value)
+
+
+@web_router.post(
+    "/admin/manifest-drafts/{draft_id}/import", tags=["web-admin/manifest-drafts"]
+)
+async def web_import_dataset_from_draft(
+    draft_id: str,
+    body: ManifestDraftImportRequest,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Publishes an approved draft straight to the catalog - the same
+    import_dataset_package pipeline the Import Dataset Package tool uses,
+    driven directly from the draft's own stored fields instead of a manual
+    download/re-upload round-trip."""
+    return admin_service.import_dataset_from_draft(user, draft_id, body.access_level.value, body.bucket_type)
+
+
+@web_router.get("/admin/documentation-sync", tags=["web-admin/datasets"])
+async def admin_check_documentation_sync(
+    dataset_id: Optional[str] = None,
+    check_all: bool = False,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Check which datasets have documentation out of sync with filestore.
+    Pass dataset_id for the interactive per-dataset check, or check_all=true
+    for a summary count across every dataset (e.g. the admin overview).
+    """
+    return admin_service.check_dataset_documentation_sync(user, dataset_id, check_all=check_all)
 
 
 @web_router.post("/admin/documentation-sync", tags=["web-admin/datasets"])

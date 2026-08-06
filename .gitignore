@@ -146,6 +146,9 @@ dmypy.json
 *.csv
 *.yaml
 !.env.example
+# Reference data the API reads at runtime (region history, canonical enum
+# registries) - not generated dataset output, must stay tracked.
+!src/dataio/api/reference_data/*.yaml
 data/*
 staging-data/*
 ARTPARK Data Catalogue
@@ -153,8 +156,10 @@ data_backup_20260716_120337/*
 **/data_inserts/**
 *.zip
 .data/
+meta-data-Generation/*
 data/
 *.nc
+
 *.geojson
 # AI Files
 
@@ -166,3 +171,8 @@ reformat_yaml.py
 dataio_naming_policy.md
 Datasets_Uploaded_Dataio.md
 
+metadata_field_reference.md
+ARTPARK Data Catalogue.xlsx
+
+# Local copy-paste sheets for manually testing the deterministic intake form
+/copy-paste-sheets/

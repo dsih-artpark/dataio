@@ -7,7 +7,9 @@ permissions, manifests, and validation through the web interface.
 
 import logging
 import json
+import os
 import re
+import tempfile
 from io import BytesIO
 from pathlib import Path
 from typing import List, Optional
@@ -31,6 +33,7 @@ from dataio.api.auth.otp import create_otp, verify_otp
 from dataio.api.auth.security import enforce_rate_limit
 from dataio.api.services.base_service import BaseService
 from dataio.api.services.admin_dataset_service import AdminDatasetService
+from dataio.api.services.draft_review_service import DraftReviewService
 from dataio.api.services.email_service import EmailService
 from dataio.api.auth.permissions import is_admin
 from dataio.api.auth.security import record_auth_event
@@ -49,6 +52,7 @@ class WebAdminService(BaseService):
         super().__init__()
         self.email_service = EmailService()
         self.admin_dataset_service = AdminDatasetService()
+        self.draft_review_service = DraftReviewService()
         self.validation_service = DataIOValidationService(
             platform_manifest_checker=apply_platform_manifest_checks
         )
@@ -1427,6 +1431,57 @@ class WebAdminService(BaseService):
             "manifest_uploaded": True,
         }
 
+    def import_dataset_from_draft(
+        self,
+        admin_user: User,
+        draft_id: str,
+        access_level: str,
+        bucket_type: VersionType = VersionType.STANDARDISED,
+    ) -> dict:
+        """Skips the manual "download draft_yaml + info.yml, re-upload
+        through the Import Dataset Package tool" handoff (see
+        DatasetManifestDraft's docstring) by driving import_dataset_package
+        directly from an approved draft's own already-stored fields - same
+        validation, same S3/Postgres writes as the Import tab, just without
+        a curator round-tripping files through their own machine first.
+        """
+        self._require_admin(admin_user)
+        draft = self.draft_review_service._get_draft_or_404(draft_id)
+        if draft.status.value != "approved":
+            raise HTTPException(status_code=400, detail="Approve this draft before uploading it.")
+
+        info_yaml = self.draft_review_service.generate_info_yaml(draft_id, access_level)["info_yaml"]
+
+        # Local import matches regenerate_draft's own convention
+        # (draft_review_service.py) for reaching into draft_service.py.
+        from dataio.api.services.draft_service import decode_csv_paths
+
+        table_names = list((draft.draft_json or {}).get("tables", {}).keys())
+        csv_paths_by_table = decode_csv_paths(draft.source_csv_path, table_names)
+
+        csv_files = []
+        for table_name, path in csv_paths_by_table.items():
+            try:
+                with open(path, "rb") as f:
+                    csv_files.append(UploadFile(filename=f"{table_name}.csv", file=BytesIO(f.read())))
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not read stored CSV for table '{table_name}': {exc}",
+                ) from exc
+
+        info_file = UploadFile(filename="info.yml", file=BytesIO(info_yaml.encode("utf-8")))
+        metadata_file = UploadFile(filename="metadata.yaml", file=BytesIO(draft.draft_yaml.encode("utf-8")))
+
+        return self.import_dataset_package(
+            admin_user,
+            info_file,
+            metadata_file,
+            csv_files,
+            dataset_override={"existing_dataset_id": draft.dataset_id},
+            bucket_type=bucket_type,
+        )
+
     def initiate_dataset_deletion(self, admin_user: User, dataset_id: str) -> dict:
         self._require_admin(admin_user)
         if not database.check_if_dataset_exists(dataset_id):
@@ -1519,9 +1574,11 @@ class WebAdminService(BaseService):
         self,
         admin_user: User,
         dataset_id: str | None = None,
+        *,
+        check_all: bool = False,
     ) -> dict:
         self._require_admin(admin_user)
-        return self.admin_dataset_service.check_dataset_documentation_sync(dataset_id)
+        return self.admin_dataset_service.check_dataset_documentation_sync(dataset_id, check_all=check_all)
 
     def sync_dataset_documentation(
         self,
@@ -1584,6 +1641,125 @@ class WebAdminService(BaseService):
             manifest_file,
             admin_user.email,
         )
+
+    def generate_manifest_draft(
+        self,
+        admin_user: User,
+        csv_files,
+        category_id: str,
+        collection_id: str,
+        data_owner_name: str,
+        dataset_id: Optional[str] = None,
+        digitization_log_file=None,
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.generate_draft_from_upload(
+            csv_files=csv_files,
+            category_id=category_id,
+            collection_id=collection_id,
+            data_owner_name=data_owner_name,
+            created_by=admin_user.email,
+            dataset_id=dataset_id,
+            digitization_log_file=digitization_log_file,
+        )
+
+    def generate_deterministic_manifest_draft(
+        self,
+        admin_user: User,
+        csv_files,
+        category_id: str,
+        collection_id: str,
+        data_owner_name: str,
+        curator_input: dict,
+        dataset_id: Optional[str] = None,
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.generate_deterministic_draft_from_upload(
+            csv_files=csv_files,
+            category_id=category_id,
+            collection_id=collection_id,
+            data_owner_name=data_owner_name,
+            created_by=admin_user.email,
+            curator_input=curator_input,
+            dataset_id=dataset_id,
+        )
+
+    def classify_columns(self, admin_user: User, column_names: list) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.classify_columns(column_names=column_names)
+
+    def infer_dataset_coverage(self, admin_user: User, csv_files: List) -> dict:
+        """Writes each uploaded CSV to a throwaway temp file (this runs
+        before any draft exists - there's nothing to persist to, unlike
+        draft_upload_storage.save_upload) just long enough to profile it,
+        then cleans up regardless of outcome.
+        """
+        self._require_admin(admin_user)
+        temp_paths: List[str] = []
+        try:
+            for file in csv_files:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
+                    file.file.seek(0)
+                    tmp.write(file.file.read())
+                    temp_paths.append(tmp.name)
+            return self.draft_review_service.infer_dataset_coverage(temp_paths)
+        finally:
+            for path in temp_paths:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+    def list_manifest_drafts(
+        self,
+        admin_user: User,
+        status: Optional[str] = None,
+        dataset_id: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.list_drafts(status=status, dataset_id=dataset_id, limit=limit, offset=offset)
+
+    def get_manifest_draft(self, admin_user: User, draft_id: str) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.get_draft(draft_id)
+
+    def delete_manifest_draft(self, admin_user: User, draft_id: str) -> None:
+        self._require_admin(admin_user)
+        self.draft_review_service.delete_draft(draft_id)
+
+    def revalidate_manifest_draft(self, admin_user: User, draft_id: str) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.revalidate_draft(draft_id)
+
+    def approve_manifest_draft(self, admin_user: User, draft_id: str) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.approve_draft(draft_id, admin_user.email)
+
+    def reject_manifest_draft(self, admin_user: User, draft_id: str, reason: Optional[str] = None) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.reject_draft(draft_id, admin_user.email, reason=reason)
+
+    def flag_manifest_draft_field(self, admin_user: User, draft_id: str, field_path: str, note: str) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.flag_field(draft_id, field_path, note, admin_user.email)
+
+    def update_manifest_draft_content(
+        self, admin_user: User, draft_id: str, draft_yaml: str
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.update_draft_content(draft_id, draft_yaml)
+
+    def regenerate_manifest_draft(self, admin_user: User, draft_id: str) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.regenerate_draft(draft_id, admin_user.email)
+
+    def generate_manifest_draft_info_yaml(
+        self, admin_user: User, draft_id: str, access_level: str
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.generate_info_yaml(draft_id, access_level)
 
     def validate_dataset(
         self,

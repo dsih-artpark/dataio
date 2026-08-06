@@ -2,26 +2,36 @@ import { useEffect, useState } from 'preact/hooks';
 
 import { api } from '../../lib/api';
 
+// null = could not be determined (that one call failed) - distinct from a
+// real 0, so the card can say "unavailable" instead of lying with a zero.
 type HubStats = {
-  datasets: number;
-  reservedIds: number;
-  outdatedDocs: number;
-  rawDatasets: number;
+  datasets: number | null;
+  reservedIds: number | null;
+  outdatedDocs: number | null;
+  rawDatasets: number | null;
+  pendingDrafts: number | null;
 };
 
 const defaultStats: HubStats = {
-  datasets: 0,
-  reservedIds: 0,
-  outdatedDocs: 0,
-  rawDatasets: 0,
+  datasets: null,
+  reservedIds: null,
+  outdatedDocs: null,
+  rawDatasets: null,
+  pendingDrafts: null,
 };
 
 const actionCards = [
   {
+    title: 'Metadata-Drafts',
+    description: 'Review LLM-drafted metadata.yaml pending curator approval before anything is uploaded.',
+    href: '/admin/datasets/drafts',
+    tone: 'bg-slate-900 text-white',
+  },
+  {
     title: 'Import Dataset Package',
     description: 'Validate info.yml and metadata.yml, review fixes, then upload matching CSV tables.',
     href: '/admin/datasets/new',
-    tone: 'bg-slate-900 text-white',
+    tone: 'bg-white text-slate-900 border border-slate-200',
   },
   {
     title: 'Browse Existing Datasets',
@@ -33,6 +43,12 @@ const actionCards = [
     title: 'Reserve Dataset ID',
     description: 'Claim identifiers for incoming datasets and keep the intake queue visible.',
     href: '/admin/datasets/reservations',
+    tone: 'bg-white text-slate-900 border border-slate-200',
+  },
+  {
+    title: 'Next Available ID',
+    description: 'Look up the next free dataset ID and raw dataset ID for a collection before authoring metadata.',
+    href: '/admin/datasets/next-id',
     tone: 'bg-white text-slate-900 border border-slate-200',
   },
   {
@@ -54,29 +70,43 @@ export default function AdminDatasetsHub() {
     async function load() {
       setLoading(true);
       setError('');
-      try {
-        const [datasetsResponse, reservationsResponse, syncResponse, rawDatasetsResponse] = await Promise.all([
+
+      // allSettled, not all: a single failed call must not zero out every
+      // other stat on this page (see the check_all=true note below for what
+      // used to fail here specifically).
+      const [datasetsResult, reservationsResult, syncResult, rawDatasetsResult, draftsResult] =
+        await Promise.allSettled([
           api.adminListDatasets({ limit: 1, offset: 0 }),
-          api.adminListReservedDatasetIds({ limit: 100, offset: 0 }),
-          api.adminCheckDocumentationSync(),
+          api.adminListReservedDatasetIds({ limit: 1, offset: 0 }),
+          // check_all=true: this summary card needs every dataset's status,
+          // not one interactive dataset_id lookup - the bare call used to
+          // 400 every time since the endpoint requires one or the other.
+          api.adminCheckDocumentationSync(undefined, true),
           api.adminListRawDatasets({ limit: 1, offset: 0 }),
+          api.adminListManifestDrafts({ status: 'pending', limit: 1, offset: 0 }),
         ]);
 
-        if (cancelled) return;
-        setStats({
-          datasets: datasetsResponse.total,
-          reservedIds: reservationsResponse.reservations.length,
-          outdatedDocs: syncResponse.outdated,
-          rawDatasets: rawDatasetsResponse.total,
-        });
-      } catch (err) {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : 'Failed to load dataset admin summary');
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+      if (cancelled) return;
+
+      setStats({
+        datasets: datasetsResult.status === 'fulfilled' ? datasetsResult.value.total : null,
+        // .total, not .reservations.length - the array is capped by `limit`,
+        // so length silently stops growing past that cap while the real
+        // count keeps climbing.
+        reservedIds: reservationsResult.status === 'fulfilled' ? reservationsResult.value.total : null,
+        outdatedDocs: syncResult.status === 'fulfilled' ? syncResult.value.outdated : null,
+        rawDatasets: rawDatasetsResult.status === 'fulfilled' ? rawDatasetsResult.value.total : null,
+        pendingDrafts: draftsResult.status === 'fulfilled' ? draftsResult.value.total : null,
+      });
+
+      const failed = [datasetsResult, reservationsResult, syncResult, rawDatasetsResult, draftsResult].some(
+        (r) => r.status === 'rejected'
+      );
+      if (failed) {
+        setError('Some stats could not be loaded - see individual cards below.');
       }
+
+      setLoading(false);
     }
 
     load();
@@ -91,28 +121,38 @@ export default function AdminDatasetsHub() {
         <div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       ) : null}
 
-      <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div class="text-sm font-medium text-slate-500">Datasets</div>
-          <div class="mt-2 text-3xl font-semibold text-slate-900">{loading ? '…' : stats.datasets}</div>
+          <div class="mt-2 text-3xl font-semibold text-slate-900">{loading ? '…' : stats.datasets ?? '—'}</div>
           <p class="mt-2 text-sm text-slate-600">Published datasets currently visible in the admin catalog.</p>
         </div>
 
         <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div class="text-sm font-medium text-slate-500">Reserved IDs</div>
-          <div class="mt-2 text-3xl font-semibold text-slate-900">{loading ? '…' : stats.reservedIds}</div>
+          <div class="mt-2 text-3xl font-semibold text-slate-900">{loading ? '…' : stats.reservedIds ?? '—'}</div>
           <p class="mt-2 text-sm text-slate-600">Held for incoming datasets before metadata or files are uploaded.</p>
         </div>
 
         <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div class="text-sm font-medium text-slate-500">Metadata-Drafts</div>
+          <div class="mt-2 text-3xl font-semibold text-slate-900">{loading ? '…' : stats.pendingDrafts ?? '—'}</div>
+          <p class="mt-2 text-sm text-slate-600">LLM-drafted metadata.yaml awaiting curator review.</p>
+        </div>
+
+        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div class="text-sm font-medium text-slate-500">Outdated Docs</div>
-          <div class="mt-2 text-3xl font-semibold text-slate-900">{loading ? '…' : stats.outdatedDocs}</div>
-          <p class="mt-2 text-sm text-slate-600">Datasets whose cached README, manifest, or dictionary may need a refresh.</p>
+          <div class="mt-2 text-3xl font-semibold text-slate-900">{loading ? '…' : stats.outdatedDocs ?? '—'}</div>
+          <p class="mt-2 text-sm text-slate-600">
+            {stats.outdatedDocs === null && !loading
+              ? 'Could not be checked just now - try refreshing.'
+              : 'Datasets whose cached README, manifest, or dictionary may need a refresh.'}
+          </p>
         </div>
 
         <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div class="text-sm font-medium text-slate-500">Raw Datasets</div>
-          <div class="mt-2 text-3xl font-semibold text-slate-900">{loading ? '…' : stats.rawDatasets}</div>
+          <div class="mt-2 text-3xl font-semibold text-slate-900">{loading ? '…' : stats.rawDatasets ?? '—'}</div>
           <p class="mt-2 text-sm text-slate-600">Available raw sources that can be linked into dataset metadata.</p>
         </div>
       </div>

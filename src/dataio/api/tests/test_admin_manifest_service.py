@@ -200,6 +200,59 @@ def test_check_dataset_documentation_sync_requires_dataset_id():
         raise AssertionError("Expected HTTPException to be raised")
 
 
+def test_check_dataset_documentation_sync_check_all_checks_every_dataset(monkeypatch):
+    """check_all=True is the opt-in for summary use (e.g. the admin overview's
+    outdated-docs count) - unlike the bare no-args call above, it must not
+    raise, and it must check every dataset in the table, not just one.
+    """
+    service = object.__new__(AdminDatasetService)
+    service.logger = logging.getLogger(__name__)
+    service.filestore_service = SimpleNamespace(bucket="test-bucket")
+
+    class RowsResult:
+        def all(self):
+            return [("CS0001DS0001",), ("CS0002DS0002",)]
+
+    class SessionStub:
+        def execute(self, query):
+            return RowsResult()
+
+        def rollback(self):
+            return None
+
+        def close(self):
+            return None
+
+    service.db_session_factory = lambda: SessionStub()
+
+    statuses_by_dataset = {
+        "CS0001DS0001": {
+            "needs_update": True,
+            "changed_fields": ["manifest"],
+            "has_remote_documentation": True,
+            "manifest_updated_at": None,
+            "documentation_synced_at": None,
+        },
+        "CS0002DS0002": {
+            "needs_update": False,
+            "changed_fields": [],
+            "has_remote_documentation": True,
+            "manifest_updated_at": None,
+            "documentation_synced_at": None,
+        },
+    }
+    monkeypatch.setattr(
+        "dataio.api.services.admin_dataset_service.get_dataset_documentation_status",
+        lambda session, bucket, dataset_id: statuses_by_dataset[dataset_id],
+    )
+
+    result = service.check_dataset_documentation_sync(check_all=True)
+
+    assert result["total"] == 2
+    assert result["outdated"] == 1
+    assert {row["ds_id"] for row in result["datasets"]} == {"CS0001DS0001", "CS0002DS0002"}
+
+
 def test_sync_dataset_documentation_requires_dataset_id():
     service = object.__new__(AdminDatasetService)
     service.logger = logging.getLogger(__name__)

@@ -3,6 +3,7 @@
  */
 
 import type {
+  AccessLevel,
   AdminDatasetDetail,
   AdminDatasetPackagePreview,
   AdminDatasetSummary,
@@ -23,6 +24,9 @@ import type {
   CollectionsResponse,
   DatasetDownloadUrls,
   ValidationResult,
+  CuratorMetadataInput,
+  ManifestDraftDetail,
+  ManifestDraftSummary,
 } from './types';
 
 const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000/api/v1';
@@ -1077,9 +1081,12 @@ class ApiClient {
     });
   }
 
-  async adminCheckDocumentationSync(datasetId?: string) {
-    const query = datasetId ? `?dataset_id=${encodeURIComponent(datasetId)}` : '';
-    return this.request<DocumentationSyncCheckResponse>(`/admin/documentation-sync${query}`);
+  async adminCheckDocumentationSync(datasetId?: string, checkAll?: boolean) {
+    const query = new URLSearchParams();
+    if (datasetId) query.set('dataset_id', datasetId);
+    if (checkAll) query.set('check_all', 'true');
+    const qs = query.toString();
+    return this.request<DocumentationSyncCheckResponse>(`/admin/documentation-sync${qs ? `?${qs}` : ''}`);
   }
 
   async adminRunDocumentationSync(payload?: {
@@ -1115,6 +1122,160 @@ class ApiClient {
         body: JSON.stringify(payload),
       }
     );
+  }
+
+  async adminGenerateManifestDraft(params: {
+    csvFiles: File[];
+    categoryId: string;
+    collectionId: string;
+    dataOwnerName: string;
+    datasetId?: string;
+    digitizationLogFile?: File | null;
+  }) {
+    const formData = new FormData();
+    for (const file of params.csvFiles) {
+      formData.append('csv_files', file);
+    }
+    formData.append('category_id', params.categoryId);
+    formData.append('collection_id', params.collectionId);
+    formData.append('data_owner_name', params.dataOwnerName);
+    if (params.datasetId) formData.append('dataset_id', params.datasetId);
+    if (params.digitizationLogFile) formData.append('digitization_log_file', params.digitizationLogFile);
+
+    return this.request<ManifestDraftDetail>('/admin/manifest-drafts/generate', {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  async adminGenerateDeterministicManifestDraft(params: {
+    csvFiles: File[];
+    categoryId: string;
+    collectionId: string;
+    dataOwnerName: string;
+    curatorInput: CuratorMetadataInput;
+    datasetId?: string;
+  }) {
+    const formData = new FormData();
+    for (const file of params.csvFiles) {
+      formData.append('csv_files', file);
+    }
+    formData.append('category_id', params.categoryId);
+    formData.append('collection_id', params.collectionId);
+    formData.append('data_owner_name', params.dataOwnerName);
+    formData.append('curator_input', JSON.stringify(params.curatorInput));
+    if (params.datasetId) formData.append('dataset_id', params.datasetId);
+
+    return this.request<ManifestDraftDetail>('/admin/manifest-drafts/generate-deterministic', {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  async adminClassifyColumns(params: { tableName: string; columnNames: string[] }) {
+    return this.request<{ fixed: string[]; needsDescription: string[] }>(
+      '/admin/manifest-drafts/classify-columns',
+      {
+        method: 'POST',
+        body: JSON.stringify({ table_name: params.tableName, column_names: params.columnNames }),
+      }
+    );
+  }
+
+  async adminInferDatasetCoverage(csvFiles: File[]) {
+    const formData = new FormData();
+    for (const file of csvFiles) {
+      formData.append('csv_files', file);
+    }
+    return this.request<{
+      spatialCoverage: string | null;
+      spatialResolution: string | null;
+      temporalCoverage: string | null;
+    }>('/admin/manifest-drafts/infer-coverage', { method: 'POST', body: formData });
+  }
+
+  async adminListManifestDrafts(params?: { status?: string; datasetId?: string; limit?: number; offset?: number }) {
+    const query = new URLSearchParams();
+    if (params?.status) query.set('status', params.status);
+    if (params?.datasetId) query.set('dataset_id', params.datasetId);
+    if (params?.limit) query.set('limit', String(params.limit));
+    if (params?.offset) query.set('offset', String(params.offset));
+    const qs = query.toString();
+    return this.request<{ drafts: ManifestDraftSummary[]; total: number }>(
+      `/admin/manifest-drafts${qs ? `?${qs}` : ''}`
+    );
+  }
+
+  async adminGetManifestDraft(draftId: string) {
+    return this.request<ManifestDraftDetail>(`/admin/manifest-drafts/${encodeURIComponent(draftId)}`);
+  }
+
+  async adminValidateManifestDraft(draftId: string) {
+    return this.request<ManifestDraftDetail>(`/admin/manifest-drafts/${encodeURIComponent(draftId)}/validate`, {
+      method: 'POST',
+    });
+  }
+
+  async adminApproveManifestDraft(draftId: string) {
+    // Lightweight accept only - this tool generates/validates/downloads,
+    // it doesn't upload anything to S3/Postgres. The draft's dataset_id
+    // was already reserved at generation time and just stays reserved.
+    return this.request<ManifestDraftDetail>(`/admin/manifest-drafts/${encodeURIComponent(draftId)}/approve`, {
+      method: 'POST',
+    });
+  }
+
+  async adminRejectManifestDraft(draftId: string, reason?: string) {
+    return this.request<ManifestDraftDetail>(`/admin/manifest-drafts/${encodeURIComponent(draftId)}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  async adminFlagManifestDraftField(draftId: string, fieldPath: string, note: string) {
+    return this.request<ManifestDraftDetail>(`/admin/manifest-drafts/${encodeURIComponent(draftId)}/flag-field`, {
+      method: 'POST',
+      body: JSON.stringify({ field_path: fieldPath, note }),
+    });
+  }
+
+  async adminUpdateManifestDraftContent(draftId: string, draftYaml: string) {
+    return this.request<ManifestDraftDetail>(`/admin/manifest-drafts/${encodeURIComponent(draftId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ draft_yaml: draftYaml }),
+    });
+  }
+
+  async adminRegenerateManifestDraft(draftId: string) {
+    return this.request<ManifestDraftDetail>(`/admin/manifest-drafts/${encodeURIComponent(draftId)}/regenerate`, {
+      method: 'POST',
+    });
+  }
+
+  async adminDeleteManifestDraft(draftId: string) {
+    return this.request<{ message: string; draft_id: string }>(
+      `/admin/manifest-drafts/${encodeURIComponent(draftId)}`,
+      { method: 'DELETE' }
+    );
+  }
+
+  async adminGenerateManifestDraftInfoYaml(draftId: string, accessLevel: AccessLevel) {
+    return this.request<{ info_yaml: string }>(
+      `/admin/manifest-drafts/${encodeURIComponent(draftId)}/info-yaml`,
+      { method: 'POST', body: JSON.stringify({ access_level: accessLevel }) }
+    );
+  }
+
+  async adminImportDatasetFromDraft(draftId: string, accessLevel: AccessLevel, bucketType: string) {
+    return this.request<{
+      dataset_id: string;
+      bucket_type: string;
+      uploaded_tables: string[];
+      manifest_uploaded: boolean;
+    }>(`/admin/manifest-drafts/${encodeURIComponent(draftId)}/import`, {
+      method: 'POST',
+      body: JSON.stringify({ access_level: accessLevel, bucket_type: bucketType }),
+    });
   }
 }
 

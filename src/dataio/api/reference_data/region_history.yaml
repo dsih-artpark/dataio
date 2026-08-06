@@ -1,0 +1,71 @@
+# Curated reference table of known Indian state/UT administrative
+# reorganization events - the deterministic replacement for the LLM
+# drafter's "use your own historical knowledge" instruction
+# (draft_prompt.py RULES item 2, e.g. "Telangana absent from 1997-2012
+# data... part of Andhra Pradesh until 2014"). See region_gap_detector.py,
+# which cross-references this list against a dataset's actual
+# region x year coverage to generate the same kind of `comments` entry
+# deterministically.
+#
+# Extend this list over time as new gaps are found during digitization -
+# a growing, curator-verified asset, not a repeated per-request inference.
+#
+# `region` is the name that appears as a *new* distinct value in the data
+# from `effective_date` onward. `predecessors` are the region name(s) it
+# was carved out of/replaced - data covering years before `effective_date`
+# should show the predecessor(s) instead, not `region`.
+schemaVersion: "1.0"
+events:
+  - region: Telangana
+    event: bifurcated
+    effective_date: "2014-06-02"
+    predecessors: [Andhra Pradesh]
+    note: >-
+      Telangana was carved out of Andhra Pradesh effective 2 June 2014
+      (Andhra Pradesh Reorganisation Act, 2014). Data covering years before
+      2014 will show it as part of Andhra Pradesh, not as a separate entry.
+
+  - region: Chhattisgarh
+    event: bifurcated
+    effective_date: "2000-11-01"
+    predecessors: [Madhya Pradesh]
+    note: >-
+      Chhattisgarh was carved out of Madhya Pradesh effective 1 November
+      2000. Data covering earlier years will show it as part of Madhya
+      Pradesh.
+
+  - region: Jharkhand
+    event: bifurcated
+    effective_date: "2000-11-15"
+    predecessors: [Bihar]
+    note: >-
+      Jharkhand was carved out of Bihar effective 15 November 2000. Data
+      covering earlier years will show it as part of Bihar.
+
+  - region: Uttarakhand
+    event: bifurcated
+    effective_date: "2000-11-09"
+    predecessors: [Uttar Pradesh]
+    note: >-
+      Uttarakhand (initially named Uttaranchal, renamed Uttarakhand in
+      2007) was carved out of Uttar Pradesh effective 9 November 2000.
+      Data covering earlier years will show it as part of Uttar Pradesh.
+
+  - region: Ladakh
+    event: created
+    effective_date: "2019-10-31"
+    predecessors: [Jammu and Kashmir]
+    note: >-
+      Ladakh became a separate union territory, split from the former
+      state of Jammu and Kashmir, effective 31 October 2019 (Jammu and
+      Kashmir Reorganisation Act, 2019). Data covering earlier years will
+      show it as part of Jammu and Kashmir.
+
+  - region: Dadra and Nagar Haveli and Daman and Diu
+    event: merged
+    effective_date: "2020-01-26"
+    predecessors: [Dadra and Nagar Haveli, Daman and Diu]
+    note: >-
+      Dadra and Nagar Haveli and Daman and Diu were merged into a single
+      union territory effective 26 January 2020. Data covering earlier
+      years will show these as two separate entries.

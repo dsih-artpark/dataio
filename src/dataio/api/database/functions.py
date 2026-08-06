@@ -1,6 +1,7 @@
 from typing import List, Optional
 import logging
 import re
+import uuid
 from sqlalchemy.orm import joinedload
 import bcrypt
 import secrets
@@ -9,7 +10,7 @@ from sqlalchemy import select
 from datetime import datetime, timedelta
 
 from dataio.api.database.config import Session
-from dataio.api.database.enums import ResourceType
+from dataio.api.database.enums import ResourceType, DatasetManifestDraftStatus
 
 from dataio.api.database.models import (
     Dataset,
@@ -26,8 +27,10 @@ from dataio.api.database.models import (
     RawDataset,
     DatasetRawDataset,
     ReservedDatasetID,
+    ReservedRawDatasetID,
     Region,
     RateLimit,
+    DatasetManifestDraft,
 )
 from dataio.api.auth.permissions import determine_highest_permission
 from dataio.api.models import (
@@ -176,6 +179,321 @@ def delete_reserved_dataset_id(ds_id: str):
         raise
     finally:
         session.close()
+
+
+def check_if_raw_dataset_exists(rds_id: str) -> bool:
+    session = Session()
+    try:
+        raw_dataset = session.query(RawDataset).filter(RawDataset.rds_id == rds_id).first()
+        return raw_dataset is not None
+    except Exception as e:
+        logger.error(f"Error checking if raw dataset exists: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def create_reserved_raw_dataset_id(rds_id: str, category_id: str | None, note: str | None, reserved_by: str):
+    """Mirrors create_reserved_dataset_id, for rds_id. Called immediately
+    after resolving a suggested rds_id (e.g. in draft_service.generate_draft)
+    so two concurrent callers in the same category can't be handed the same
+    suggestion - suggest_next_raw_dataset_id_for_category folds these
+    reservations into its max-suffix computation.
+    """
+    session = Session()
+    try:
+        if check_if_raw_dataset_exists(rds_id):
+            raise ValueError(f"Raw dataset with ID {rds_id} already exists")
+        existing = session.query(ReservedRawDatasetID).filter(ReservedRawDatasetID.rds_id == rds_id).first()
+        if existing:
+            raise ValueError(f"Raw dataset ID {rds_id} is already reserved")
+        reservation = ReservedRawDatasetID(
+            rds_id=rds_id,
+            category_id=category_id,
+            note=note,
+            reserved_by=reserved_by,
+        )
+        session.add(reservation)
+        session.commit()
+        session.refresh(reservation)
+        return reservation
+    except Exception as e:
+        logger.error(f"Error creating reserved raw dataset ID: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def delete_reserved_raw_dataset_id(rds_id: str):
+    session = Session()
+    try:
+        reservation = session.query(ReservedRawDatasetID).filter(ReservedRawDatasetID.rds_id == rds_id).first()
+        if not reservation:
+            raise ValueError(f"Reserved raw dataset ID {rds_id} not found")
+        session.delete(reservation)
+        session.commit()
+    except Exception as e:
+        logger.error(f"Error deleting reserved raw dataset ID: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def _coerce_draft_id(draft_id) -> uuid.UUID:
+    return draft_id if isinstance(draft_id, uuid.UUID) else uuid.UUID(str(draft_id))
+
+
+def create_manifest_draft(
+    *,
+    collection_id: str,
+    category_id: str,
+    source_csv_path: str,
+    draft_yaml: str,
+    draft_json: dict,
+    llm_model_id: str,
+    created_by: str,
+    dataset_id: str | None = None,
+    digitization_log_path: str | None = None,
+    raw_dataset_id: str | None = None,
+    flagged_fields: list | None = None,
+    validation_result: dict | None = None,
+    llm_prompt_tokens: int | None = None,
+    llm_completion_tokens: int | None = None,
+    superseded_by_draft_id: str | None = None,
+    session=None,
+):
+    """Create a pending manifest draft row. Regenerating a single flagged
+    field should call this again (with superseded_by_draft_id set to the
+    original draft) rather than mutating an existing row in place, so the
+    review history stays intact.
+    """
+    owns_session = session is None
+    session = session or Session()
+    try:
+        draft = DatasetManifestDraft(
+            dataset_id=dataset_id,
+            collection_id=collection_id,
+            category_id=category_id,
+            source_csv_path=source_csv_path,
+            digitization_log_path=digitization_log_path,
+            raw_dataset_id=raw_dataset_id,
+            status=DatasetManifestDraftStatus.PENDING,
+            draft_yaml=draft_yaml,
+            draft_json=draft_json,
+            flagged_fields=flagged_fields or [],
+            validation_result=validation_result,
+            llm_model_id=llm_model_id,
+            llm_prompt_tokens=llm_prompt_tokens,
+            llm_completion_tokens=llm_completion_tokens,
+            created_by=created_by,
+            superseded_by_draft_id=_coerce_draft_id(superseded_by_draft_id) if superseded_by_draft_id else None,
+        )
+        session.add(draft)
+        session.commit()
+        session.refresh(draft)
+        return draft
+    except Exception as e:
+        logger.error(f"Error creating manifest draft: {str(e)}")
+        raise
+    finally:
+        if owns_session:
+            session.close()
+
+
+def get_manifest_draft(draft_id, session=None):
+    owns_session = session is None
+    session = session or Session()
+    try:
+        return (
+            session.query(DatasetManifestDraft)
+            .filter(DatasetManifestDraft.draft_id == _coerce_draft_id(draft_id))
+            .first()
+        )
+    except Exception as e:
+        logger.error(f"Error fetching manifest draft {draft_id}: {str(e)}")
+        raise
+    finally:
+        if owns_session:
+            session.close()
+
+
+def list_manifest_drafts(status: str | None = None, dataset_id: str | None = None, limit: int = 50, offset: int = 0):
+    session = Session()
+    try:
+        query = session.query(DatasetManifestDraft)
+        if status:
+            query = query.filter(DatasetManifestDraft.status == DatasetManifestDraftStatus(status))
+        if dataset_id:
+            query = query.filter(DatasetManifestDraft.dataset_id == dataset_id)
+        total = query.count()
+        rows = query.order_by(DatasetManifestDraft.created_at.desc()).offset(offset).limit(limit).all()
+        return rows, total
+    except Exception as e:
+        logger.error(f"Error listing manifest drafts: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def update_manifest_draft_status(
+    draft_id,
+    status: str,
+    *,
+    reviewed_by: str | None = None,
+    dataset_id: str | None = None,
+    validation_result: dict | None = None,
+    session=None,
+):
+    owns_session = session is None
+    session = session or Session()
+    try:
+        draft = (
+            session.query(DatasetManifestDraft)
+            .filter(DatasetManifestDraft.draft_id == _coerce_draft_id(draft_id))
+            .first()
+        )
+        if not draft:
+            raise ValueError(f"Manifest draft {draft_id} not found")
+        draft.status = DatasetManifestDraftStatus(status)
+        if reviewed_by is not None:
+            draft.reviewed_by = reviewed_by
+            draft.reviewed_at = datetime.utcnow()
+        if dataset_id is not None:
+            draft.dataset_id = dataset_id
+        if validation_result is not None:
+            draft.validation_result = validation_result
+        session.commit()
+        session.refresh(draft)
+        return draft
+    except Exception as e:
+        logger.error(f"Error updating manifest draft {draft_id}: {str(e)}")
+        raise
+    finally:
+        if owns_session:
+            session.close()
+
+
+def update_manifest_draft_content(
+    draft_id,
+    *,
+    draft_yaml: str,
+    draft_json: dict,
+    validation_result: dict | None = None,
+    session=None,
+):
+    """Overwrites a draft's manifest content in place (curator-edited YAML,
+    see draft_review_service.update_draft_content) - unlike
+    update_manifest_draft_status, this never touches status/reviewed_by,
+    since editing content is independent of the review decision.
+    """
+    owns_session = session is None
+    session = session or Session()
+    try:
+        draft = (
+            session.query(DatasetManifestDraft)
+            .filter(DatasetManifestDraft.draft_id == _coerce_draft_id(draft_id))
+            .first()
+        )
+        if not draft:
+            raise ValueError(f"Manifest draft {draft_id} not found")
+        draft.draft_yaml = draft_yaml
+        draft.draft_json = draft_json
+        if validation_result is not None:
+            draft.validation_result = validation_result
+        session.commit()
+        session.refresh(draft)
+        return draft
+    except Exception as e:
+        logger.error(f"Error updating manifest draft content {draft_id}: {str(e)}")
+        raise
+    finally:
+        if owns_session:
+            session.close()
+
+
+def flag_manifest_draft_field(draft_id, field_path: str, reason: str, flagged_by: str, session=None):
+    """Appends one entry to a draft's flagged_fields, sets its status to
+    'flagged', and records a matching reviewer note - the one place a
+    curator marks a specific field as needing attention/regeneration.
+    """
+    owns_session = session is None
+    session = session or Session()
+    try:
+        draft = (
+            session.query(DatasetManifestDraft)
+            .filter(DatasetManifestDraft.draft_id == _coerce_draft_id(draft_id))
+            .first()
+        )
+        if not draft:
+            raise ValueError(f"Manifest draft {draft_id} not found")
+        draft.flagged_fields = [*(draft.flagged_fields or []), {"field": field_path, "reason": reason}]
+        draft.reviewer_notes = [*(draft.reviewer_notes or []), {"field": field_path, "note": reason, "by": flagged_by}]
+        draft.status = DatasetManifestDraftStatus.FLAGGED
+        session.commit()
+        session.refresh(draft)
+        return draft
+    except Exception as e:
+        logger.error(f"Error flagging field on manifest draft {draft_id}: {str(e)}")
+        raise
+    finally:
+        if owns_session:
+            session.close()
+
+
+def append_manifest_draft_note(draft_id, note: dict, session=None):
+    """Append one reviewer note (e.g. {"field": "...", "note": "...", "by": "...", "at": "..."})
+    to a draft's reviewer_notes array.
+    """
+    owns_session = session is None
+    session = session or Session()
+    try:
+        draft = (
+            session.query(DatasetManifestDraft)
+            .filter(DatasetManifestDraft.draft_id == _coerce_draft_id(draft_id))
+            .first()
+        )
+        if not draft:
+            raise ValueError(f"Manifest draft {draft_id} not found")
+        draft.reviewer_notes = [*(draft.reviewer_notes or []), note]
+        session.commit()
+        session.refresh(draft)
+        return draft
+    except Exception as e:
+        logger.error(f"Error appending note to manifest draft {draft_id}: {str(e)}")
+        raise
+    finally:
+        if owns_session:
+            session.close()
+
+
+def delete_manifest_draft(draft_id, session=None):
+    """Deletes a draft row outright - this only removes the staging record,
+    never anything already approved/persisted (that lives in filestore/the
+    datasets table, untouched). Superseding drafts that reference this one
+    via superseded_by_draft_id are unlinked first rather than cascade-deleted,
+    so their own history isn't silently destroyed.
+    """
+    owns_session = session is None
+    session = session or Session()
+    try:
+        draft = (
+            session.query(DatasetManifestDraft)
+            .filter(DatasetManifestDraft.draft_id == _coerce_draft_id(draft_id))
+            .first()
+        )
+        if not draft:
+            raise ValueError(f"Manifest draft {draft_id} not found")
+        session.query(DatasetManifestDraft).filter(
+            DatasetManifestDraft.superseded_by_draft_id == draft.draft_id
+        ).update({"superseded_by_draft_id": None})
+        session.delete(draft)
+        session.commit()
+    except Exception as e:
+        logger.error(f"Error deleting manifest draft {draft_id}: {str(e)}")
+        raise
+    finally:
+        if owns_session:
+            session.close()
 
 
 def update_dataset_manifest_cache(
@@ -561,16 +879,19 @@ def suggest_next_raw_dataset_id_for_category(category_id: str, session=None) -> 
 
     Also folds in rds_ids still stored in the older per-collection format
     (e.g. CS0002RDS0003) so a category that already has raw datasets under
-    the old scheme doesn't restart its counter from 1 and collide with them.
+    the old scheme doesn't restart its counter from 1 and collide with them,
+    and folds in reserved_raw_dataset_ids so an id reserved (but not yet
+    turned into a real RawDataset row) isn't suggested again.
     """
     owns_session = session is None
     session = session or Session()
     try:
         existing_ids = session.query(RawDataset.rds_id).all()
+        reserved_ids = session.query(ReservedRawDatasetID.rds_id).all()
         max_suffix = 0
         new_format_pattern = re.compile(rf"^{re.escape(category_id)}RDS(\d+)$")
         legacy_format_pattern = re.compile(rf"^{re.escape(category_id)}\d{{4}}RDS(\d{{4}})$")
-        for (rds_id,) in existing_ids:
+        for (rds_id,) in [*existing_ids, *reserved_ids]:
             rds_id = rds_id or ""
             match = new_format_pattern.match(rds_id) or legacy_format_pattern.match(rds_id)
             if match:

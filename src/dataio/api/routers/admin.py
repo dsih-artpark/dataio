@@ -1,9 +1,16 @@
-from fastapi import HTTPException, Depends, APIRouter, UploadFile
+from fastapi import HTTPException, Depends, APIRouter, Form, UploadFile
+from typing import List
+import json
 import logging
 from dataio.api.auth import get_user, admin_required
-from dataio.api.services import AdminUserManagementService, AdminDatasetService
+from dataio.api.services import AdminUserManagementService, AdminDatasetService, DraftReviewService
 from dataio.api.models import (
+    ClassifyColumnsRequest,
     DatasetCreate,
+    ManifestDraftEdit,
+    ManifestDraftFlagField,
+    ManifestDraftInfoYamlRequest,
+    ManifestDraftReject,
     User,
     UserCreate,
     VersionType,
@@ -168,6 +175,177 @@ async def get_dataset_manifest(
     admin_dataset_service: AdminDatasetService = Depends(AdminDatasetService),
 ):
     return admin_dataset_service.get_dataset_manifest(dataset_id, bucket_type)
+
+
+###
+### MANIFEST DRAFTS (LLM-drafted metadata.yaml, pending curator review)
+###
+
+
+@admin_router.post("/manifest-drafts/generate", tags=["admin/manifest-drafts"])
+@admin_required
+async def generate_manifest_draft(
+    csv_files: List[UploadFile],
+    category_id: str = Form(...),
+    collection_id: str = Form(...),
+    data_owner_name: str = Form(...),
+    created_by: str = Form(None),
+    dataset_id: str = Form(None),
+    digitization_log_file: UploadFile = None,
+    user: User = Depends(get_user),
+    draft_review_service: DraftReviewService = Depends(DraftReviewService),
+):
+    return draft_review_service.generate_draft_from_upload(
+        csv_files=csv_files,
+        category_id=category_id,
+        collection_id=collection_id,
+        data_owner_name=data_owner_name,
+        created_by=created_by or user.email,
+        dataset_id=dataset_id,
+        digitization_log_file=digitization_log_file,
+    )
+
+
+@admin_router.post("/manifest-drafts/generate-deterministic", tags=["admin/manifest-drafts"])
+@admin_required
+async def generate_deterministic_manifest_draft(
+    csv_files: List[UploadFile],
+    category_id: str = Form(...),
+    collection_id: str = Form(...),
+    data_owner_name: str = Form(...),
+    curator_input: str = Form(...),
+    created_by: str = Form(None),
+    dataset_id: str = Form(None),
+    user: User = Depends(get_user),
+    draft_review_service: DraftReviewService = Depends(DraftReviewService),
+):
+    return draft_review_service.generate_deterministic_draft_from_upload(
+        csv_files=csv_files,
+        category_id=category_id,
+        collection_id=collection_id,
+        data_owner_name=data_owner_name,
+        created_by=created_by or user.email,
+        curator_input=json.loads(curator_input),
+        dataset_id=dataset_id,
+    )
+
+
+@admin_router.post("/manifest-drafts/classify-columns", tags=["admin/manifest-drafts"])
+@admin_required
+async def classify_columns(
+    body: ClassifyColumnsRequest,
+    user: User = Depends(get_user),
+    draft_review_service: DraftReviewService = Depends(DraftReviewService),
+):
+    return draft_review_service.classify_columns(column_names=body.column_names)
+
+
+@admin_router.get("/manifest-drafts", tags=["admin/manifest-drafts"])
+@admin_required
+async def list_manifest_drafts(
+    status: str = None,
+    dataset_id: str = None,
+    limit: int = 50,
+    offset: int = 0,
+    user: User = Depends(get_user),
+    draft_review_service: DraftReviewService = Depends(DraftReviewService),
+):
+    return draft_review_service.list_drafts(status=status, dataset_id=dataset_id, limit=limit, offset=offset)
+
+
+@admin_router.get("/manifest-drafts/{draft_id}", tags=["admin/manifest-drafts"])
+@admin_required
+async def get_manifest_draft(
+    draft_id: str,
+    user: User = Depends(get_user),
+    draft_review_service: DraftReviewService = Depends(DraftReviewService),
+):
+    return draft_review_service.get_draft(draft_id)
+
+
+@admin_router.delete("/manifest-drafts/{draft_id}", tags=["admin/manifest-drafts"])
+@admin_required
+async def delete_manifest_draft(
+    draft_id: str,
+    user: User = Depends(get_user),
+    draft_review_service: DraftReviewService = Depends(DraftReviewService),
+):
+    draft_review_service.delete_draft(draft_id)
+    return {"message": "Manifest draft deleted", "draft_id": draft_id}
+
+
+@admin_router.post("/manifest-drafts/{draft_id}/validate", tags=["admin/manifest-drafts"])
+@admin_required
+async def revalidate_manifest_draft(
+    draft_id: str,
+    user: User = Depends(get_user),
+    draft_review_service: DraftReviewService = Depends(DraftReviewService),
+):
+    return draft_review_service.revalidate_draft(draft_id)
+
+
+@admin_router.post("/manifest-drafts/{draft_id}/approve", tags=["admin/manifest-drafts"])
+@admin_required
+async def approve_manifest_draft(
+    draft_id: str,
+    user: User = Depends(get_user),
+    draft_review_service: DraftReviewService = Depends(DraftReviewService),
+):
+    return draft_review_service.approve_draft(draft_id, user.email)
+
+
+@admin_router.post("/manifest-drafts/{draft_id}/reject", tags=["admin/manifest-drafts"])
+@admin_required
+async def reject_manifest_draft(
+    draft_id: str,
+    body: ManifestDraftReject,
+    user: User = Depends(get_user),
+    draft_review_service: DraftReviewService = Depends(DraftReviewService),
+):
+    return draft_review_service.reject_draft(draft_id, user.email, reason=body.reason)
+
+
+@admin_router.put("/manifest-drafts/{draft_id}", tags=["admin/manifest-drafts"])
+@admin_required
+async def update_manifest_draft(
+    draft_id: str,
+    body: ManifestDraftEdit,
+    user: User = Depends(get_user),
+    draft_review_service: DraftReviewService = Depends(DraftReviewService),
+):
+    return draft_review_service.update_draft_content(draft_id, body.draft_yaml)
+
+
+@admin_router.post("/manifest-drafts/{draft_id}/flag-field", tags=["admin/manifest-drafts"])
+@admin_required
+async def flag_manifest_draft_field(
+    draft_id: str,
+    body: ManifestDraftFlagField,
+    user: User = Depends(get_user),
+    draft_review_service: DraftReviewService = Depends(DraftReviewService),
+):
+    return draft_review_service.flag_field(draft_id, body.field_path, body.note, user.email)
+
+
+@admin_router.post("/manifest-drafts/{draft_id}/regenerate", tags=["admin/manifest-drafts"])
+@admin_required
+async def regenerate_manifest_draft(
+    draft_id: str,
+    user: User = Depends(get_user),
+    draft_review_service: DraftReviewService = Depends(DraftReviewService),
+):
+    return draft_review_service.regenerate_draft(draft_id, user.email)
+
+
+@admin_router.post("/manifest-drafts/{draft_id}/info-yaml", tags=["admin/manifest-drafts"])
+@admin_required
+async def generate_manifest_draft_info_yaml(
+    draft_id: str,
+    body: ManifestDraftInfoYamlRequest,
+    user: User = Depends(get_user),
+    draft_review_service: DraftReviewService = Depends(DraftReviewService),
+):
+    return draft_review_service.generate_info_yaml(draft_id, body.access_level.value)
 
 
 @admin_router.delete(

@@ -43,16 +43,24 @@ gh pr create --base staging --title "PR Title" --body "Description"
 ### Backend (Python/FastAPI)
 - **Source**: `src/dataio/`
 - **API**: `src/dataio/api/` - FastAPI application
-- **Database**: PostgreSQL with SQLAlchemy 2.0+
-- **Auth**: `src/dataio/api/auth/` - Authentication & authorization
-- **Services**: `src/dataio/api/services/` - Business logic layer
-- **Migrations**: `src/dataio/db/migrations/` - SQL migration files
+  - **Routers**: `src/dataio/api/routers/` - `admin.py` (API-key admin endpoints), `user.py`, `validate.py`, `web.py` (session-based web app endpoints, incl. `/admin/*` used by the admin panel)
+  - **Services**: `src/dataio/api/services/` - business logic layer, one service per domain (`admin_dataset_service.py`, `web_admin_service.py`, `chat_service.py`, `filestore_service.py` for S3, etc.)
+  - **Database**: `src/dataio/api/database/` - SQLAlchemy 2.0+ models and query functions (`functions.py`), PostgreSQL
+  - **Auth**: `src/dataio/api/auth/` - Authentication & authorization
+- **Validation library**: `src/dataio/validate/` - standalone Pydantic-based manifest/data validator (`contracts/`, `validators/`, `loaders/`, `registry/`), usable independent of the API
+- **CLI**: `src/dataio/cli/` and **SDK**: `src/dataio/sdk/` - packaged with the PyPI distribution (`dataio-artpark`) for programmatic/CLI access
+- **MCP server**: `src/dataio/mcp/` - exposes dataset-discovery tools to the AI chat assistant
+- **Migrations**: `src/dataio/db/migrations/` - SQL migration files, run via `uv run all-migrations`
 
 ### Frontend (Astro + Preact)
 - **Source**: `web/` - Astro application with TypeScript
 - **Components**: `web/src/components/` - Preact islands for interactivity
+  - `admin/` - admin panel (dataset/raw-dataset import & curation, manifest validation/updates, user & group management)
+  - `datasets/` - public dataset catalogue/browser and detail views
+  - `auth/`, `account/` - OTP/Passkey login, registration, account & API-key management
+  - `chat/` - AI chat assistant UI
 - **Pages**: `web/src/pages/` - Astro pages and layouts
-- **Lib**: `web/src/lib/` - API client, auth helpers, utilities
+- **Lib**: `web/src/lib/` - API client (`api.ts`), shared types (`types.ts`), auth helpers, utilities
 
 ## Web UI Feature
 
@@ -81,6 +89,15 @@ gh pr create --base staging --title "PR Title" --body "Description"
 - `webauthn_challenges` - WebAuthn flow state
 - `user_api_keys` - Self-service API key management
 - Extended `users` table with `email_verified`, `last_login`, `created_at`, `display_name`
+
+## Dataset & Raw Dataset ID Generation
+
+`ds_id` (12 chars, `^[A-Z]{2}\d{4}DS\d{4}$`, enforced by a DB trigger) and `rds_id` (free-form, DB-unique only) are suggested rather than freely chosen, to match the numbering already used in the master Excel catalogue and in S3:
+
+- **`ds_id`** uses a single catalogue-wide counter, independent of collection — `get_next_dataset_serial_number()` / `suggest_next_dataset_id(collection_id)` in `src/dataio/api/database/functions.py`. The numeric suffix is the max across every existing `datasets.ds_id` and `reserved_dataset_ids.ds_id`, plus one; the requested collection only supplies the prefix.
+- **`rds_id`** uses a per-category counter (all collections under one category, e.g. all of `CS0001`, `CS0007`, `CS0026`, share one `CS` counter), in the catalogue's unpadded format (`CSRDS16`) — `suggest_next_raw_dataset_id_for_category(category_id)`.
+- Both are exposed read-only in the admin panel's "Next Available IDs" tab (`DatasetAdminManager.tsx`) via `GET /admin/datasets/next-id-number` and `GET /admin/raw-datasets/suggest-id-by-category` — nothing is created or reserved by looking one up.
+- `reserved_dataset_ids` lets an id be pre-claimed (e.g. for out-of-band coordination) without a `datasets` row existing yet; the suggestion functions factor reserved ids in so they don't get handed out again.
 
 ## Development Commands
 

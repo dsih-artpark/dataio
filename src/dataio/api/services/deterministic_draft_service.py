@@ -13,8 +13,6 @@ left unset.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
@@ -90,8 +88,9 @@ def generate_deterministic_draft(
     if not csv_paths:
         raise HTTPException(status_code=400, detail="At least one CSV file is required.")
 
-    # Same one-table-per-CSV convention as generate_draft.
-    csv_paths_by_table = {Path(p).stem: str(p) for p in csv_paths}
+    # Same one-table-per-CSV convention as generate_draft, including its
+    # duplicate-filename-stem rejection.
+    csv_paths_by_table = draft_service.build_csv_paths_by_table(csv_paths)
 
     missing_descriptions = [
         name for name in csv_paths_by_table
@@ -160,9 +159,12 @@ def generate_deterministic_draft(
             detail=f"Missing description for: {', '.join(sorted(missing_column_descriptions))}.",
         )
 
-    dataset_join_keys = curator_input.joinKeyColumns or sorted(
-        {column for table in tables.values() for column in table["joinKeys"]}
-    )
+    # Always derived from each table's already-validated joinKeys (filtered
+    # against that table's real columns inside infer_table_structure) -
+    # never curator_input.joinKeyColumns directly, since an unfiltered
+    # curator override could reference a column that doesn't exist in any
+    # table (a typo, or a join-key list pasted from a different dataset).
+    dataset_join_keys = sorted({column for table in tables.values() for column in table["joinKeys"]})
 
     manifest_dict: dict = {
         "datasetDescription": curator_input.datasetDescription,

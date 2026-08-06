@@ -66,3 +66,44 @@ def test_complete_raises_readable_error_on_200_with_no_choices():
 
     with pytest.raises(RuntimeError, match="upstream provider overloaded"):
         client.complete(system_prompt="be terse", user_prompt="draft it")
+
+
+def test_complete_returns_empty_text_when_message_content_is_missing():
+    """Some providers omit "content" entirely on an otherwise well-formed
+    choices response - this must not raise a raw KeyError, since an empty
+    text string fails parse_llm_output's own format check the same way any
+    other malformed response does, routing into the existing retry path.
+    """
+    def missing_content_response(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"model": "x", "choices": [{"message": {"role": "assistant"}}]},
+        )
+
+    client = OpenRouterDraftClient()
+    client._client = httpx.Client(
+        base_url=client._client.base_url,
+        transport=httpx.MockTransport(missing_content_response),
+    )
+
+    completion = client.complete(system_prompt="be terse", user_prompt="draft it")
+
+    assert completion.text == ""
+
+
+def test_complete_returns_empty_text_when_message_content_is_null():
+    def null_content_response(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"model": "x", "choices": [{"message": {"role": "assistant", "content": None}}]},
+        )
+
+    client = OpenRouterDraftClient()
+    client._client = httpx.Client(
+        base_url=client._client.base_url,
+        transport=httpx.MockTransport(null_content_response),
+    )
+
+    completion = client.complete(system_prompt="be terse", user_prompt="draft it")
+
+    assert completion.text == ""

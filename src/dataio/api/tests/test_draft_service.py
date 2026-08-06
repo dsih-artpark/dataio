@@ -290,6 +290,23 @@ def test_batch_tables_single_table_under_budget_is_one_batch():
     assert draft_service._batch_tables(["only"], context_sizes, char_budget=100) == [["only"]]
 
 
+def test_build_csv_paths_by_table_rejects_duplicate_filename_stems():
+    import pytest
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc_info:
+        draft_service.build_csv_paths_by_table(["dir_a/data.csv", "dir_b/data.csv"])
+
+    assert exc_info.value.status_code == 400
+    assert "data" in exc_info.value.detail
+
+
+def test_build_csv_paths_by_table_allows_unique_stems():
+    result = draft_service.build_csv_paths_by_table(["dir_a/foo.csv", "dir_b/bar.csv"])
+
+    assert result == {"foo": "dir_a/foo.csv", "bar": "dir_b/bar.csv"}
+
+
 def test_merge_batch_manifests_single_batch_passes_through_unchanged():
     manifest = {"tables": {"main": {}}}
     flags = [{"field": "x", "reason": "y"}]

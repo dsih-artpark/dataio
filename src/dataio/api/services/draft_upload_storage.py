@@ -10,6 +10,7 @@ transient tempfile.
 from __future__ import annotations
 
 import os
+import shutil
 import uuid
 from pathlib import Path
 
@@ -35,8 +36,11 @@ def save_upload(upload_file: UploadFile) -> str:
     original_name = Path(upload_file.filename or "upload").name or "upload"
     dest_path = upload_dir / original_name
 
+    # Streamed in chunks (not upload_file.file.read() then write()) - a
+    # large CSV would otherwise be buffered whole in memory before any of
+    # it reaches disk.
     upload_file.file.seek(0)
     with open(dest_path, "wb") as f:
-        f.write(upload_file.file.read())
+        shutil.copyfileobj(upload_file.file, f)
 
     return str(dest_path.resolve())

@@ -94,7 +94,13 @@ class OpenRouterDraftClient:
         choice = body["choices"][0]["message"]
         usage = body.get("usage", {})
         return DraftCompletion(
-            text=choice["content"],
+            # .get(...) or "" (not choice["content"]) - some providers omit
+            # "content" entirely or return it as null in edge-case
+            # responses; an empty string here fails parse_llm_output's
+            # delimiter check the same way any other malformed response
+            # does, routing into _complete_with_retry's existing retry
+            # path instead of an unhandled KeyError.
+            text=choice.get("content") or "",
             model=body.get("model", self.model_id),
             prompt_tokens=usage.get("prompt_tokens"),
             completion_tokens=usage.get("completion_tokens"),

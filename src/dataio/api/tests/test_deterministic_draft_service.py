@@ -189,6 +189,30 @@ def test_generate_deterministic_draft_respects_curator_confirmed_join_keys(tmp_p
     assert "isJoinKey" not in table["data_dictionary"]["state.ID"]
 
 
+def test_generate_deterministic_draft_drops_nonexistent_curator_join_key_from_dataset_level_list(
+    tmp_path: Path, monkeypatch
+):
+    """A curator-supplied joinKeyColumns override that includes a column
+    not present in any table (a typo, or a list pasted from a different
+    dataset) must not leak into the dataset-level joinKeys - only columns
+    infer_table_structure actually validated against a real table's
+    data_dictionary should appear there.
+    """
+    csv_path = tmp_path / "table.csv"
+    csv_path.write_text(CSV_TEXT, encoding="utf-8")
+
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(draft_service.database, "create_manifest_draft", _fake_create_manifest_draft({}))
+
+    result = deterministic_draft_service.generate_deterministic_draft(
+        csv_paths=[str(csv_path)], category_id="CS", collection_id="CS0007", created_by="engineer@artpark.in",
+        data_owner_name="DAHD", curator_input=_curator_input(joinKeyColumns=["year", "no_such_column"]),
+    )
+
+    assert result.draft_json["joinKeys"] == ["year"]
+    assert "no_such_column" not in result.draft_json["joinKeys"]
+
+
 def test_generate_deterministic_draft_includes_canonical_species_registry(tmp_path: Path, monkeypatch):
     csv_path = tmp_path / "table.csv"
     csv_path.write_text(CSV_TEXT, encoding="utf-8")
@@ -465,6 +489,34 @@ def test_generate_deterministic_draft_raises_when_collection_does_not_exist(tmp_
             data_owner_name="DAHD", curator_input=_curator_input(),
         )
     assert exc_info.value.status_code == 400
+
+
+def test_generate_deterministic_draft_rejects_duplicate_csv_filename_stems(tmp_path: Path, monkeypatch):
+    """Two uploaded CSVs that share a filename stem (e.g. from different
+    folders) must be rejected up front, not silently collapsed into one
+    table by the csv_paths_by_table dict build.
+    """
+    import pytest
+    from fastapi import HTTPException
+
+    dir_a = tmp_path / "a"
+    dir_a.mkdir()
+    dir_b = tmp_path / "b"
+    dir_b.mkdir()
+    csv_a = dir_a / "table.csv"
+    csv_a.write_text(CSV_TEXT, encoding="utf-8")
+    csv_b = dir_b / "table.csv"
+    csv_b.write_text(CSV_TEXT, encoding="utf-8")
+
+    _patch_common(monkeypatch)
+
+    with pytest.raises(HTTPException) as exc_info:
+        deterministic_draft_service.generate_deterministic_draft(
+            csv_paths=[str(csv_a), str(csv_b)], category_id="CS", collection_id="CS0007",
+            created_by="engineer@artpark.in", data_owner_name="DAHD", curator_input=_curator_input(),
+        )
+    assert exc_info.value.status_code == 400
+    assert "table" in exc_info.value.detail
 
 
 def test_generate_deterministic_draft_raises_when_table_description_missing(tmp_path: Path, monkeypatch):

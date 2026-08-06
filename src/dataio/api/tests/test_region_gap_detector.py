@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
+
+from dataio.api.services import region_gap_detector
 from dataio.api.services.region_gap_detector import detect_region_gaps, detect_region_gaps_for_table
 
 
@@ -78,3 +81,42 @@ def test_detect_region_gaps_for_table_finds_the_region_and_date_columns_automati
     comments = detect_region_gaps_for_table(csv_path, data_dictionary)
 
     assert any("Telangana" in c for c in comments)
+
+
+def test_detect_region_gaps_ignores_blank_region_values_without_treating_them_as_a_region(tmp_path: Path):
+    # A blank/missing region cell must not survive as the literal string
+    # "nan" (a pandas astype(str) artifact) and get treated as if it were
+    # a real (bogus) region name anywhere in the output.
+    csv_path = _write_csv(tmp_path, [("", 2015), ("Telangana", 2019)])
+
+    comments = detect_region_gaps(csv_path, "state.name", "year")
+
+    assert any("Telangana" in c for c in comments)
+    assert not any("nan" in c.lower() for c in comments)
+
+
+def test_detect_region_gaps_for_table_reads_the_csv_only_once(tmp_path: Path, monkeypatch):
+    # 2 region columns x 1 date column = 2 pairs to check, but the CSV
+    # itself must only be read from disk once, not once per pair.
+    csv_path = tmp_path / "data.csv"
+    csv_path.write_text(
+        "state.name,district.name,year\nAndhra Pradesh,Guntur,1997\nTelangana,Hyderabad,2019\n",
+        encoding="utf-8",
+    )
+    data_dictionary = {
+        "state.name": {"type": "regionName"},
+        "district.name": {"type": "regionName"},
+        "year": {"type": "date", "format": "%Y"},
+    }
+    real_read_csv = pd.read_csv
+    calls: list[None] = []
+
+    def counting_read_csv(*args, **kwargs):
+        calls.append(None)
+        return real_read_csv(*args, **kwargs)
+
+    monkeypatch.setattr(region_gap_detector.pd, "read_csv", counting_read_csv)
+
+    detect_region_gaps_for_table(str(csv_path), data_dictionary)
+
+    assert len(calls) == 1

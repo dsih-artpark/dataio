@@ -620,6 +620,30 @@ def _merge_narrative_into_base(base: dict, narrative_manifest: dict) -> dict:
     return merged
 
 
+def build_csv_paths_by_table(csv_paths: list[str]) -> dict[str, str]:
+    """One table per CSV, keyed by that CSV's own filename stem verbatim -
+    same convention the dataset-import flow already uses (csv_by_stem in
+    web_admin_service._parse_dataset_package). Shared by both drafting
+    paths (see deterministic_draft_service.generate_deterministic_draft).
+
+    Rejects duplicate stems up front (e.g. two CSVs both named "data.csv"
+    from different folders, or the same file picked twice) - a bare dict
+    comprehension would otherwise silently drop all but the last one with
+    no error, and the curator would have no idea a table went missing.
+    """
+    stems = [Path(p).stem for p in csv_paths]
+    duplicates = sorted({stem for stem in stems if stems.count(stem) > 1})
+    if duplicates:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Duplicate table name(s) from CSV filenames: {', '.join(duplicates)}. "
+                "Rename the files so each table name is unique."
+            ),
+        )
+    return {Path(p).stem: str(p) for p in csv_paths}
+
+
 def generate_draft(
     *,
     csv_paths: list[str],
@@ -635,10 +659,7 @@ def generate_draft(
     if not csv_paths:
         raise HTTPException(status_code=400, detail="At least one CSV file is required.")
 
-    # One table per CSV, keyed by that CSV's own filename stem verbatim -
-    # same convention the dataset-import flow already uses (csv_by_stem in
-    # web_admin_service._parse_dataset_package).
-    csv_paths_by_table = {Path(p).stem: str(p) for p in csv_paths}
+    csv_paths_by_table = build_csv_paths_by_table(csv_paths)
     csv_profiles = {table_name: profile_csv(p) for table_name, p in csv_paths_by_table.items()}
     digitization_log = load_digitization_log(digitization_log_path)
 

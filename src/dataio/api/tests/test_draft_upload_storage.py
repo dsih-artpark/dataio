@@ -19,6 +19,34 @@ def test_save_upload_writes_file_and_returns_path(tmp_path, monkeypatch):
         assert f.read() == b"a,b\n1,2\n"
 
 
+def test_save_upload_strips_leading_utf8_bom(tmp_path, monkeypatch):
+    """A CSV saved by Excel as "CSV UTF-8" carries a 3-byte BOM marker
+    before the first column header - stripping it at intake means it
+    never reaches the validator (or anything else) mismatched against a
+    manifest's clean column names.
+    """
+    monkeypatch.setattr(draft_upload_storage, "DRAFT_UPLOAD_DIR", str(tmp_path))
+
+    bom_prefixed = b"\xef\xbb\xbfstate.lgd_code,name\n29,Karnataka\n"
+    upload = UploadFile(filename="data.csv", file=io.BytesIO(bom_prefixed))
+    saved_path = draft_upload_storage.save_upload(upload)
+
+    with open(saved_path, "rb") as f:
+        content = f.read()
+    assert not content.startswith(draft_upload_storage._UTF8_BOM)
+    assert content == b"state.lgd_code,name\n29,Karnataka\n"
+
+
+def test_save_upload_leaves_non_bom_content_untouched(tmp_path, monkeypatch):
+    monkeypatch.setattr(draft_upload_storage, "DRAFT_UPLOAD_DIR", str(tmp_path))
+
+    upload = UploadFile(filename="data.csv", file=io.BytesIO(b"state.lgd_code,name\n29,Karnataka\n"))
+    saved_path = draft_upload_storage.save_upload(upload)
+
+    with open(saved_path, "rb") as f:
+        assert f.read() == b"state.lgd_code,name\n29,Karnataka\n"
+
+
 def test_save_upload_is_collision_proof(tmp_path, monkeypatch):
     monkeypatch.setattr(draft_upload_storage, "DRAFT_UPLOAD_DIR", str(tmp_path))
 

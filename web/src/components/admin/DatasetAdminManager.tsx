@@ -159,6 +159,11 @@ export default function DatasetAdminManager({
   const [tableFile, setTableFile] = useState<File | null>(null);
   const [tableMetadataText, setTableMetadataText] = useState('{\n  "table_name": "",\n  "description": "",\n  "source": "",\n  "data_dictionary": {}\n}');
   const [documentationStatuses, setDocumentationStatuses] = useState<DocumentationSyncDatasetStatus[]>([]);
+  const [documentationStatusesCheckedAll, setDocumentationStatusesCheckedAll] = useState(false);
+  const [showOnlyOutdated, setShowOnlyOutdated] = useState(true);
+  const [checkingAllDocumentationStatus, setCheckingAllDocumentationStatus] = useState(false);
+  const [selectedSyncIds, setSelectedSyncIds] = useState<Set<string>>(new Set());
+  const [syncingSelectedIds, setSyncingSelectedIds] = useState(false);
   const [importInfoFile, setImportInfoFile] = useState<File | null>(null);
   const [importMetadataFile, setImportMetadataFile] = useState<File | null>(null);
   const [importCsvFiles, setImportCsvFiles] = useState<File[]>([]);
@@ -321,9 +326,37 @@ export default function DatasetAdminManager({
     try {
       const response = await api.adminCheckDocumentationSync(datasetId);
       setDocumentationStatuses(response.datasets);
+      setDocumentationStatusesCheckedAll(false);
+      setSelectedSyncIds(new Set());
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Failed to check documentation sync');
     }
+  };
+
+  const loadAllDocumentationStatuses = async () => {
+    setCheckingAllDocumentationStatus(true);
+    try {
+      const response = await api.adminCheckDocumentationSync(undefined, true);
+      setDocumentationStatuses(response.datasets);
+      setDocumentationStatusesCheckedAll(true);
+      setSelectedSyncIds(new Set());
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to check documentation sync');
+    } finally {
+      setCheckingAllDocumentationStatus(false);
+    }
+  };
+
+  const toggleSyncSelection = (dsId: string) => {
+    setSelectedSyncIds((current) => {
+      const next = new Set(current);
+      if (next.has(dsId)) {
+        next.delete(dsId);
+      } else {
+        next.add(dsId);
+      }
+      return next;
+    });
   };
 
   useEffect(() => {
@@ -769,6 +802,40 @@ export default function DatasetAdminManager({
       }
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Failed to sync dataset documentation');
+    }
+  };
+
+  // Backend only syncs one dataset_id at a time by design (no bulk-sync
+  // route, unlike the check_all=true read path) - so a multi-select "sync
+  // these N" is a sequential loop over the same single-dataset endpoint
+  // "Sync selected" already uses, not a new backend capability.
+  const handleSyncSelectedItems = async () => {
+    const ids = Array.from(selectedSyncIds);
+    if (ids.length === 0) return;
+    setSyncingSelectedIds(true);
+    setErrorMessage('');
+    setStatusMessage('');
+    let updatedCount = 0;
+    const failedIds: string[] = [];
+    for (const id of ids) {
+      try {
+        const response = await api.adminRunDocumentationSync({ dataset_id: id });
+        updatedCount += response.updated;
+      } catch {
+        failedIds.push(id);
+      }
+    }
+    setSyncingSelectedIds(false);
+    setSelectedSyncIds(new Set());
+    if (failedIds.length > 0) {
+      setErrorMessage(`Synced ${ids.length - failedIds.length} of ${ids.length}. Failed: ${failedIds.join(', ')}`);
+    } else {
+      setStatusMessage(`Documentation sync finished. Updated ${updatedCount} of ${ids.length} selected dataset(s).`);
+    }
+    if (documentationStatusesCheckedAll) {
+      await loadAllDocumentationStatuses();
+    } else {
+      await loadDocumentationStatuses(selectedDatasetId || undefined);
     }
   };
 
@@ -2089,10 +2156,10 @@ export default function DatasetAdminManager({
           <div>
             <h3 class="text-lg font-semibold text-slate-900">Documentation Sync</h3>
             <p class="mt-1 text-sm text-slate-600">
-              Check whether the selected dataset is out of date versus filestore, then sync it manually when needed.
+              Check whether the selected dataset is out of date versus filestore, then sync it manually when needed - or check every dataset at once to see the full outdated list.
             </p>
           </div>
-          <div class="grid w-full gap-2 sm:w-auto sm:grid-cols-2">
+          <div class="grid w-full gap-2 sm:w-auto sm:grid-cols-3">
             <button
               type="button"
               onClick={() => loadDocumentationStatuses(selectedDatasetId || undefined)}
@@ -2102,36 +2169,85 @@ export default function DatasetAdminManager({
             </button>
             <button
               type="button"
+              onClick={loadAllDocumentationStatuses}
+              disabled={checkingAllDocumentationStatus}
+              class="w-full rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
+            >
+              {checkingAllDocumentationStatus ? 'Checking all…' : 'Check all datasets'}
+            </button>
+            <button
+              type="button"
               onClick={() => handleDocumentationSync(false)}
               class="w-full rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white"
             >
-              Sync selected
+              Sync current dataset
             </button>
           </div>
         </div>
+
+        {documentationStatusesCheckedAll ? (
+          <div class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-2">
+            <p class="text-sm text-slate-600">
+              {documentationStatuses.filter((item) => item.needs_update).length} of {documentationStatuses.length} datasets are outdated.
+            </p>
+            <label class="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={showOnlyOutdated}
+                onChange={(e) => setShowOnlyOutdated((e.currentTarget as HTMLInputElement).checked)}
+              />
+              Show only outdated
+            </label>
+          </div>
+        ) : null}
+
+        {selectedSyncIds.size > 0 ? (
+          <div class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-300 bg-white px-4 py-2">
+            <p class="text-sm text-slate-700">{selectedSyncIds.size} dataset(s) checked</p>
+            <button
+              type="button"
+              onClick={handleSyncSelectedItems}
+              disabled={syncingSelectedIds}
+              class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {syncingSelectedIds ? 'Syncing…' : `Sync ${selectedSyncIds.size} checked`}
+            </button>
+          </div>
+        ) : null}
 
         <div class="mt-4 space-y-3">
           {documentationStatuses.length === 0 ? (
             <p class="text-sm text-slate-500">Run a check to see documentation sync status.</p>
           ) : (
-            documentationStatuses.map((item) => (
-              <div key={item.ds_id} class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <div class="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <div class="font-medium text-slate-900">{item.ds_id}</div>
-                    <div class="mt-1 text-xs text-slate-500">
-                      Changed fields: {item.changed_fields.length > 0 ? item.changed_fields.join(', ') : 'none'}
+            documentationStatuses
+              .filter((item) => !(documentationStatusesCheckedAll && showOnlyOutdated) || item.needs_update)
+              .map((item) => (
+                <div key={item.ds_id} class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div class="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        class="mt-1"
+                        checked={selectedSyncIds.has(item.ds_id)}
+                        onChange={() => toggleSyncSelection(item.ds_id)}
+                        aria-label={`Select ${item.ds_id} for sync`}
+                      />
+                      <div>
+                        <div class="font-medium text-slate-900">{item.ds_id}</div>
+                        <div class="mt-1 text-xs text-slate-500">
+                          Changed fields: {item.changed_fields.length > 0 ? item.changed_fields.join(', ') : 'none'}
+                        </div>
+                        <div class="mt-1 text-xs text-slate-500">
+                          Last synced: {item.documentation_synced_at ? new Date(item.documentation_synced_at).toLocaleString() : 'never'}
+                        </div>
+                      </div>
                     </div>
-                    <div class="mt-1 text-xs text-slate-500">
-                      Last synced: {item.documentation_synced_at ? new Date(item.documentation_synced_at).toLocaleString() : 'never'}
-                    </div>
+                    <span class={`rounded-full px-3 py-1 text-xs font-medium ${item.needs_update ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                      {item.needs_update ? 'Outdated' : 'Up to date'}
+                    </span>
                   </div>
-                  <span class={`rounded-full px-3 py-1 text-xs font-medium ${item.needs_update ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
-                    {item.needs_update ? 'Outdated' : 'Up to date'}
-                  </span>
                 </div>
-              </div>
-            ))
+              ))
           )}
         </div>
       </section>

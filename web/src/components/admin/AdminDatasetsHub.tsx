@@ -140,15 +140,18 @@ export default function AdminDatasetsHub() {
           <p class="mt-2 text-sm text-slate-600">LLM-drafted metadata.yaml awaiting curator review.</p>
         </div>
 
-        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <a
+          href="/admin/datasets/sync"
+          class="block rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-slate-300 hover:shadow-md"
+        >
           <div class="text-sm font-medium text-slate-500">Outdated Docs</div>
           <div class="mt-2 text-3xl font-semibold text-slate-900">{loading ? '…' : stats.outdatedDocs ?? '—'}</div>
           <p class="mt-2 text-sm text-slate-600">
             {stats.outdatedDocs === null && !loading
               ? 'Could not be checked just now - try refreshing.'
-              : 'Datasets whose cached README, manifest, or dictionary may need a refresh.'}
+              : 'Datasets whose cached README, manifest, or dictionary may need a refresh - click to see the list.'}
           </p>
-        </div>
+        </a>
 
         <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div class="text-sm font-medium text-slate-500">Raw Datasets</div>

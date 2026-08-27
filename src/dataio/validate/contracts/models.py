@@ -1,7 +1,18 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from enum import StrEnum
+from datetime import datetime, timezone
+try:
+    from datetime import UTC
+except ImportError:
+    UTC = timezone.utc
+
+try:
+    from enum import StrEnum
+except ImportError:
+    from enum import Enum
+    class StrEnum(str, Enum):
+        pass
+
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator

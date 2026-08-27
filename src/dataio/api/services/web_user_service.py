@@ -16,7 +16,7 @@ import yaml
 from fastapi import HTTPException
 
 from dataio.api.database.config import Session as DBSession
-from dataio.api.database.models import User, UserAPIKey, Dataset, Collection, DataOwner
+from dataio.api.database.models import User, UserAPIKey, Dataset, Collection, DataOwner, DatasetDownload
 from dataio.api.services.base_service import BaseService
 from dataio.api.services.email_service import EmailService
 from dataio.api.auth.permissions import determine_user_permissions
@@ -474,13 +474,23 @@ class WebUserService(BaseService):
         finally:
             session.close()
 
-    def get_dataset_download_urls(self, user: User, dataset_id: str) -> dict:
+    def get_dataset_download_urls(
+        self,
+        user: User,
+        dataset_id: str,
+        access_channel: str = "WEB",
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> dict:
         """
         Get presigned download URLs for all tables in a dataset.
 
         Args:
             user: The authenticated user
             dataset_id: The dataset ID
+            access_channel: Access channel ('WEB', 'SDK', 'MCP')
+            ip_address: Optional client IP address
+            user_agent: Optional user agent string
 
         Returns:
             dict: Download URLs for tables and metadata
@@ -508,6 +518,22 @@ class WebUserService(BaseService):
 
             if not can_download:
                 raise HTTPException(status_code=403, detail="Download permission required")
+
+            # Record download audit entry in database
+            try:
+                download_log = DatasetDownload(
+                    user_email=user.email,
+                    dataset_id=dataset_id,
+                    access_channel=access_channel,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                )
+                session.add(download_log)
+                session.commit()
+                self.logger.info(f"Logged dataset download: user={user.email}, dataset={dataset_id}, channel={access_channel}")
+            except Exception as log_err:
+                session.rollback()
+                self.logger.warning(f"Failed to record download log for {dataset_id}: {str(log_err)}")
 
             # Get presigned URLs for all tables
             filestore = FilestoreService()

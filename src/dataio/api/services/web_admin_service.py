@@ -28,7 +28,7 @@ from dataio.api.models import (
     RawDatasetUpdate,
     TableMetadata,
 )
-from dataio.api.database.models import Collection, DataOwner, Dataset, User, UserGroup, UserPermission
+from dataio.api.database.models import Collection, DataOwner, Dataset, User, UserGroup, UserPermission, DatasetDownload
 from dataio.api.auth.otp import create_otp, verify_otp
 from dataio.api.auth.security import enforce_rate_limit
 from dataio.api.services.base_service import BaseService
@@ -2098,3 +2098,166 @@ class WebAdminService(BaseService):
             )
         finally:
             session.close()
+
+    def get_download_metrics(
+        self,
+        admin_user: User,
+        search: Optional[str] = None,
+        dataset_id: Optional[str] = None,
+        user_email: Optional[str] = None,
+        channel: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict:
+        """
+        Get dataset download audit logs and analytics summary.
+
+        Args:
+            admin_user: The authenticated admin user
+            search: Optional search filter (for email or dataset_id)
+            dataset_id: Optional filter by dataset ID
+            user_email: Optional filter by user email
+            channel: Optional filter by channel ('WEB', 'SDK', 'MCP')
+            limit: Maximum number of results
+            offset: Pagination offset
+
+        Returns:
+            dict: Summary metrics and download history items
+        """
+        self._require_admin(admin_user)
+
+        session = DBSession()
+        try:
+            from sqlalchemy import func
+
+            query = session.query(DatasetDownload)
+
+            if dataset_id:
+                query = query.filter(DatasetDownload.dataset_id == dataset_id)
+
+            if user_email:
+                query = query.filter(DatasetDownload.user_email == user_email)
+
+            if channel:
+                query = query.filter(DatasetDownload.access_channel == channel)
+
+            if search:
+                pattern = f"%{search}%"
+                query = query.filter(
+                    (DatasetDownload.user_email.ilike(pattern))
+                    | (DatasetDownload.dataset_id.ilike(pattern))
+                )
+
+            total = query.count()
+
+            # Unique users and unique datasets count - derived from the same
+            # filtered `query`, not a fresh session.query(DatasetDownload),
+            # so these respect search/dataset_id/user_email/channel just
+            # like `total` and `downloads` do below. A separate unfiltered
+            # query here would show e.g. "12 unique users" next to a
+            # search-filtered download list that only touches 1 of them.
+            unique_users = query.with_entities(func.count(func.distinct(DatasetDownload.user_email))).scalar() or 0
+            unique_datasets = query.with_entities(func.count(func.distinct(DatasetDownload.dataset_id))).scalar() or 0
+
+            # Paginated log entries
+            downloads = (
+                query.order_by(DatasetDownload.downloaded_at.desc())
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+
+            # Fetch dataset titles map for rich display
+            dataset_ids = list({d.dataset_id for d in downloads})
+            titles_map = {}
+            if dataset_ids:
+                ds_records = (
+                    session.query(Dataset.ds_id, Dataset.title)
+                    .filter(Dataset.ds_id.in_(dataset_ids))
+                    .all()
+                )
+                titles_map = {ds.ds_id: ds.title for ds in ds_records}
+
+            def _parse_device(ua_str: Optional[str]) -> str:
+                if not ua_str:
+                    return "Unknown Device"
+                ua = ua_str.lower()
+                if "dataio" in ua or "python-requests" in ua or "httpx" in ua or "urllib" in ua or "aiohttp" in ua:
+                    return "Python SDK / Script"
+                if "postman" in ua:
+                    return "Postman Client"
+                if "curl" in ua:
+                    return "cURL CLI"
+                
+                os_name = "Desktop"
+                if "windows" in ua:
+                    os_name = "Windows"
+                elif "macintosh" in ua or "mac os" in ua:
+                    os_name = "macOS"
+                elif "iphone" in ua:
+                    os_name = "iPhone"
+                elif "ipad" in ua:
+                    os_name = "iPad"
+                elif "android" in ua:
+                    os_name = "Android"
+                elif "linux" in ua:
+                    os_name = "Linux"
+
+                browser_name = "Browser"
+                if "edg" in ua:
+                    browser_name = "Edge"
+                elif "chrome" in ua and "chromium" not in ua:
+                    browser_name = "Chrome"
+                elif "firefox" in ua:
+                    browser_name = "Firefox"
+                elif "safari" in ua and "chrome" not in ua:
+                    browser_name = "Safari"
+
+                return f"{os_name} ({browser_name})"
+
+            return {
+                "summary": {
+                    "total_downloads": total,
+                    "unique_users": unique_users,
+                    "unique_datasets": unique_datasets,
+                },
+                "downloads": [
+                    {
+                        "id": str(d.id),
+                        "user_email": d.user_email,
+                        "dataset_id": d.dataset_id,
+                        "dataset_title": titles_map.get(d.dataset_id, d.dataset_id),
+                        "access_channel": d.access_channel,
+                        "device_info": _parse_device(d.user_agent),
+                        "ip_address": d.ip_address,
+                        "user_agent": d.user_agent,
+                        "downloaded_at": d.downloaded_at.isoformat() if d.downloaded_at else None,
+                    }
+                    for d in downloads
+                ],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Failed to get download metrics: {str(e)}")
+            if "dataset_downloads" in str(e).lower() or "undefinedtable" in str(e).lower():
+                return {
+                    "summary": {
+                        "total_downloads": 0,
+                        "unique_users": 0,
+                        "unique_datasets": 0,
+                    },
+                    "downloads": [],
+                    "total": 0,
+                    "limit": limit,
+                    "offset": offset,
+                    "warning": "The dataset_downloads table has not been created yet in the database. Please run: uv run all-migrations",
+                }
+            raise HTTPException(status_code=500, detail="Failed to get download metrics")
+        finally:
+            session.close()
+

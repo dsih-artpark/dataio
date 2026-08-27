@@ -445,3 +445,21 @@ class DatasetManifestDraft(Base):
     reviewed_by = Column(Text, ForeignKey("users.email"), nullable=True)
     reviewed_at = Column(DateTime, nullable=True)
     superseded_by_draft_id = Column(UUID(as_uuid=True), ForeignKey("dataset_manifest_drafts.draft_id"), nullable=True)
+
+
+class DatasetDownload(Base):
+    """Audit and analytics log for dataset downloads."""
+
+    __tablename__ = "dataset_downloads"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_email = Column(Text, ForeignKey("users.email", ondelete="CASCADE"), nullable=False)
+    dataset_id = Column(Text, nullable=False)
+    access_channel = Column(Text, nullable=False, default="WEB")  # 'WEB', 'SDK', 'MCP'
+    ip_address = Column(Text, nullable=True)
+    user_agent = Column(Text, nullable=True)
+    downloaded_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    # Relationship
+    user = relationship("User", backref="downloads")
+

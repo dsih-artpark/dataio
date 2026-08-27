@@ -22,6 +22,7 @@ const navItems: NavItem[] = [
     adminOnly: true,
     children: [
       { name: 'Overview', href: '/admin/datasets' },
+      { name: 'Download Analytics', href: '/admin/datasets/analytics' },
       { name: 'Metadata Drafts', href: '/admin/datasets/drafts' },
       { name: 'Create / Import', href: '/admin/datasets/new' },
       { name: 'Catalog', href: '/admin/datasets/catalog' },

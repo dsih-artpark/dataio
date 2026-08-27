@@ -724,6 +724,46 @@ class ApiClient {
     );
   }
 
+  async adminGetDownloadMetrics(params?: {
+    search?: string;
+    dataset_id?: string;
+    user_email?: string;
+    channel?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const searchParams = new URLSearchParams();
+    if (params?.search) searchParams.set('search', params.search);
+    if (params?.dataset_id) searchParams.set('dataset_id', params.dataset_id);
+    if (params?.user_email) searchParams.set('user_email', params.user_email);
+    if (params?.channel) searchParams.set('channel', params.channel);
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    if (params?.offset) searchParams.set('offset', String(params.offset));
+
+    const query = searchParams.toString();
+    return this.request<{
+      summary: {
+        total_downloads: number;
+        unique_users: number;
+        unique_datasets: number;
+      };
+      downloads: {
+        id: string;
+        user_email: string;
+        dataset_id: string;
+        dataset_title: string;
+        access_channel: string;
+        device_info?: string;
+        ip_address: string | null;
+        user_agent: string | null;
+        downloaded_at: string | null;
+      }[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(`/admin/metrics/downloads${query ? `?${query}` : ''}`);
+  }
+
   // Chat endpoints
   async chat(message: string, history?: { role: string; content: { text: string }[] }[]) {
     return this.request<{ response: string; tool_calls: { tool: string; input: Record<string, unknown> }[] }>(

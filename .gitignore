@@ -176,3 +176,6 @@ ARTPARK Data Catalogue.xlsx
 
 # Local copy-paste sheets for manually testing the deterministic intake form
 /copy-paste-sheets/
+# Local docs and drafts (untracked)
+Data_Standardisation_Docs/
+prod_datasets_by_team_contact.md

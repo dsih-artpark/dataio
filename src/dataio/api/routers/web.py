@@ -909,6 +909,7 @@ async def get_dataset_manifest(
 @web_router.get("/datasets/{dataset_id}/download-urls", tags=["datasets"])
 async def get_dataset_download_urls(
     dataset_id: str,
+    request: Request,
     user: User = Depends(get_current_web_user),
     user_service: WebUserService = Depends(WebUserService),
 ):
@@ -920,7 +921,14 @@ async def get_dataset_download_urls(
 
     Requires authentication and download permission.
     """
-    return user_service.get_dataset_download_urls(user, dataset_id)
+    user_agent, ip_address = get_client_info(request)
+    return user_service.get_dataset_download_urls(
+        user,
+        dataset_id,
+        access_channel="WEB",
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
 
 
 @web_router.get("/collections", tags=["datasets"])
@@ -2049,3 +2057,36 @@ async def delete_chat_session(
         user_email=user.email,
     )
     return {"deleted": deleted}
+
+
+# =============================================================================
+# Admin Metrics & Analytics Endpoints
+# =============================================================================
+
+
+@web_router.get("/admin/metrics/downloads", tags=["web-admin/metrics"])
+async def admin_get_download_metrics(
+    search: Optional[str] = None,
+    dataset_id: Optional[str] = None,
+    user_email: Optional[str] = None,
+    channel: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """
+    Get dataset download audit logs and analytics summary.
+
+    Requires admin privileges.
+    """
+    return admin_service.get_download_metrics(
+        user,
+        search=search,
+        dataset_id=dataset_id,
+        user_email=user_email,
+        channel=channel,
+        limit=limit,
+        offset=offset,
+    )
+

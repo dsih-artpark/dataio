@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'preact/hooks';
+import { useState, useEffect, useRef } from 'preact/hooks';
 import { api } from '../../lib/api';
 
 interface DownloadItem {
@@ -42,7 +42,15 @@ export function DownloadMetricsManager() {
   // paginating through it.
   const EXPORT_LIMIT = 100000;
 
+  // Guards against out-of-order responses: handleSearchSubmit resets to page
+  // 1 and fetches in the same tick, before the page-1 re-render lands, so a
+  // stale request for the old page can still be in flight alongside the new
+  // one. Only the response from the most recently *started* request is
+  // applied, regardless of which one resolves first.
+  const latestRequestId = useRef(0);
+
   const fetchMetrics = async () => {
+    const requestId = ++latestRequestId.current;
     setLoading(true);
     setError(null);
     try {
@@ -52,6 +60,7 @@ export function DownloadMetricsManager() {
         limit,
         offset: (page - 1) * limit,
       });
+      if (latestRequestId.current !== requestId) return;
       setDownloads(data.downloads || []);
       setSummary(
         data.summary || {
@@ -62,9 +71,10 @@ export function DownloadMetricsManager() {
       );
       setTotal(data.total || 0);
     } catch (err: unknown) {
+      if (latestRequestId.current !== requestId) return;
       setError(err instanceof Error ? err.message : 'Failed to load download metrics');
     } finally {
-      setLoading(false);
+      if (latestRequestId.current === requestId) setLoading(false);
     }
   };
 
@@ -110,7 +120,12 @@ export function DownloadMetricsManager() {
 
   const csvEscape = (value: string | number | null | undefined) => {
     const str = value === null || value === undefined ? '' : String(value);
-    return /[",\r\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+    // user_agent is attacker-controlled (the downloader's own HTTP client
+    // sets it) and gets exported verbatim - prefix a leading apostrophe on
+    // anything spreadsheet apps would otherwise read as a formula, so it
+    // can't execute when an admin opens this CSV in Excel/Sheets.
+    const safe = /^[\t ]*[=+\-@]/.test(str) ? `'${str}` : str;
+    return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
   };
 
   const handleExportCsv = async () => {

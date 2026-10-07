@@ -1284,10 +1284,20 @@ def create_raw_dataset(raw_dataset: RawDatasetCreate):
     try:
         raw_dataset = RawDataset(**raw_dataset.model_dump())
         session.add(raw_dataset)
+        # The id is now a real row: drop its reservation in the same commit,
+        # as create_dataset does for reserved_dataset_ids.
+        reserved = (
+            session.query(ReservedRawDatasetID)
+            .filter(ReservedRawDatasetID.rds_id == raw_dataset.rds_id)
+            .first()
+        )
+        if reserved:
+            session.delete(reserved)
         session.commit()
         session.refresh(raw_dataset)
         return raw_dataset
     except Exception as e:
+        session.rollback()
         logger.error(f"Error creating raw dataset: {str(e)}")
         raise
     finally:

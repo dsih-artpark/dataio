@@ -32,6 +32,21 @@ def _fake_draft(*, status: str, source_csv_path: str):
     )
 
 
+VALID_INFO = (
+    "spatial_resolution: STATE\n"
+    "temporal_resolution: YEAR\n"
+    "temporal_coverage_start_date: '1997-01-01'\n"
+    "temporal_coverage_end_date: '2019-12-31'\n"
+)
+
+
+@pytest.fixture(autouse=True)
+def _dataset_does_not_exist_yet(monkeypatch):
+    monkeypatch.setattr(
+        "dataio.api.services.web_admin_service.database.check_if_dataset_exists", lambda ds_id: False
+    )
+
+
 def _service():
     return WebAdminService()
 
@@ -46,7 +61,9 @@ def test_import_dataset_from_draft_happy_path(monkeypatch, tmp_path):
     monkeypatch.setattr(
         service.draft_review_service,
         "generate_info_yaml",
-        lambda draft_id, access_level: {"info_yaml": f"ds_id: {draft.dataset_id}\naccess_level: {access_level}\n"},
+        lambda draft_id, access_level: {
+            "info_yaml": f"ds_id: {draft.dataset_id}\naccess_level: {access_level}\n{VALID_INFO}"
+        },
     )
 
     captured = {}
@@ -99,7 +116,9 @@ def test_import_dataset_from_draft_raises_clear_error_for_missing_csv(monkeypatc
     service = _service()
     monkeypatch.setattr(service.draft_review_service, "_get_draft_or_404", lambda draft_id: draft)
     monkeypatch.setattr(
-        service.draft_review_service, "generate_info_yaml", lambda draft_id, access_level: {"info_yaml": "ds_id: x\n"}
+        service.draft_review_service,
+        "generate_info_yaml",
+        lambda draft_id, access_level: {"info_yaml": f"ds_id: x\n{VALID_INFO}"},
     )
 
     def fail_if_called(*a, **kw):
@@ -112,3 +131,53 @@ def test_import_dataset_from_draft_raises_clear_error_for_missing_csv(monkeypatc
 
     assert exc_info.value.status_code == 400
     assert "foo" in exc_info.value.detail
+
+
+def _fail_if_imported(*a, **kw):
+    raise AssertionError("import_dataset_package must not run when pre-checks fail")
+
+
+def test_import_dataset_from_draft_refuses_existing_dataset_before_any_write(monkeypatch, tmp_path):
+    draft = _fake_draft(status="approved", source_csv_path=json.dumps({"foo": str(tmp_path / "foo.csv")}))
+    service = _service()
+    monkeypatch.setattr(service.draft_review_service, "_get_draft_or_404", lambda draft_id: draft)
+    monkeypatch.setattr(
+        "dataio.api.services.web_admin_service.database.check_if_dataset_exists", lambda ds_id: True
+    )
+    monkeypatch.setattr(service, "import_dataset_package", _fail_if_imported)
+
+    with pytest.raises(HTTPException) as exc_info:
+        service.import_dataset_from_draft(ADMIN_USER, "draft-1", "VIEW", VersionType.STANDARDISED)
+
+    assert exc_info.value.status_code == 409
+
+
+@pytest.mark.parametrize(
+    "info_yaml, expected_problem",
+    [
+        # free-text resolution from the intake form / field inference
+        (VALID_INFO.replace("STATE", "TALUK"), "spatial_resolution"),
+        # no %Y column with values -> no temporal_resolution
+        (VALID_INFO.replace("temporal_resolution: YEAR\n", ""), "temporal_resolution"),
+        # a year column with a blank cell profiled as float
+        (VALID_INFO.replace("'1997-01-01'", "'1997.0'"), "temporal_coverage_start_date"),
+    ],
+)
+def test_import_dataset_from_draft_rejects_values_create_dataset_would_fail_on(
+    monkeypatch, tmp_path, info_yaml, expected_problem
+):
+    csv_path = tmp_path / "foo.csv"
+    csv_path.write_bytes(b"a,b\n1,2\n")
+    draft = _fake_draft(status="approved", source_csv_path=json.dumps({"foo": str(csv_path)}))
+    service = _service()
+    monkeypatch.setattr(service.draft_review_service, "_get_draft_or_404", lambda draft_id: draft)
+    monkeypatch.setattr(
+        service.draft_review_service, "generate_info_yaml", lambda draft_id, access_level: {"info_yaml": info_yaml}
+    )
+    monkeypatch.setattr(service, "import_dataset_package", _fail_if_imported)
+
+    with pytest.raises(HTTPException) as exc_info:
+        service.import_dataset_from_draft(ADMIN_USER, "draft-1", "VIEW", VersionType.STANDARDISED)
+
+    assert exc_info.value.status_code == 400
+    assert any(expected_problem in problem for problem in exc_info.value.detail["problems"])

@@ -19,7 +19,7 @@ import yaml
 
 from dataio.api.database import functions as database
 from dataio.api.database.config import Session as DBSession
-from dataio.api.database.enums import VersionType
+from dataio.api.database.enums import SpatialResolution, TemporalResolution, VersionType
 from dataio.api.models import (
     DatasetCreate,
     DatasetDocumentationUpdate,
@@ -45,6 +45,33 @@ from dataio.validate import DataIOValidationService, DatasetKind, ValidationRequ
 
 logger = logging.getLogger(__name__)
 
+
+
+def _draft_info_problems(info: dict) -> list[str]:
+    """Values in a draft-derived info.yml that create_dataset would reject."""
+    problems = []
+    spatial_resolution = info.get("spatial_resolution")
+    if spatial_resolution not in {member.value for member in SpatialResolution}:
+        problems.append(
+            f"spatial_resolution {spatial_resolution!r} is not one of "
+            f"{', '.join(member.value for member in SpatialResolution)}"
+        )
+    temporal_resolution = info.get("temporal_resolution")
+    if temporal_resolution not in {member.value for member in TemporalResolution}:
+        problems.append(
+            f"temporal_resolution {temporal_resolution!r} is not one of "
+            f"{', '.join(member.value for member in TemporalResolution)} "
+            "(no year column with values was found)"
+        )
+    for key in ("temporal_coverage_start_date", "temporal_coverage_end_date"):
+        value = info.get(key)
+        if value is None:
+            continue
+        try:
+            database.parse_date(str(value))
+        except (ValueError, OverflowError):
+            problems.append(f"{key} {value!r} is not a valid date")
+    return problems
 
 class WebAdminService(BaseService):
     """Service for web admin operations."""
@@ -1451,7 +1478,29 @@ class WebAdminService(BaseService):
         if draft.status.value != "approved":
             raise HTTPException(status_code=400, detail="Approve this draft before uploading it.")
 
+        if database.check_if_dataset_exists(draft.dataset_id):
+            # import_dataset_package always creates the dataset; for an
+            # existing one it would commit a new raw dataset and then fail.
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Dataset {draft.dataset_id} already exists. Upload this draft's "
+                    "metadata.yaml through that dataset's manifest upload instead."
+                ),
+            )
+
         info_yaml = self.draft_review_service.generate_info_yaml(draft_id, access_level)["info_yaml"]
+        problems = _draft_info_problems(yaml.safe_load(info_yaml) or {})
+        if problems:
+            # Checked before anything is written: these values otherwise fail
+            # inside create_dataset after the raw dataset is already committed.
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "This draft can't be uploaded yet. Fix these values and approve it again.",
+                    "problems": problems,
+                },
+            )
 
         # Local import matches regenerate_draft's own convention
         # (draft_review_service.py) for reaching into draft_service.py.

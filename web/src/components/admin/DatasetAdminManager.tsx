@@ -365,14 +365,20 @@ export default function DatasetAdminManager({
     const requestId = documentationCheckRequestRef.current + 1;
     documentationCheckRequestRef.current = requestId;
     const refreshed = new Map<string, DocumentationSyncDatasetStatus>();
-    for (const dsId of dsIds) {
-      try {
-        const response = await api.adminCheckDocumentationSync(dsId);
-        for (const row of response.datasets) refreshed.set(row.ds_id, row);
-      } catch {
-        // Keep the row as it was; the sync summary already names failures.
+    // A few checks at a time: each reads S3, so one-by-one is slow for a big
+    // selection, and all at once would flood the API.
+    const queue = [...dsIds];
+    const worker = async () => {
+      for (let dsId = queue.shift(); dsId !== undefined; dsId = queue.shift()) {
+        try {
+          const response = await api.adminCheckDocumentationSync(dsId);
+          for (const row of response.datasets) refreshed.set(row.ds_id, row);
+        } catch {
+          // Keep the row as it was; the sync summary already names failures.
+        }
       }
-    }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, dsIds.length) }, worker));
     if (documentationCheckRequestRef.current !== requestId) return;
     setDocumentationStatuses((rows) => rows.map((row) => refreshed.get(row.ds_id) ?? row));
   };

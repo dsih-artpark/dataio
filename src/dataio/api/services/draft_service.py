@@ -398,9 +398,9 @@ def _resolve_and_reserve_raw_dataset_id(
         {"category": {"ID": category_id}, "collection": {"ID": collection_id}}
     )
     if not category:
-        raise ValueError(
-            "Cannot resolve rds_id: metadata has no category.ID and no collection.ID "
-            "to fall back to."
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot resolve the raw dataset ID: no category or collection ID was given.",
         )
     return reserve_next_raw_dataset_id(
         category, "Reserved for LLM-drafted metadata.yaml", created_by

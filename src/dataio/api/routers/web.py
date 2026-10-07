@@ -28,7 +28,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr
 
 from dataio.api.database.enums import VersionType
 from dataio.api.database.models import User
@@ -143,8 +143,9 @@ class DatasetDeleteVerifyRequest(BaseModel):
 
 
 class ReserveDatasetIdRequest(BaseModel):
-    # <collection ID><DS><4-digit catalogue-wide number>, e.g. CS0007DS0113
-    ds_id: str = Field(pattern=r"^[A-Z]{2}\d{4}DS\d{4}$")
+    # Format is checked by WebAdminService.reserve_dataset_id, which returns a
+    # readable 400 (a model pattern would return a 422 the UI can't show).
+    ds_id: str
     collection_id: Optional[str] = None
     note: Optional[str] = None
 

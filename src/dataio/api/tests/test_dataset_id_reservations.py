@@ -15,9 +15,8 @@ os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
 import pytest
 from fastapi import HTTPException
-from pydantic import ValidationError
 
-from dataio.api.database.functions import ReservedIdConflict
+from dataio.api.database.functions import IdCounterExhausted, ReservedIdConflict
 from dataio.api.routers.web import ReserveDatasetIdRequest
 from dataio.api.services.admin_dataset_service import AdminDatasetService
 from dataio.api.services.web_admin_service import WebAdminService
@@ -38,13 +37,19 @@ def service(monkeypatch):
 
 
 @pytest.mark.parametrize("ds_id", ["CS0007DS113", "cs0007ds0113", "CS0007DS0113 ", "CS7DS0113", "CSRDS16"])
-def test_reserve_request_rejects_malformed_dataset_ids(ds_id):
-    with pytest.raises(ValidationError):
-        ReserveDatasetIdRequest(ds_id=ds_id)
+def test_reserve_dataset_id_rejects_malformed_ids_with_a_readable_400(service, monkeypatch, ds_id):
+    monkeypatch.setattr(f"{DB}.create_reserved_dataset_id", _fail_if_reserved)
+
+    with pytest.raises(HTTPException) as exc_info:
+        service.reserve_dataset_id(ADMIN_USER, ds_id)
+
+    assert exc_info.value.status_code == 400
+    assert "is not a dataset ID like CS0007DS0113" in exc_info.value.detail
 
 
-def test_reserve_request_accepts_a_well_formed_dataset_id():
-    assert ReserveDatasetIdRequest(ds_id="CS0007DS0113").ds_id == "CS0007DS0113"
+def test_reserve_request_leaves_the_format_check_to_the_service():
+    # a model-level pattern would answer 422, which the admin UI shows as "Request failed"
+    assert ReserveDatasetIdRequest(ds_id="cs0007ds0113").ds_id == "cs0007ds0113"
 
 
 def test_reserve_dataset_id_rejects_an_id_from_another_collection(service, monkeypatch):
@@ -113,7 +118,7 @@ def test_suggest_next_dataset_id_reports_an_exhausted_counter_as_409(monkeypatch
     monkeypatch.setattr(f"{ADMIN_DB}.get_collection_by_identifier", lambda collection_id: KNOWN_COLLECTION)
 
     def exhausted(collection_id):
-        raise ValueError("The dataset number counter is past 9999; dataset IDs only have four digits.")
+        raise IdCounterExhausted("The dataset number counter is past 9999; dataset IDs only have four digits.")
 
     monkeypatch.setattr(f"{ADMIN_DB}.suggest_next_dataset_id", exhausted)
 
@@ -124,19 +129,22 @@ def test_suggest_next_dataset_id_reports_an_exhausted_counter_as_409(monkeypatch
     assert "9999" in exc_info.value.detail
 
 
-def test_suggest_next_raw_dataset_id_returns_404_for_an_unknown_collection(monkeypatch):
-    monkeypatch.setattr(f"{ADMIN_DB}.get_collection_by_identifier", lambda collection_id: None)
+def test_suggest_next_raw_dataset_id_still_suggests_for_a_collection_with_no_row_yet(monkeypatch):
+    # suggest_next_raw_dataset_id derives the category from the ID's prefix
+    # when no Collection row exists, so a brand-new collection still gets one
+    monkeypatch.setattr(f"{ADMIN_DB}.suggest_next_raw_dataset_id", lambda collection_id: "XXRDS1")
 
-    with pytest.raises(HTTPException) as exc_info:
-        AdminDatasetService().suggest_next_raw_dataset_id("XX0001")
+    result = AdminDatasetService().suggest_next_raw_dataset_id("XX0001")
 
-    assert exc_info.value.status_code == 404
+    assert result["suggested_raw_dataset_id"] == "XXRDS1"
 
 
-def test_suggest_raw_dataset_id_for_category_returns_404_for_an_unknown_category(monkeypatch):
-    monkeypatch.setattr(f"{ADMIN_DB}.category_exists", lambda category_id: False)
+def test_suggest_raw_dataset_id_for_category_suggests_for_a_category_with_no_collections_yet(monkeypatch):
+    # categories have no table; a new one exists only once a collection uses it
+    monkeypatch.setattr(
+        f"{ADMIN_DB}.suggest_next_raw_dataset_id_for_category", lambda category_id: "XYRDS1"
+    )
 
-    with pytest.raises(HTTPException) as exc_info:
-        AdminDatasetService().suggest_next_raw_dataset_id_for_category("XX")
+    result = AdminDatasetService().suggest_next_raw_dataset_id_for_category("XY")
 
-    assert exc_info.value.status_code == 404
+    assert result["suggested_raw_dataset_id"] == "XYRDS1"

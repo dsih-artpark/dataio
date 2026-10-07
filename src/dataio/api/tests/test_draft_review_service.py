@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import uuid
@@ -802,6 +803,37 @@ def test_generate_draft_from_upload_hides_unexpected_errors_behind_a_reference(m
     assert deleted == ["/uploads/csv-abc.csv", "/uploads/log-abc.yaml"]
 
 
+def test_generate_draft_from_upload_explains_a_csv_that_is_not_utf8(monkeypatch):
+    error, deleted = _generate_with_failure(
+        monkeypatch, UnicodeDecodeError("utf-8", b"\x92", 0, 1, "invalid start byte")
+    )
+
+    assert error.status_code == 400
+    assert "CSV UTF-8" in error.detail
+    assert len(deleted) == 2
+
+
+def test_generate_draft_from_upload_explains_a_csv_pandas_cannot_parse(monkeypatch):
+    from pandas.errors import ParserError
+
+    error, _ = _generate_with_failure(
+        monkeypatch, ParserError("Error tokenizing data. C error: Expected 3 fields in line 5, saw 4")
+    )
+
+    assert error.status_code == 400
+    assert "Expected 3 fields in line 5" in error.detail
+
+
+def test_generate_draft_from_upload_reports_an_exhausted_id_counter_as_409(monkeypatch):
+    error, _ = _generate_with_failure(
+        monkeypatch,
+        service_module.IdCounterExhausted("The dataset number counter is past 9999; dataset IDs only have four digits."),
+    )
+
+    assert error.status_code == 409
+    assert "9999" in error.detail
+
+
 def test_generate_draft_from_upload_passes_user_facing_errors_through(monkeypatch):
     error, deleted = _generate_with_failure(
         monkeypatch, HTTPException(status_code=400, detail="Collection 'XX0001' does not exist.")
@@ -1168,31 +1200,73 @@ def test_regenerate_gives_new_draft_its_own_file_copies(monkeypatch, tmp_path):
     assert open(new_csv).read() == "count\n1\n"
 
 
-def test_regenerate_drops_new_draft_when_original_changed_meanwhile(monkeypatch, tmp_path):
+NEW_DRAFT_ID = "22222222-2222-2222-2222-222222222222"
+
+
+def _regenerate_with_failing_status_update(monkeypatch, tmp_path, status_update):
+    """Regenerates a draft whose original changes (status_update raises) after
+    the new draft row exists. Returns (error, recorded generate kwargs,
+    deleted draft ids, released reservation ids, original csv path)."""
     monkeypatch.setattr("dataio.api.services.draft_upload_storage.DRAFT_UPLOAD_DIR", str(tmp_path))
     original_csv = tmp_path / "foo.csv"
     original_csv.write_text("count\n1\n")
     service = _make_service()
     original = _fake_draft(source_csv_path=f'{{"main": "{original_csv.as_posix()}"}}')
-    monkeypatch.setattr(service_module.database, "get_manifest_draft", lambda draft_id: original)
-    monkeypatch.setattr(service_module.database, "update_manifest_draft_status", _conflict_on_status_update)
-    deleted = []
-    monkeypatch.setattr(service_module.database, "delete_manifest_draft", deleted.append)
     recorded = {}
+
+    def get_manifest_draft(draft_id):
+        if str(draft_id) != NEW_DRAFT_ID:
+            return original
+        # the new draft row: same ids, its own copy of the CSV
+        return _fake_draft(
+            draft_id=uuid.UUID(NEW_DRAFT_ID),
+            source_csv_path=json.dumps({"main": recorded["csv_paths"][0]}),
+        )
 
     def fake_generate_draft(**kwargs):
         recorded.update(kwargs)
-        return SimpleNamespace(draft_id="new", model_dump=lambda: {"draft_id": "new"})
+        return SimpleNamespace(draft_id=NEW_DRAFT_ID, model_dump=lambda: {"draft_id": NEW_DRAFT_ID})
 
+    monkeypatch.setattr(service_module.database, "get_manifest_draft", get_manifest_draft)
+    monkeypatch.setattr(service_module.database, "update_manifest_draft_status", status_update)
+    monkeypatch.setattr(service_module.database, "check_if_dataset_exists", lambda dataset_id: False)
+    monkeypatch.setattr(service_module, "check_if_raw_dataset_exists", lambda rds_id: False)
+    deleted, released = [], []
+    monkeypatch.setattr(service_module.database, "delete_manifest_draft", deleted.append)
+    monkeypatch.setattr(service_module, "delete_reserved_dataset_id", released.append)
+    monkeypatch.setattr(service_module, "delete_reserved_raw_dataset_id", released.append)
     monkeypatch.setattr("dataio.api.services.draft_service.generate_draft", fake_generate_draft)
 
     with pytest.raises(HTTPException) as exc_info:
         service.regenerate_draft(str(original.draft_id), "reviewer@artpark.in")
+    return exc_info.value, recorded, deleted, released, original_csv
 
-    assert exc_info.value.status_code == 409
-    assert deleted == ["new"]
+
+def test_regenerate_drops_new_draft_when_original_changed_meanwhile(monkeypatch, tmp_path):
+    error, recorded, deleted, released, original_csv = _regenerate_with_failing_status_update(
+        monkeypatch, tmp_path, _conflict_on_status_update
+    )
+
+    assert error.status_code == 409
+    assert deleted == [NEW_DRAFT_ID]
+    # the original was rejected meanwhile, so no live draft holds the ids any more
+    assert released == ["CS0007DS0112", "CSRDS0016"]
     assert not os.path.exists(recorded["csv_paths"][0])
     assert original_csv.exists()
+
+
+def test_regenerate_drops_new_draft_when_original_was_deleted_meanwhile(monkeypatch, tmp_path):
+    def original_gone(draft_id, status, **kw):
+        raise ValueError(f"Manifest draft {draft_id} not found")
+
+    error, recorded, deleted, released, _ = _regenerate_with_failing_status_update(
+        monkeypatch, tmp_path, original_gone
+    )
+
+    assert error.status_code == 404
+    assert deleted == [NEW_DRAFT_ID]
+    assert released == ["CS0007DS0112", "CSRDS0016"]
+    assert not os.path.exists(recorded["csv_paths"][0])
 
 
 def test_delete_keeps_reservation_held_by_a_live_regenerated_draft(monkeypatch):

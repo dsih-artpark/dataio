@@ -112,18 +112,6 @@ def get_collection_by_identifier(collection_id: str):
         session.close()
 
 
-def category_exists(category_id: str) -> bool:
-    """Categories have no table of their own; one exists if a collection uses it."""
-    session = Session()
-    try:
-        return (
-            session.query(Collection.id).filter(Collection.category_id == category_id).first()
-            is not None
-        )
-    finally:
-        session.close()
-
-
 def get_raw_dataset_by_identifier(raw_dataset_id: str):
     session = Session()
     try:
@@ -157,6 +145,10 @@ def list_reserved_dataset_ids(search: str | None = None, limit: int = 100, offse
 
 class ReservedIdConflict(ValueError):
     """The ID, or for a dataset ID its catalogue-wide number, is already taken."""
+
+
+class IdCounterExhausted(ValueError):
+    """The four-digit dataset number counter has no numbers left."""
 
 
 # pg_advisory_xact_lock keys, one per ID counter. Held until the reserving
@@ -237,7 +229,7 @@ def reserve_next_dataset_id(collection_id: str, note: str | None, reserved_by: s
         _lock_id_counter(session, _DATASET_ID_LOCK_KEY)
         next_number = get_next_dataset_serial_number(session)
         if next_number > MAX_DATASET_SERIAL:
-            raise ValueError(
+            raise IdCounterExhausted(
                 f"The dataset number counter is past {MAX_DATASET_SERIAL}; "
                 "dataset IDs only have four digits."
             )
@@ -1153,7 +1145,7 @@ def suggest_next_dataset_id(collection_id: str) -> str:
     try:
         next_number = get_next_dataset_serial_number(session)
         if next_number > MAX_DATASET_SERIAL:
-            raise ValueError(
+            raise IdCounterExhausted(
                 f"The dataset number counter is past {MAX_DATASET_SERIAL}; "
                 "dataset IDs only have four digits."
             )

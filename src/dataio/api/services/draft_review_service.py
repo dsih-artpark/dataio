@@ -19,10 +19,12 @@ import uuid
 import httpx
 import yaml
 from fastapi import HTTPException, UploadFile
+from pandas.errors import EmptyDataError, ParserError
 
 from dataio.api.database import functions as database
 from dataio.api.database.functions import (
     DraftStatusConflict,
+    IdCounterExhausted,
     check_if_raw_dataset_exists,
     delete_reserved_dataset_id,
     delete_reserved_raw_dataset_id,
@@ -90,6 +92,11 @@ def parse_curator_input_json(text: str) -> dict:
 REVIEWABLE_STATUSES = ("pending", "flagged")
 
 
+def _delete_files(paths) -> None:
+    for path in paths:
+        delete_managed_file(path)
+
+
 def _status_conflict(exc: DraftStatusConflict) -> HTTPException:
     return HTTPException(status_code=409, detail=str(exc))
 
@@ -147,8 +154,7 @@ class DraftReviewService(BaseService):
             )
         except Exception as e:
             # No draft row points at these uploads, so nothing would ever delete them.
-            for path in [*csv_paths, digitization_log_path]:
-                delete_managed_file(path)
+            _delete_files([*csv_paths, digitization_log_path])
             raise self._generation_failed(e) from e
 
         return draft.model_dump()
@@ -196,8 +202,7 @@ class DraftReviewService(BaseService):
                 dataset_id=dataset_id,
             )
         except Exception as e:
-            for path in csv_paths:
-                delete_managed_file(path)
+            _delete_files(csv_paths)
             raise self._generation_failed(e) from e
 
         return draft.model_dump()
@@ -206,10 +211,24 @@ class DraftReviewService(BaseService):
         """A draft-generation failure as an HTTP error that names the cause
         without echoing internals (SQL, server paths, OpenRouter response
         bodies). Errors already meant for the user (HTTPException, e.g. an
-        unknown collection) pass through; anything else is logged in full
+        unknown collection) pass through, and problems the curator can fix in
+        their CSVs or IDs are explained; anything else is logged in full
         under a reference the message quotes."""
         if isinstance(exc, HTTPException):
             return exc
+        if isinstance(exc, UnicodeDecodeError):
+            return HTTPException(
+                status_code=400,
+                detail=(
+                    "A CSV file is not UTF-8 text. Save it as \"CSV UTF-8\" "
+                    "(in Excel: Save As > CSV UTF-8) and upload it again."
+                ),
+            )
+        if isinstance(exc, (ParserError, EmptyDataError)):
+            # pandas describes the file's own content (e.g. a row with too many fields)
+            return HTTPException(status_code=400, detail=f"A CSV file could not be read: {exc}")
+        if isinstance(exc, IdCounterExhausted):
+            return HTTPException(status_code=409, detail=str(exc))
         reference = uuid.uuid4().hex[:8]
         self.logger.error("Draft generation failed (reference %s)", reference, exc_info=exc)
         if isinstance(exc, DraftOutputError):
@@ -572,8 +591,7 @@ class DraftReviewService(BaseService):
                 digitization_log_path = copy_into_storage(original.digitization_log_path)
                 copied_paths.append(digitization_log_path)
         except OSError as exc:
-            for path in copied_paths:
-                delete_managed_file(path)
+            _delete_files(copied_paths)
             raise HTTPException(
                 status_code=400, detail="This draft's source files are no longer available."
             ) from exc
@@ -598,26 +616,29 @@ class DraftReviewService(BaseService):
                     # new one.
                     raw_dataset_id=original.raw_dataset_id,
                 )
-        except Exception as exc:
-            for path in copied_paths:
-                delete_managed_file(path)
-            raise self._generation_failed(exc) from exc
-        except BaseException:
-            for path in copied_paths:
-                delete_managed_file(path)
+        except BaseException as exc:
+            _delete_files(copied_paths)
+            if isinstance(exc, Exception):
+                raise self._generation_failed(exc) from exc
             raise
 
         try:
             database.update_manifest_draft_status(
                 draft_id, "rejected", expected_statuses=REVIEWABLE_STATUSES, reviewed_by=reviewed_by
             )
-        except DraftStatusConflict as exc:
-            # The original was approved/rejected while regenerating: drop the
-            # new draft rather than leave two drafts holding the same ids.
-            database.delete_manifest_draft(new_draft.draft_id)
-            for path in copied_paths:
-                delete_managed_file(path)
-            raise _status_conflict(exc) from exc
+        except ValueError as exc:  # DraftStatusConflict, or the original no longer exists
+            # The original was approved, rejected or deleted while regenerating:
+            # drop the new draft the normal way, so it also releases the ids no
+            # other live draft still holds, instead of leaving them reserved.
+            try:
+                self.delete_draft(str(new_draft.draft_id))
+            finally:
+                _delete_files(copied_paths)
+            if isinstance(exc, DraftStatusConflict):
+                raise _status_conflict(exc) from exc
+            raise HTTPException(
+                status_code=404, detail="This draft was deleted while it was being regenerated."
+            ) from exc
         return new_draft.model_dump()
 
     def _regenerate_deterministic_draft(self, original, csv_paths_by_table: dict, reviewed_by: str):

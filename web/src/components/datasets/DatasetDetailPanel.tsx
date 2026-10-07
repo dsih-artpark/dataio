@@ -423,6 +423,45 @@ export default function DatasetDetailPanel({
     }
   };
 
+  // JSON/YAML toggle + Download button, shown on both the Data Dictionary
+  // and the Manifest tab.
+  const renderMetadataDownloadControls = (disabled = false) => (
+    <div class="flex items-center gap-2">
+      <div class="flex items-center bg-gray-100 rounded-lg p-1">
+        <button
+          onClick={() => setMetadataFormat('json')}
+          class={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+            metadataFormat === 'json'
+              ? 'bg-white text-gray-900 shadow-sm'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          JSON
+        </button>
+        <button
+          onClick={() => setMetadataFormat('yaml')}
+          class={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+            metadataFormat === 'yaml'
+              ? 'bg-white text-gray-900 shadow-sm'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          YAML
+        </button>
+      </div>
+      <button
+        onClick={downloadMetadataOnly}
+        disabled={disabled}
+        class="flex items-center gap-1.5 px-3 py-1.5 bg-primary-600 text-white rounded-lg text-xs font-medium hover:bg-primary-700 transition-colors disabled:opacity-50"
+      >
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+        </svg>
+        Download
+      </button>
+    </div>
+  );
+
   // Download metadata only
   const downloadMetadataOnly = () => {
     if (!dataset) return;
@@ -733,39 +772,7 @@ export default function DatasetDetailPanel({
             {/* Download button and format toggle */}
             <div class="flex items-center justify-between">
               <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Data Dictionary</h3>
-              <div class="flex items-center gap-2">
-                <div class="flex items-center bg-gray-100 rounded-lg p-1">
-                  <button
-                    onClick={() => setMetadataFormat('json')}
-                    class={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
-                      metadataFormat === 'json'
-                        ? 'bg-white text-gray-900 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    JSON
-                  </button>
-                  <button
-                    onClick={() => setMetadataFormat('yaml')}
-                    class={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
-                      metadataFormat === 'yaml'
-                        ? 'bg-white text-gray-900 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    YAML
-                  </button>
-                </div>
-                <button
-                  onClick={downloadMetadataOnly}
-                  class="flex items-center gap-1.5 px-3 py-1.5 bg-primary-600 text-white rounded-lg text-xs font-medium hover:bg-primary-700 transition-colors"
-                >
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
-                  Download
-                </button>
-              </div>
+              {renderMetadataDownloadControls()}
             </div>
 
             {/* Table tabs */}
@@ -851,14 +858,17 @@ export default function DatasetDetailPanel({
 
         {activeTab === 'manifest' && (
           <div class="space-y-4">
-            <div class="flex items-center justify-between">
+            <div class="flex flex-wrap items-center justify-between gap-2">
               <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Data Dictionary</h3>
-              {manifestRecord?.manifest_updated_at && (
-                <p class="text-xs text-gray-500">
-                  Updated {new Date(manifestRecord.manifest_updated_at).toLocaleString()}
-                  {manifestRecord.manifest_updated_by ? ` by ${manifestRecord.manifest_updated_by}` : ''}
-                </p>
-              )}
+              <div class="flex flex-wrap items-center gap-3">
+                {manifestRecord?.manifest_updated_at && (
+                  <p class="text-xs text-gray-500">
+                    Updated {new Date(manifestRecord.manifest_updated_at).toLocaleString()}
+                    {manifestRecord.manifest_updated_by ? ` by ${manifestRecord.manifest_updated_by}` : ''}
+                  </p>
+                )}
+                {renderMetadataDownloadControls(manifestLoading)}
+              </div>
             </div>
 
             {manifestLoading && (

@@ -60,8 +60,10 @@ jobs:
             cd dataio
             mkdir logs
             uv sync --group docs --group api
-            uv run all-migrations
+            # Docs first: a failed docs build then stops the deploy before
+            # migrations, not between migrations and the restart.
             uv run sphinx-build -b html docs/source docs/build
+            uv run all-migrations
             sudo supervisorctl restart dataio-app
 
   deploy_web:

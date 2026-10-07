@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from io import BytesIO
@@ -16,6 +17,7 @@ import pytest
 from fastapi import HTTPException
 
 from dataio.api.database.enums import VersionType
+from dataio.api.database.functions import DatasetBusy
 from dataio.api.services.web_admin_service import WebAdminService
 
 ADMIN_USER = SimpleNamespace(email="admin@example.com", is_admin=True, is_group=False)
@@ -305,9 +307,10 @@ class _PackageImport:
     Records each call in order; a step named in fail_at raises instead."""
 
     def __init__(self, monkeypatch, *, existing_raw=None, fail_at=(), s3_has_files=False,
-                 ds_reservation=True, rds_reservation=True):
+                 ds_reservation=True, rds_reservation=True, lock_busy=False):
         self.calls = []
         self.fail_at = set(fail_at)
+        self.locks = []
         service = _service()
         self.service = service
         db = "dataio.api.services.web_admin_service.database"
@@ -324,6 +327,19 @@ class _PackageImport:
             "manifest_yaml": "datasetID: CS0007DS0999\n",
         })
         monkeypatch.setattr(f"{db}.get_raw_dataset_by_identifier", lambda rds_id: existing_raw)
+
+        @contextlib.contextmanager
+        def upload_lock(ds_id, *, exclusive):
+            if lock_busy:
+                raise DatasetBusy(f"Files are being uploaded to dataset {ds_id} right now")
+            self.locks.append(("acquired", ds_id, exclusive))
+            try:
+                yield
+            finally:
+                self.released_after = self.names()
+                self.locks.append(("released", ds_id, exclusive))
+
+        monkeypatch.setattr(f"{db}.dataset_upload_lock", upload_lock)
         monkeypatch.setattr(
             f"{db}.get_reserved_dataset_id",
             lambda ds_id: SimpleNamespace(collection_id="CS0007", note="Reserved for draft", reserved_by="curator@example.com")
@@ -484,3 +500,55 @@ def test_import_dataset_package_keeps_validation_findings_in_the_error(monkeypat
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["findings"] == [{"code": "x"}]
     assert exc_info.value.detail["undone"] is True
+
+
+def test_import_dataset_package_holds_the_dataset_upload_lock_for_the_whole_import(monkeypatch):
+    package = _PackageImport(monkeypatch, fail_at={"create_dataset_table"})
+
+    with pytest.raises(HTTPException):
+        package.run()
+
+    # taken exclusively before any write, released only after the undo ran
+    assert package.locks == [("acquired", DS_ID, True), ("released", DS_ID, True)]
+    assert "undo:delete_s3" in package.released_after
+    # the import's own uploads don't try to take the lock it already holds
+    _, table_kwargs = package.call("create_dataset_table")
+    assert table_kwargs == {"hold_upload_lock": False}
+
+
+def test_import_dataset_package_refuses_while_files_are_being_uploaded_to_the_dataset(monkeypatch):
+    package = _PackageImport(monkeypatch, lock_busy=True)
+
+    with pytest.raises(HTTPException) as exc_info:
+        package.run()
+
+    assert exc_info.value.status_code == 409
+    assert package.calls == []
+
+
+ADMIN_DB = "dataio.api.services.admin_dataset_service.database"
+
+
+@pytest.mark.parametrize("upload", ["create_dataset_table", "upsert_dataset_manifest"])
+def test_manual_uploads_take_the_shared_lock_and_refuse_during_an_import(monkeypatch, upload):
+    from dataio.api.services.admin_dataset_service import AdminDatasetService
+
+    service = AdminDatasetService()
+    taken = []
+
+    @contextlib.contextmanager
+    def import_running(ds_id, *, exclusive):
+        taken.append(exclusive)
+        raise DatasetBusy(f"Dataset {ds_id} is being imported right now; try again in a few minutes.")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(f"{ADMIN_DB}.dataset_upload_lock", import_running)
+    monkeypatch.setattr(service, f"_{upload}", lambda *a, **kw: pytest.fail("uploaded during an import"))
+    args = (DS_ID, VersionType.STANDARDISED, None, None if upload == "create_dataset_table" else "a@b.c")
+
+    with pytest.raises(HTTPException) as exc_info:
+        getattr(service, upload)(*args)
+
+    assert exc_info.value.status_code == 409
+    assert "being imported" in exc_info.value.detail
+    assert taken == [False]  # shared, so manual uploads don't block each other

@@ -1480,6 +1480,21 @@ class WebAdminService(BaseService):
                 },
             )
 
+        ds_id = preview["dataset"]["ds_id"]
+        # Held from the S3 pre-check until the import has finished or been
+        # undone. Manual table and manifest uploads take it shared, so none can
+        # write into the dataset's S3 folder that a failed import's undo deletes.
+        try:
+            with database.dataset_upload_lock(ds_id, exclusive=True):
+                return self._import_dataset_package_locked(
+                    admin_user, preview, csv_files, bucket_type
+                )
+        except database.DatasetBusy as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    def _import_dataset_package_locked(
+        self, admin_user: User, preview: dict, csv_files: List, bucket_type: VersionType
+    ) -> dict:
         raw_dataset_payload = preview["raw_dataset"]
         rds_id = raw_dataset_payload["rds_id"]
         dataset_payload = dict(preview["dataset"])
@@ -1549,6 +1564,7 @@ class WebAdminService(BaseService):
                     bucket_type,
                     table_file,
                     metadata_upload,
+                    hold_upload_lock=False,  # this import already holds it
                 )
                 uploaded_tables.append(table["table_name"])
 
@@ -1561,6 +1577,7 @@ class WebAdminService(BaseService):
                 bucket_type,
                 manifest_upload,
                 admin_user.email,
+                hold_upload_lock=False,  # this import already holds it
             )
         except Exception as exc:
             logger.exception("Import of dataset %s failed; undoing it", ds_id)

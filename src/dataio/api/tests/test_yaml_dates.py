@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import datetime
 import io
 import json
@@ -13,12 +14,22 @@ os.environ.setdefault("DB_PASSWORD", "password")
 os.environ.setdefault("DB_NAME", "catalogue")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
+import pytest
 from fastapi import UploadFile
 
 from dataio.api.models import VersionType
 from dataio.api.services.admin_dataset_service import AdminDatasetService
 from dataio.api.services.yaml_utils import stringify_yaml_dates
 from dataio.validate.reports.models import ValidationResult
+
+
+@pytest.fixture(autouse=True)
+def _no_dataset_upload_lock(monkeypatch):
+    """Manual uploads take a Postgres advisory lock; these unit tests have no DB."""
+    monkeypatch.setattr(
+        "dataio.api.services.admin_dataset_service.database.dataset_upload_lock",
+        lambda ds_id, exclusive: contextlib.nullcontext(),
+    )
 
 
 def test_stringify_yaml_dates_converts_nested_values_and_keys():

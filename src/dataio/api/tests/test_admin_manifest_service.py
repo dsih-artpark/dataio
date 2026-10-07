@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import contextlib
 import io
 import logging
 import os
 from types import SimpleNamespace
 
+import pytest
 from fastapi import HTTPException, UploadFile
 
 os.environ.setdefault("DB_HOST", "localhost")
@@ -20,6 +22,15 @@ from dataio.api.services.web_admin_service import WebAdminService
 from dataio.validate.reports.models import Finding, ValidationResult
 from dataio.api.database import functions as database_functions
 from dataio.api.models import DatasetDocumentationUpdate, DatasetUpdate
+
+
+@pytest.fixture(autouse=True)
+def _no_dataset_upload_lock(monkeypatch):
+    """Manual uploads take a Postgres advisory lock; these unit tests have no DB."""
+    monkeypatch.setattr(
+        "dataio.api.services.admin_dataset_service.database.dataset_upload_lock",
+        lambda ds_id, exclusive: contextlib.nullcontext(),
+    )
 
 
 def test_upsert_dataset_manifest_updates_filestore_and_db(monkeypatch):

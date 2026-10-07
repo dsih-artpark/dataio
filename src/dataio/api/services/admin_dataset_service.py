@@ -1,3 +1,4 @@
+import contextlib
 import gzip
 
 import yaml
@@ -329,16 +330,41 @@ class AdminDatasetService(BaseService):
                 status_code=500, detail="Failed to get dataset detail. Contact support."
             ) from e
 
+    def _upload_guard(self, dataset_id: str, hold_upload_lock: bool):
+        """Shared per-dataset upload lock, so a manual upload never runs while a
+        package import (which holds it exclusively) could undo the dataset."""
+        if not hold_upload_lock:
+            return contextlib.nullcontext()
+        return database.dataset_upload_lock(dataset_id, exclusive=False)
+
     def create_dataset_table(
         self,
         dataset_id: str,
         bucket_type: VersionType,
         file: UploadFile,
         table_metadata_file: UploadFile,
+        *,
+        hold_upload_lock: bool = True,
     ):
         """
-        Create/upload a dataset table.
+        Create/upload a dataset table. hold_upload_lock=False only for a caller
+        that already holds the dataset's upload lock (a package import).
         """
+        try:
+            with self._upload_guard(dataset_id, hold_upload_lock):
+                return self._create_dataset_table(
+                    dataset_id, bucket_type, file, table_metadata_file
+                )
+        except database.DatasetBusy as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+
+    def _create_dataset_table(
+        self,
+        dataset_id: str,
+        bucket_type: VersionType,
+        file: UploadFile,
+        table_metadata_file: UploadFile,
+    ):
         # Table metadata should also be provided
         try:
             # Check if dataset exists
@@ -463,6 +489,25 @@ class AdminDatasetService(BaseService):
         }
 
     def upsert_dataset_manifest(
+        self,
+        dataset_id: str,
+        bucket_type: VersionType,
+        manifest_file: UploadFile,
+        updated_by: str,
+        *,
+        hold_upload_lock: bool = True,
+    ):
+        """hold_upload_lock=False only for a caller that already holds the
+        dataset's upload lock (a package import)."""
+        try:
+            with self._upload_guard(dataset_id, hold_upload_lock):
+                return self._upsert_dataset_manifest(
+                    dataset_id, bucket_type, manifest_file, updated_by
+                )
+        except database.DatasetBusy as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+
+    def _upsert_dataset_manifest(
         self,
         dataset_id: str,
         bucket_type: VersionType,

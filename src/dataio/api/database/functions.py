@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from typing import List, Optional
 import logging
 import re
@@ -9,7 +10,7 @@ import dateutil
 from sqlalchemy import or_, select, text
 from datetime import datetime, timedelta
 
-from dataio.api.database.config import Session
+from dataio.api.database.config import Session, engine
 from dataio.api.database.enums import ResourceType, DatasetManifestDraftStatus
 
 from dataio.api.database.models import (
@@ -149,6 +150,59 @@ class ReservedIdConflict(ValueError):
 
 class IdCounterExhausted(ValueError):
     """The four-digit dataset number counter has no numbers left."""
+
+
+class DatasetBusy(ValueError):
+    """Another import or upload currently holds the dataset."""
+
+
+# Advisory-lock class for dataset_upload_lock; the second key is hashtext(ds_id).
+_DATASET_UPLOAD_LOCK_CLASS = 7_340_003
+
+
+@contextmanager
+def dataset_upload_lock(ds_id: str, *, exclusive: bool):
+    """Holds a per-dataset advisory lock for the duration of the block, on a
+    connection of its own (so it survives the commits made inside the block).
+    A package import takes it exclusively from its S3 pre-check until it has
+    finished or been undone; manual table and manifest uploads take it shared.
+    So a manual upload never lands in the S3 folder a failed import's undo
+    deletes, while manual uploads don't block each other. Raises DatasetBusy
+    instead of waiting when the other side holds it."""
+    lock, unlock = (
+        ("pg_try_advisory_lock", "pg_advisory_unlock")
+        if exclusive
+        else ("pg_try_advisory_lock_shared", "pg_advisory_unlock_shared")
+    )
+    params = {"lock_class": _DATASET_UPLOAD_LOCK_CLASS, "ds_id": ds_id}
+    conn = engine.connect()
+    try:
+        acquired = conn.execute(
+            text(f"SELECT {lock}(:lock_class, hashtext(:ds_id))"), params
+        ).scalar()
+        conn.commit()  # don't sit "idle in transaction" while the block runs
+    except Exception:
+        conn.close()
+        raise
+    if not acquired:
+        conn.close()
+        raise DatasetBusy(
+            f"Files are being uploaded to dataset {ds_id} right now; try again when that finishes."
+            if exclusive
+            else f"Dataset {ds_id} is being imported right now; try again in a few minutes."
+        )
+    try:
+        yield
+    finally:
+        try:
+            conn.execute(text(f"SELECT {unlock}(:lock_class, hashtext(:ds_id))"), params)
+            conn.commit()
+            conn.close()
+        except Exception:
+            # A session-level lock must never go back to the pool still held:
+            # discard the connection (closing it releases the lock).
+            logger.exception("Could not release the upload lock on dataset %s", ds_id)
+            conn.invalidate()
 
 
 # pg_advisory_xact_lock keys, one per ID counter. Held until the reserving

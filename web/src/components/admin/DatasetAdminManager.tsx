@@ -2242,8 +2242,8 @@ export default function DatasetAdminManager({
                         </div>
                       </div>
                     </div>
-                    <span class={`rounded-full px-3 py-1 text-xs font-medium ${item.needs_update ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
-                      {item.needs_update ? 'Outdated' : 'Up to date'}
+                    <span class={`rounded-full px-3 py-1 text-xs font-medium ${item.error ? 'bg-red-100 text-red-800' : item.needs_update ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                      {item.error ? 'Check failed' : item.needs_update ? 'Outdated' : 'Up to date'}
                     </span>
                   </div>
                 </div>

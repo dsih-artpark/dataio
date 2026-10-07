@@ -536,12 +536,36 @@ class AdminDatasetService(BaseService):
 
             results = []
             outdated = 0
+            errors = 0
             for current_dataset_id in dataset_ids:
-                status = get_dataset_documentation_status(
-                    session,
-                    self.filestore_service.bucket,
-                    current_dataset_id,
-                )
+                try:
+                    status = get_dataset_documentation_status(
+                        session,
+                        self.filestore_service.bucket,
+                        current_dataset_id,
+                    )
+                except Exception as e:
+                    if not check_all:
+                        raise
+                    # One unreadable dataset (S3 AccessDenied, non-UTF-8 README)
+                    # must not fail the whole check-all sweep.
+                    session.rollback()
+                    errors += 1
+                    self.logger.warning(
+                        f"Documentation sync check failed for {current_dataset_id}: {e!s}"
+                    )
+                    results.append(
+                        {
+                            "ds_id": current_dataset_id,
+                            "needs_update": False,
+                            "changed_fields": [],
+                            "has_remote_documentation": False,
+                            "manifest_updated_at": None,
+                            "documentation_synced_at": None,
+                            "error": "Could not check this dataset",
+                        }
+                    )
+                    continue
                 results.append(
                     {
                         "ds_id": current_dataset_id,
@@ -559,6 +583,7 @@ class AdminDatasetService(BaseService):
                 "datasets": results,
                 "total": len(results),
                 "outdated": outdated,
+                "errors": errors,
             }
         except (ValueError, ValidationError) as e:
             session.rollback()

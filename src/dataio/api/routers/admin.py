@@ -184,7 +184,7 @@ async def get_dataset_manifest(
 
 @admin_router.post("/manifest-drafts/generate", tags=["admin/manifest-drafts"])
 @admin_required
-async def generate_manifest_draft(
+def generate_manifest_draft(
     csv_files: List[UploadFile],
     category_id: str = Form(...),
     collection_id: str = Form(...),
@@ -208,7 +208,7 @@ async def generate_manifest_draft(
 
 @admin_router.post("/manifest-drafts/generate-deterministic", tags=["admin/manifest-drafts"])
 @admin_required
-async def generate_deterministic_manifest_draft(
+def generate_deterministic_manifest_draft(
     csv_files: List[UploadFile],
     category_id: str = Form(...),
     collection_id: str = Form(...),
@@ -276,7 +276,7 @@ async def delete_manifest_draft(
 
 @admin_router.post("/manifest-drafts/{draft_id}/validate", tags=["admin/manifest-drafts"])
 @admin_required
-async def revalidate_manifest_draft(
+def revalidate_manifest_draft(
     draft_id: str,
     user: User = Depends(get_user),
     draft_review_service: DraftReviewService = Depends(DraftReviewService),
@@ -307,7 +307,7 @@ async def reject_manifest_draft(
 
 @admin_router.put("/manifest-drafts/{draft_id}", tags=["admin/manifest-drafts"])
 @admin_required
-async def update_manifest_draft(
+def update_manifest_draft(
     draft_id: str,
     body: ManifestDraftEdit,
     user: User = Depends(get_user),
@@ -329,7 +329,7 @@ async def flag_manifest_draft_field(
 
 @admin_router.post("/manifest-drafts/{draft_id}/regenerate", tags=["admin/manifest-drafts"])
 @admin_required
-async def regenerate_manifest_draft(
+def regenerate_manifest_draft(
     draft_id: str,
     user: User = Depends(get_user),
     draft_review_service: DraftReviewService = Depends(DraftReviewService),

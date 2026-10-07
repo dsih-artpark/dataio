@@ -283,12 +283,14 @@ export interface DocumentationSyncDatasetStatus {
   documentation_synced_at?: string | null;
   updated?: boolean;
   skipped?: boolean;
+  error?: string;
 }
 
 export interface DocumentationSyncCheckResponse {
   datasets: DocumentationSyncDatasetStatus[];
   total: number;
   outdated: number;
+  errors?: number;
 }
 
 export interface DocumentationSyncRunResponse {

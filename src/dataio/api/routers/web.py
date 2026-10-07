@@ -1629,7 +1629,7 @@ async def admin_upsert_dataset_manifest(
 
 
 @web_router.post("/admin/manifest-drafts/generate", tags=["web-admin/manifest-drafts"])
-async def web_generate_manifest_draft(
+def web_generate_manifest_draft(
     csv_files: List[UploadFile] = File(...),
     category_id: str = Form(...),
     collection_id: str = Form(...),
@@ -1653,7 +1653,7 @@ async def web_generate_manifest_draft(
 @web_router.post(
     "/admin/manifest-drafts/generate-deterministic", tags=["web-admin/manifest-drafts"]
 )
-async def web_generate_deterministic_manifest_draft(
+def web_generate_deterministic_manifest_draft(
     csv_files: List[UploadFile] = File(...),
     category_id: str = Form(...),
     collection_id: str = Form(...),
@@ -1684,7 +1684,7 @@ async def web_classify_columns(
 
 
 @web_router.post("/admin/manifest-drafts/infer-coverage", tags=["web-admin/manifest-drafts"])
-async def web_infer_dataset_coverage(
+def web_infer_dataset_coverage(
     csv_files: List[UploadFile] = File(...),
     user: User = Depends(get_current_web_user),
     admin_service: WebAdminService = Depends(WebAdminService),
@@ -1728,7 +1728,7 @@ async def web_delete_manifest_draft(
 
 
 @web_router.post("/admin/manifest-drafts/{draft_id}/validate", tags=["web-admin/manifest-drafts"])
-async def web_revalidate_manifest_draft(
+def web_revalidate_manifest_draft(
     draft_id: str,
     user: User = Depends(get_current_web_user),
     admin_service: WebAdminService = Depends(WebAdminService),
@@ -1756,7 +1756,7 @@ async def web_reject_manifest_draft(
 
 
 @web_router.put("/admin/manifest-drafts/{draft_id}", tags=["web-admin/manifest-drafts"])
-async def web_update_manifest_draft(
+def web_update_manifest_draft(
     draft_id: str,
     body: ManifestDraftEdit,
     user: User = Depends(get_current_web_user),
@@ -1776,7 +1776,7 @@ async def web_flag_manifest_draft_field(
 
 
 @web_router.post("/admin/manifest-drafts/{draft_id}/regenerate", tags=["web-admin/manifest-drafts"])
-async def web_regenerate_manifest_draft(
+def web_regenerate_manifest_draft(
     draft_id: str,
     user: User = Depends(get_current_web_user),
     admin_service: WebAdminService = Depends(WebAdminService),
@@ -1799,7 +1799,7 @@ async def web_generate_manifest_draft_info_yaml(
 @web_router.post(
     "/admin/manifest-drafts/{draft_id}/import", tags=["web-admin/manifest-drafts"]
 )
-async def web_import_dataset_from_draft(
+def web_import_dataset_from_draft(
     draft_id: str,
     body: ManifestDraftImportRequest,
     user: User = Depends(get_current_web_user),
@@ -1813,7 +1813,7 @@ async def web_import_dataset_from_draft(
 
 
 @web_router.get("/admin/documentation-sync", tags=["web-admin/datasets"])
-async def admin_check_documentation_sync(
+def admin_check_documentation_sync(
     dataset_id: Optional[str] = None,
     check_all: bool = False,
     user: User = Depends(get_current_web_user),
@@ -1827,7 +1827,7 @@ async def admin_check_documentation_sync(
 
 
 @web_router.post("/admin/documentation-sync", tags=["web-admin/datasets"])
-async def admin_run_documentation_sync(
+def admin_run_documentation_sync(
     body: DocumentationSyncRequest,
     user: User = Depends(get_current_web_user),
     admin_service: WebAdminService = Depends(WebAdminService),

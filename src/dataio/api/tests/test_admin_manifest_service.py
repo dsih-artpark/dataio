@@ -253,6 +253,54 @@ def test_check_dataset_documentation_sync_check_all_checks_every_dataset(monkeyp
     assert {row["ds_id"] for row in result["datasets"]} == {"CS0001DS0001", "CS0002DS0002"}
 
 
+
+def test_check_dataset_documentation_sync_check_all_isolates_failing_datasets(monkeypatch):
+    """One dataset whose S3 objects can't be read must not fail the whole sweep."""
+    service = object.__new__(AdminDatasetService)
+    service.logger = logging.getLogger(__name__)
+    service.filestore_service = SimpleNamespace(bucket="test-bucket")
+
+    class RowsResult:
+        def all(self):
+            return [("CS0001DS0001",), ("CS0002DS0002",)]
+
+    class SessionStub:
+        def execute(self, query):
+            return RowsResult()
+
+        def rollback(self):
+            return None
+
+        def close(self):
+            return None
+
+    service.db_session_factory = lambda: SessionStub()
+
+    def fake_status(session, bucket, dataset_id):
+        if dataset_id == "CS0001DS0001":
+            raise RuntimeError("AccessDenied")
+        return {
+            "needs_update": True,
+            "changed_fields": ["manifest"],
+            "has_remote_documentation": True,
+            "manifest_updated_at": None,
+            "documentation_synced_at": None,
+        }
+
+    monkeypatch.setattr(
+        "dataio.api.services.admin_dataset_service.get_dataset_documentation_status",
+        fake_status,
+    )
+
+    result = service.check_dataset_documentation_sync(check_all=True)
+
+    assert result["total"] == 2
+    assert result["outdated"] == 1
+    assert result["errors"] == 1
+    failed = next(row for row in result["datasets"] if row["ds_id"] == "CS0001DS0001")
+    assert failed["error"]
+    assert failed["needs_update"] is False
+
 def test_sync_dataset_documentation_requires_dataset_id():
     service = object.__new__(AdminDatasetService)
     service.logger = logging.getLogger(__name__)

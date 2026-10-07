@@ -145,6 +145,7 @@ export default function DatasetAdminManager({
   const [nextRawDatasetIdLoading, setNextRawDatasetIdLoading] = useState(false);
   const nextDatasetIdRequestRef = useRef(0);
   const nextRawDatasetIdRequestRef = useRef(0);
+  const documentationCheckRequestRef = useRef(0);
   const rawDatasetIdSuggestRequestRef = useRef('');
   const [loading, setLoading] = useState(true);
   const [loadingDatasetDetail, setLoadingDatasetDetail] = useState(false);
@@ -322,29 +323,58 @@ export default function DatasetAdminManager({
     }
   };
 
+  // Each documentation check takes the next request id; a response is shown
+  // only if no newer check started meanwhile, so a slow "Check all" can't
+  // overwrite a later single-dataset check.
   const loadDocumentationStatuses = async (datasetId?: string) => {
+    const requestId = documentationCheckRequestRef.current + 1;
+    documentationCheckRequestRef.current = requestId;
     try {
       const response = await api.adminCheckDocumentationSync(datasetId);
+      if (documentationCheckRequestRef.current !== requestId) return;
       setDocumentationStatuses(response.datasets);
       setDocumentationStatusesCheckedAll(false);
       setSelectedSyncIds(new Set());
     } catch (err) {
+      if (documentationCheckRequestRef.current !== requestId) return;
       setErrorMessage(err instanceof Error ? err.message : 'Failed to check documentation sync');
     }
   };
 
   const loadAllDocumentationStatuses = async () => {
+    const requestId = documentationCheckRequestRef.current + 1;
+    documentationCheckRequestRef.current = requestId;
     setCheckingAllDocumentationStatus(true);
     try {
       const response = await api.adminCheckDocumentationSync(undefined, true);
+      if (documentationCheckRequestRef.current !== requestId) return;
       setDocumentationStatuses(response.datasets);
       setDocumentationStatusesCheckedAll(true);
       setSelectedSyncIds(new Set());
     } catch (err) {
+      if (documentationCheckRequestRef.current !== requestId) return;
       setErrorMessage(err instanceof Error ? err.message : 'Failed to check documentation sync');
     } finally {
       setCheckingAllDocumentationStatus(false);
     }
+  };
+
+  // Re-checks only these datasets and updates their rows in place - after a
+  // bulk sync, re-checking every dataset in filestore again is slow.
+  const refreshDocumentationStatuses = async (dsIds: string[]) => {
+    const requestId = documentationCheckRequestRef.current + 1;
+    documentationCheckRequestRef.current = requestId;
+    const refreshed = new Map<string, DocumentationSyncDatasetStatus>();
+    for (const dsId of dsIds) {
+      try {
+        const response = await api.adminCheckDocumentationSync(dsId);
+        for (const row of response.datasets) refreshed.set(row.ds_id, row);
+      } catch {
+        // Keep the row as it was; the sync summary already names failures.
+      }
+    }
+    if (documentationCheckRequestRef.current !== requestId) return;
+    setDocumentationStatuses((rows) => rows.map((row) => refreshed.get(row.ds_id) ?? row));
   };
 
   const toggleSyncSelection = (dsId: string) => {
@@ -809,8 +839,17 @@ export default function DatasetAdminManager({
   // route, unlike the check_all=true read path) - so a multi-select "sync
   // these N" is a sequential loop over the same single-dataset endpoint
   // "Sync selected" already uses, not a new backend capability.
+  // Only ticked rows the "Show only outdated" filter currently shows count:
+  // a ticked row hidden by the filter is never synced unseen.
+  const visibleDocumentationStatuses = documentationStatuses.filter(
+    (item) => !(documentationStatusesCheckedAll && showOnlyOutdated) || item.needs_update
+  );
+  const visibleSelectedSyncIds = visibleDocumentationStatuses
+    .filter((item) => selectedSyncIds.has(item.ds_id))
+    .map((item) => item.ds_id);
+
   const handleSyncSelectedItems = async () => {
-    const ids = Array.from(selectedSyncIds);
+    const ids = visibleSelectedSyncIds;
     if (ids.length === 0) return;
     setSyncingSelectedIds(true);
     setErrorMessage('');
@@ -832,11 +871,7 @@ export default function DatasetAdminManager({
     } else {
       setStatusMessage(`Documentation sync finished. Updated ${updatedCount} of ${ids.length} selected dataset(s).`);
     }
-    if (documentationStatusesCheckedAll) {
-      await loadAllDocumentationStatuses();
-    } else {
-      await loadDocumentationStatuses(selectedDatasetId || undefined);
-    }
+    await refreshDocumentationStatuses(ids);
   };
 
   const handleQuickAccessLevelUpdate = async (datasetId: string, accessLevel: string) => {
@@ -2201,16 +2236,16 @@ export default function DatasetAdminManager({
           </div>
         ) : null}
 
-        {selectedSyncIds.size > 0 ? (
+        {visibleSelectedSyncIds.length > 0 ? (
           <div class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-300 bg-white px-4 py-2">
-            <p class="text-sm text-slate-700">{selectedSyncIds.size} dataset(s) checked</p>
+            <p class="text-sm text-slate-700">{visibleSelectedSyncIds.length} dataset(s) checked</p>
             <button
               type="button"
               onClick={handleSyncSelectedItems}
               disabled={syncingSelectedIds}
               class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
             >
-              {syncingSelectedIds ? 'Syncing…' : `Sync ${selectedSyncIds.size} checked`}
+              {syncingSelectedIds ? 'Syncing…' : `Sync ${visibleSelectedSyncIds.length} checked`}
             </button>
           </div>
         ) : null}
@@ -2219,8 +2254,7 @@ export default function DatasetAdminManager({
           {documentationStatuses.length === 0 ? (
             <p class="text-sm text-slate-500">Run a check to see documentation sync status.</p>
           ) : (
-            documentationStatuses
-              .filter((item) => !(documentationStatusesCheckedAll && showOnlyOutdated) || item.needs_update)
+            visibleDocumentationStatuses
               .map((item) => (
                 <div key={item.ds_id} class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                   <div class="flex flex-wrap items-center justify-between gap-3">

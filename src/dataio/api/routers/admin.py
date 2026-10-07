@@ -1,9 +1,9 @@
 from fastapi import HTTPException, Depends, APIRouter, Form, UploadFile
 from typing import List
-import json
 import logging
 from dataio.api.auth import get_user, admin_required
 from dataio.api.services import AdminUserManagementService, AdminDatasetService, DraftReviewService
+from dataio.api.services.draft_review_service import parse_curator_input_json
 from dataio.api.models import (
     ClassifyColumnsRequest,
     DatasetCreate,
@@ -225,7 +225,7 @@ def generate_deterministic_manifest_draft(
         collection_id=collection_id,
         data_owner_name=data_owner_name,
         created_by=created_by or user.email,
-        curator_input=json.loads(curator_input),
+        curator_input=parse_curator_input_json(curator_input),
         dataset_id=dataset_id,
     )
 

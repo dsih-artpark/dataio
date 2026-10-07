@@ -13,6 +13,10 @@ will ever go on to consume it itself.
 
 from __future__ import annotations
 
+import json
+import uuid
+
+import httpx
 import yaml
 from fastapi import HTTPException, UploadFile
 
@@ -24,8 +28,10 @@ from dataio.api.database.functions import (
     delete_reserved_raw_dataset_id,
 )
 from dataio.api.services.base_service import BaseService
+from dataio.api.services.draft_service import DraftOutputError
 from dataio.api.services.draft_upload_storage import copy_into_storage, delete_managed_file, save_upload
 from dataio.api.services.manifest_v2_conversion import convert_v2_manifest_to_contract
+from dataio.api.services.openrouter_draft_client import OpenRouterError
 from dataio.api.services.yaml_utils import stringify_yaml_dates
 from dataio.validate.sdk import DataIOValidator
 
@@ -55,7 +61,28 @@ def _draft_to_dict(draft, *, dataset_exists: bool | None = None) -> dict:
         "reviewed_by": draft.reviewed_by,
         "reviewed_at": draft.reviewed_at.isoformat() if draft.reviewed_at else None,
         "superseded_by_draft_id": str(draft.superseded_by_draft_id) if draft.superseded_by_draft_id else None,
+        # "Upload dataset now" record (see web_admin_service.import_dataset_from_draft).
+        "import_started_at": (
+            draft.import_started_at.isoformat() if draft.import_started_at else None
+        ),
+        "import_running": database.draft_import_running(draft),
+        "imported_at": draft.imported_at.isoformat() if draft.imported_at else None,
+        "imported_by": draft.imported_by,
+        "import_result": draft.import_result,
     }
+
+
+def parse_curator_input_json(text: str) -> dict:
+    """The deterministic-draft form's curator_input field, which must be a JSON object."""
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=400, detail=f"curator_input is not valid JSON: {exc.msg}"
+        ) from exc
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=400, detail="curator_input must be a JSON object.")
+    return value
 
 
 # A draft can be reviewed (approved, rejected, flagged, edited, regenerated)
@@ -69,7 +96,10 @@ def _status_conflict(exc: DraftStatusConflict) -> HTTPException:
 
 class DraftReviewService(BaseService):
     def _get_draft_or_404(self, draft_id: str):
-        draft = database.get_manifest_draft(draft_id)
+        try:
+            draft = database.get_manifest_draft(draft_id)
+        except ValueError:  # not a UUID, so no such draft
+            draft = None
         if not draft:
             raise HTTPException(status_code=404, detail=f"Manifest draft {draft_id} not found")
         return draft
@@ -116,8 +146,10 @@ class DraftReviewService(BaseService):
                 digitization_log_path=digitization_log_path,
             )
         except Exception as e:
-            self.logger.error(f"Failed to generate manifest draft: {e!s}")
-            raise HTTPException(status_code=502, detail=f"Draft generation failed: {e}") from e
+            # No draft row points at these uploads, so nothing would ever delete them.
+            for path in [*csv_paths, digitization_log_path]:
+                delete_managed_file(path)
+            raise self._generation_failed(e) from e
 
         return draft.model_dump()
 
@@ -164,10 +196,47 @@ class DraftReviewService(BaseService):
                 dataset_id=dataset_id,
             )
         except Exception as e:
-            self.logger.error(f"Failed to generate deterministic manifest draft: {e!s}")
-            raise HTTPException(status_code=502, detail=f"Draft generation failed: {e}") from e
+            for path in csv_paths:
+                delete_managed_file(path)
+            raise self._generation_failed(e) from e
 
         return draft.model_dump()
+
+    def _generation_failed(self, exc: Exception) -> HTTPException:
+        """A draft-generation failure as an HTTP error that names the cause
+        without echoing internals (SQL, server paths, OpenRouter response
+        bodies). Errors already meant for the user (HTTPException, e.g. an
+        unknown collection) pass through; anything else is logged in full
+        under a reference the message quotes."""
+        if isinstance(exc, HTTPException):
+            return exc
+        reference = uuid.uuid4().hex[:8]
+        self.logger.error("Draft generation failed (reference %s)", reference, exc_info=exc)
+        if isinstance(exc, DraftOutputError):
+            return HTTPException(
+                status_code=502,
+                detail=(
+                    "The AI's reply could not be turned into a draft after several attempts. "
+                    f"Try again, or generate a deterministic draft (reference {reference})."
+                ),
+            )
+        if isinstance(exc, (httpx.HTTPError, OpenRouterError)):
+            return HTTPException(
+                status_code=502,
+                detail=(
+                    "The AI drafting service (OpenRouter) failed or rejected the request. "
+                    "Check its API key, credits and model setting, or generate a "
+                    "deterministic draft "
+                    f"(reference {reference})."
+                ),
+            )
+        return HTTPException(
+            status_code=500,
+            detail=(
+                "Draft generation failed unexpectedly. The server log has the details "
+                f"under reference {reference}."
+            ),
+        )
 
     def classify_columns(self, *, column_names: list[str]) -> dict:
         """Backs the intake form's dynamic per-column description prompts:
@@ -409,6 +478,14 @@ class DraftReviewService(BaseService):
         permanently squat on those IDs and leak disk space.
         """
         draft = self._get_draft_or_404(draft_id)
+        if database.draft_import_running(draft):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "This draft is being uploaded right now. "
+                    "Wait for the upload to finish before deleting it."
+                ),
+            )
         self._release_reservations(draft)
         self._delete_uploaded_files(draft)
         database.delete_manifest_draft(draft_id)
@@ -521,6 +598,10 @@ class DraftReviewService(BaseService):
                     # new one.
                     raw_dataset_id=original.raw_dataset_id,
                 )
+        except Exception as exc:
+            for path in copied_paths:
+                delete_managed_file(path)
+            raise self._generation_failed(exc) from exc
         except BaseException:
             for path in copied_paths:
                 delete_managed_file(path)

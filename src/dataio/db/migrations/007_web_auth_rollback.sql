@@ -27,6 +27,6 @@ ALTER TABLE users ADD CONSTRAINT valid_user_group CHECK (
 DROP FUNCTION IF EXISTS cleanup_expired_auth_data();
 
 -- Remove migration record
-DELETE FROM migrations WHERE migration_number = 7;
+DELETE FROM db_migration_history WHERE migration_number = 7;
 
 COMMIT;

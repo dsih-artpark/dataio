@@ -437,7 +437,13 @@ export default function DatasetDetailPanel({
     const manifestJson = manifestRecord?.manifest_json || dataset.manifest_json;
     const dataDictJson = dataset.data_dictionary_json;
 
-    if (metadataFormat === 'json') {
+    if (metadataFormat === 'json' && !manifestJson && !dataDictJson && manifestYaml) {
+      // No YAML parser in this file to convert yaml -> json (same as the zip
+      // download above): give the YAML as a .yaml file, not YAML named .json.
+      content = manifestYaml;
+      filename = `${dataset.ds_id}_${safeTitle}_metadata.yaml`;
+      mimeType = 'text/yaml';
+    } else if (metadataFormat === 'json') {
       if (manifestJson) {
         content = JSON.stringify(manifestJson, null, 2);
       } else if (dataDictJson) {
@@ -447,8 +453,6 @@ export default function DatasetDetailPanel({
         } catch {
           content = dataDictJson;
         }
-      } else if (manifestYaml) {
-        content = manifestYaml;
       } else {
         return;
       }

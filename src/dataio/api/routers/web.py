@@ -28,7 +28,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 from dataio.api.database.enums import VersionType
 from dataio.api.database.models import User
@@ -46,6 +46,7 @@ from dataio.api.models import (
     RawDatasetCreate,
     RawDatasetUpdate,
 )
+from dataio.api.services.draft_review_service import parse_curator_input_json
 from dataio.api.services.web_auth_service import WebAuthService
 from dataio.api.services.web_admin_service import WebAdminService
 from dataio.api.services.web_user_service import WebUserService
@@ -142,7 +143,8 @@ class DatasetDeleteVerifyRequest(BaseModel):
 
 
 class ReserveDatasetIdRequest(BaseModel):
-    ds_id: str
+    # <collection ID><DS><4-digit catalogue-wide number>, e.g. CS0007DS0113
+    ds_id: str = Field(pattern=r"^[A-Z]{2}\d{4}DS\d{4}$")
     collection_id: Optional[str] = None
     note: Optional[str] = None
 
@@ -1464,7 +1466,7 @@ async def admin_update_dataset_documentation(
 
 
 @web_router.post("/admin/datasets/import/preview", tags=["web-admin/datasets"])
-async def admin_preview_dataset_import(
+def admin_preview_dataset_import(
     info_file: UploadFile = File(...),
     metadata_file: UploadFile = File(...),
     csv_files: List[UploadFile] = File(default=[]),
@@ -1487,7 +1489,7 @@ async def admin_preview_dataset_import(
 
 
 @web_router.post("/admin/datasets/import/apply", tags=["web-admin/datasets"])
-async def admin_apply_dataset_import(
+def admin_apply_dataset_import(
     info_file: UploadFile = File(...),
     metadata_file: UploadFile = File(...),
     csv_files: List[UploadFile] = File(...),
@@ -1669,7 +1671,7 @@ def web_generate_deterministic_manifest_draft(
         category_id,
         collection_id,
         data_owner_name,
-        json.loads(curator_input),
+        parse_curator_input_json(curator_input),
         dataset_id=dataset_id,
     )
 

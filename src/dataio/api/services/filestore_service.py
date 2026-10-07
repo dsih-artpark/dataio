@@ -1,3 +1,4 @@
+import codecs
 import json
 import os
 from pathlib import Path
@@ -142,6 +143,11 @@ class FilestoreService(BaseService):
             metadata_object["tables"][table_metadata.table_name] = (
                 table_metadata.model_dump()
             )
+            # Store Excel "CSV UTF-8" files without their byte-order mark, so
+            # every later reader sees the real first column name.
+            file.file.seek(0)
+            if file.file.read(len(codecs.BOM_UTF8)) != codecs.BOM_UTF8:
+                file.file.seek(0)
             self.bucket.upload_fileobj(file.file, remote_filepath)
             self.bucket.put_object(
                 Body=json.dumps(metadata_object).encode("UTF-8"),
@@ -253,8 +259,9 @@ class FilestoreService(BaseService):
             if Path(file_name).suffix.lower() != ".csv":
                 continue
 
+            # utf-8-sig: tables uploaded before BOMs were stripped may still have one
             table_sources[Path(file_name).stem] = (
-                self.bucket.Object(key).get()["Body"].read().decode("utf-8")
+                self.bucket.Object(key).get()["Body"].read().decode("utf-8-sig")
             )
         return table_sources
 
@@ -355,6 +362,13 @@ class FilestoreService(BaseService):
         except Exception as e:
             self.logger.error(f"Failed to delete file: {e!s}")
             raise e
+
+    def dataset_has_objects(self, dataset_id: str) -> bool:
+        """True if any file exists under the dataset's S3 folders."""
+        return any(
+            self._list_dataset_objects(dataset_id, version_type)
+            for version_type in (VersionType.STANDARDISED, VersionType.PREPROCESSED)
+        )
 
     def rename_dataset(self, old_dataset_id: str, new_dataset_id: str) -> None:
         for version_type in (VersionType.STANDARDISED, VersionType.PREPROCESSED):

@@ -204,6 +204,8 @@ class AdminDatasetService(BaseService):
             ) from e
 
     def suggest_next_raw_dataset_id_for_category(self, category_id: str):
+        if category_id.strip() and not database.category_exists(category_id):
+            raise HTTPException(status_code=404, detail=f"Category {category_id} does not exist.")
         try:
             if not category_id.strip():
                 raise ValidationError("Category ID is required")
@@ -221,6 +223,7 @@ class AdminDatasetService(BaseService):
             ) from e
 
     def suggest_next_dataset_id(self, collection_id: str):
+        self._require_known_collection(collection_id)
         try:
             if not collection_id.strip():
                 raise ValidationError("Collection ID is required")
@@ -231,13 +234,23 @@ class AdminDatasetService(BaseService):
         except ValidationError as e:
             self.logger.error(f"Failed to suggest dataset id: {e!s}")
             raise HTTPException(status_code=400, detail=str(e)) from e
+        except ValueError as e:  # the four-digit dataset number counter is used up
+            self.logger.error(f"Failed to suggest dataset id: {e!s}")
+            raise HTTPException(status_code=409, detail=str(e)) from e
         except Exception as e:
             self.logger.error(f"Failed to suggest dataset id: {e!s}")
             raise HTTPException(
                 status_code=500, detail="Failed to suggest dataset ID. Contact support."
             ) from e
 
+    def _require_known_collection(self, collection_id: str) -> None:
+        if collection_id.strip() and database.get_collection_by_identifier(collection_id) is None:
+            raise HTTPException(
+                status_code=404, detail=f"Collection {collection_id} does not exist."
+            )
+
     def suggest_next_raw_dataset_id(self, collection_id: str):
+        self._require_known_collection(collection_id)
         try:
             if not collection_id.strip():
                 raise ValidationError("Collection ID is required")

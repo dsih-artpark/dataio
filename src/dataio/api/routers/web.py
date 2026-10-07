@@ -22,6 +22,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     Request,
     Response,
     UploadFile,
@@ -2070,8 +2071,9 @@ async def admin_get_download_metrics(
     dataset_id: Optional[str] = None,
     user_email: Optional[str] = None,
     channel: Optional[str] = None,
-    limit: int = 100,
-    offset: int = 0,
+    # The admin CSV export requests up to 100000 rows in one call
+    limit: int = Query(100, ge=1, le=100000),
+    offset: int = Query(0, ge=0),
     user: User = Depends(get_current_web_user),
     admin_service: WebAdminService = Depends(WebAdminService),
 ):

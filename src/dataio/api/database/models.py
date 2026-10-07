@@ -13,7 +13,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import backref, relationship, declarative_base
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 from dataio.api.database.enums import (
     AccessLevel,
@@ -458,7 +458,9 @@ class DatasetDownload(Base):
     access_channel = Column(Text, nullable=False, default="WEB")  # 'WEB', 'SDK', 'MCP'
     ip_address = Column(Text, nullable=True)
     user_agent = Column(Text, nullable=True)
-    downloaded_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    # TIMESTAMPTZ in migration 022: write an aware UTC value so the stored
+    # instant doesn't depend on the database session's TimeZone
+    downloaded_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Relationship
     user = relationship("User", backref=backref("downloads", passive_deletes=True))

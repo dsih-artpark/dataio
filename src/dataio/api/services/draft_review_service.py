@@ -13,7 +13,6 @@ will ever go on to consume it itself.
 
 from __future__ import annotations
 
-import datetime
 import os
 
 import yaml
@@ -28,6 +27,7 @@ from dataio.api.database.functions import (
 from dataio.api.services.base_service import BaseService
 from dataio.api.services.draft_upload_storage import save_upload
 from dataio.api.services.manifest_v2_conversion import convert_v2_manifest_to_contract
+from dataio.api.services.yaml_utils import stringify_yaml_dates
 from dataio.validate.sdk import DataIOValidator
 
 
@@ -57,25 +57,6 @@ def _draft_to_dict(draft, *, dataset_exists: bool | None = None) -> dict:
         "reviewed_at": draft.reviewed_at.isoformat() if draft.reviewed_at else None,
         "superseded_by_draft_id": str(draft.superseded_by_draft_id) if draft.superseded_by_draft_id else None,
     }
-
-
-def _stringify_dates(value):
-    """yaml.safe_load implicitly parses an ISO-8601-looking scalar (e.g. a
-    temporalCoverage value like "2019-06-30") into a datetime.date/datetime
-    object - every manifest field is a plain string everywhere else in the
-    app (CuratorMetadataInput, field_inference, etc. never produce a real
-    date object), and the JSONB column's json serializer has no idea how to
-    write one out, so a curator-edited draft containing one fails to save.
-    Round-trips it back to the plain-string contract the rest of the app
-    expects.
-    """
-    if isinstance(value, dict):
-        return {k: _stringify_dates(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_stringify_dates(v) for v in value]
-    if isinstance(value, (datetime.date, datetime.datetime)):
-        return value.isoformat()
-    return value
 
 
 class DraftReviewService(BaseService):
@@ -285,7 +266,7 @@ class DraftReviewService(BaseService):
             )
 
         try:
-            draft_json = _stringify_dates(yaml.safe_load(draft_yaml))
+            draft_json = stringify_yaml_dates(yaml.safe_load(draft_yaml))
         except yaml.YAMLError as exc:
             raise HTTPException(status_code=400, detail=f"Not valid YAML: {exc}") from exc
         if not isinstance(draft_json, dict):

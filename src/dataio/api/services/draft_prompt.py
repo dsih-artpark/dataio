@@ -24,6 +24,7 @@ import yaml
 
 from dataio.api.services.csv_profiler import CsvProfile
 from dataio.api.services.digitization_log import DigitizationLog
+from dataio.api.services.yaml_utils import stringify_yaml_dates
 
 # A real, trimmed metadata.yaml (condensed from the actual CS0007DS0112
 # dataset in data/) shown to the LLM verbatim as a structural template - not
@@ -503,7 +504,7 @@ def parse_llm_output(text: str) -> tuple[dict, list[dict]]:
     manifest_text, flags_text = rest.split("---FLAGS---", 1)
 
     try:
-        manifest_dict = yaml.safe_load(manifest_text)
+        manifest_dict = stringify_yaml_dates(yaml.safe_load(manifest_text))
     except yaml.YAMLError as exc:
         raise ValueError(f"Manifest block is not valid YAML: {exc}") from exc
     if not isinstance(manifest_dict, dict):

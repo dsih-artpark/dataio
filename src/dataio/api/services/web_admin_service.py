@@ -31,6 +31,7 @@ from dataio.api.models import (
 from dataio.api.database.models import Collection, DataOwner, Dataset, User, UserGroup, UserPermission, DatasetDownload
 from dataio.api.auth.otp import create_otp, verify_otp
 from dataio.api.auth.security import enforce_rate_limit
+from dataio.api.services.yaml_utils import stringify_yaml_dates
 from dataio.api.services.base_service import BaseService
 from dataio.api.services.admin_dataset_service import AdminDatasetService
 from dataio.api.services.draft_review_service import DraftReviewService
@@ -149,7 +150,7 @@ class WebAdminService(BaseService):
         except yaml.YAMLError as exc:
             raise HTTPException(status_code=400, detail=f"Invalid info.yml: {exc}") from exc
         try:
-            metadata = yaml.safe_load(metadata_text) or {}
+            metadata = stringify_yaml_dates(yaml.safe_load(metadata_text) or {})
         except yaml.YAMLError as exc:
             raise HTTPException(status_code=400, detail=f"Invalid metadata.yml: {exc}") from exc
 

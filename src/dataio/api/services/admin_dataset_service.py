@@ -23,6 +23,7 @@ from dataio.api.services.dataset_documentation_sync_service import (
     sync_dataset_documentation,
 )
 from dataio.api.services.filestore_service import FilestoreService, ValidationError
+from dataio.api.services.yaml_utils import stringify_yaml_dates
 from dataio.api.services.platform_manifest_validation_service import (
     apply_platform_manifest_checks,
 )
@@ -464,7 +465,7 @@ class AdminDatasetService(BaseService):
                 raise ValidationError("Dataset does not exist")
 
             manifest_text = manifest_file.file.read().decode("utf-8")
-            parsed_manifest = yaml.safe_load(manifest_text)
+            parsed_manifest = stringify_yaml_dates(yaml.safe_load(manifest_text))
             if not isinstance(parsed_manifest, dict):
                 raise ValidationError("Manifest must deserialize to an object")
 

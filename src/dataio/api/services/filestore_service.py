@@ -161,13 +161,17 @@ class FilestoreService(BaseService):
         manifest_yaml: str,
         manifest_json: dict,
     ) -> None:
+        # Serialise first so an unserialisable manifest fails before either
+        # object is written, rather than leaving manifest.yaml without its
+        # manifest.json.
+        manifest_json_body = json.dumps(manifest_json).encode("utf-8")
         self.bucket.put_object(
             Body=manifest_yaml.encode("utf-8"),
             Key=self._manifest_yaml_key(dataset_id, version_type),
             ContentType="application/x-yaml",
         )
         self.bucket.put_object(
-            Body=json.dumps(manifest_json).encode("utf-8"),
+            Body=manifest_json_body,
             Key=self._manifest_json_key(dataset_id, version_type),
             ContentType="application/json",
         )

@@ -13,19 +13,18 @@ will ever go on to consume it itself.
 
 from __future__ import annotations
 
-import os
-
 import yaml
 from fastapi import HTTPException, UploadFile
 
 from dataio.api.database import functions as database
 from dataio.api.database.functions import (
+    DraftStatusConflict,
     check_if_raw_dataset_exists,
     delete_reserved_dataset_id,
     delete_reserved_raw_dataset_id,
 )
 from dataio.api.services.base_service import BaseService
-from dataio.api.services.draft_upload_storage import save_upload
+from dataio.api.services.draft_upload_storage import copy_into_storage, delete_managed_file, save_upload
 from dataio.api.services.manifest_v2_conversion import convert_v2_manifest_to_contract
 from dataio.api.services.yaml_utils import stringify_yaml_dates
 from dataio.validate.sdk import DataIOValidator
@@ -57,6 +56,15 @@ def _draft_to_dict(draft, *, dataset_exists: bool | None = None) -> dict:
         "reviewed_at": draft.reviewed_at.isoformat() if draft.reviewed_at else None,
         "superseded_by_draft_id": str(draft.superseded_by_draft_id) if draft.superseded_by_draft_id else None,
     }
+
+
+# A draft can be reviewed (approved, rejected, flagged, edited, regenerated)
+# only while it is still under review. Approved and rejected are final.
+REVIEWABLE_STATUSES = ("pending", "flagged")
+
+
+def _status_conflict(exc: DraftStatusConflict) -> HTTPException:
+    return HTTPException(status_code=409, detail=str(exc))
 
 
 class DraftReviewService(BaseService):
@@ -245,9 +253,10 @@ class DraftReviewService(BaseService):
         result = DataIOValidator().validate_tabular(
             manifest=manifest_yaml, data_files=data_files, deep_check=False, full_scan=True,
         )
-        updated = database.update_manifest_draft_status(
-            draft_id, draft.status.value, validation_result=result.model_dump(),
-        )
+        # Write only the validation result: writing back the status read
+        # before the (slow) full-scan validation would silently undo an
+        # approve/reject made while it ran.
+        updated = database.update_manifest_draft_validation(draft_id, result.model_dump())
         return _draft_to_dict(updated)
 
     def update_draft_content(self, draft_id: str, draft_yaml: str) -> dict:
@@ -260,7 +269,7 @@ class DraftReviewService(BaseService):
         from dataio.api.services.draft_service import _reorder_manifest_keys, decode_csv_paths
 
         draft = self._get_draft_or_404(draft_id)
-        if draft.status.value in ("approved", "rejected"):
+        if draft.status.value not in REVIEWABLE_STATUSES:
             raise HTTPException(
                 status_code=400, detail=f"Cannot edit a draft that is already {draft.status.value}."
             )
@@ -294,12 +303,16 @@ class DraftReviewService(BaseService):
             manifest=manifest_yaml, data_files=data_files, deep_check=False, full_scan=True,
         )
 
-        updated = database.update_manifest_draft_content(
-            draft_id,
-            draft_yaml=draft_yaml,
-            draft_json=draft_json,
-            validation_result=result.model_dump(),
-        )
+        try:
+            updated = database.update_manifest_draft_content(
+                draft_id,
+                draft_yaml=draft_yaml,
+                draft_json=draft_json,
+                validation_result=result.model_dump(),
+                expected_statuses=REVIEWABLE_STATUSES,
+            )
+        except DraftStatusConflict as exc:
+            raise _status_conflict(exc) from exc
         return _draft_to_dict(updated)
 
     def generate_info_yaml(self, draft_id: str, access_level: str) -> dict:
@@ -342,12 +355,24 @@ class DraftReviewService(BaseService):
         ever go on to consume the reservation itself, so both must free it
         up rather than let it sit unused forever.
         """
-        if draft.dataset_id and not database.check_if_dataset_exists(draft.dataset_id):
+        # A regenerated draft reuses its predecessor's ids, so an id is only
+        # released once no other live draft still holds it.
+        if (
+            draft.dataset_id
+            and not database.check_if_dataset_exists(draft.dataset_id)
+            and not database.other_live_draft_uses_ids(draft.draft_id, dataset_id=draft.dataset_id)
+        ):
             try:
                 delete_reserved_dataset_id(draft.dataset_id)
             except ValueError:
                 pass  # already released, or never actually reserved - fine either way
-        if draft.raw_dataset_id and not check_if_raw_dataset_exists(draft.raw_dataset_id):
+        if (
+            draft.raw_dataset_id
+            and not check_if_raw_dataset_exists(draft.raw_dataset_id)
+            and not database.other_live_draft_uses_ids(
+                draft.draft_id, raw_dataset_id=draft.raw_dataset_id
+            )
+        ):
             try:
                 delete_reserved_raw_dataset_id(draft.raw_dataset_id)
             except ValueError:
@@ -366,10 +391,12 @@ class DraftReviewService(BaseService):
         if draft.digitization_log_path:
             paths.append(draft.digitization_log_path)
         for path in paths:
-            try:
-                os.remove(path)
-            except OSError:
-                pass  # already gone, or never existed - not worth failing the delete over
+            # Only files this app stored (never a CLI operator's source
+            # paths), and not ones another draft still points at - drafts
+            # regenerated before each draft got its own copies share them.
+            if database.other_draft_uses_path(draft.draft_id, path):
+                continue
+            delete_managed_file(path)
 
     def delete_draft(self, draft_id: str) -> None:
         """Removes a draft row outright. Never touches anything already
@@ -394,7 +421,12 @@ class DraftReviewService(BaseService):
         happen here for them to show up under "Reserved IDs".
         """
         self._get_draft_or_404(draft_id)
-        updated = database.update_manifest_draft_status(draft_id, "approved", reviewed_by=reviewed_by)
+        try:
+            updated = database.update_manifest_draft_status(
+                draft_id, "approved", expected_statuses=REVIEWABLE_STATUSES, reviewed_by=reviewed_by
+            )
+        except DraftStatusConflict as exc:
+            raise _status_conflict(exc) from exc
         return _draft_to_dict(updated)
 
     def reject_draft(self, draft_id: str, reviewed_by: str, reason: str | None = None) -> dict:
@@ -405,15 +437,27 @@ class DraftReviewService(BaseService):
         number in the global/category counter.
         """
         draft = self._get_draft_or_404(draft_id)
+        # Change status first (only from a reviewable state), then release:
+        # if the status change is refused nothing has been freed.
+        try:
+            updated = database.update_manifest_draft_status(
+                draft_id, "rejected", expected_statuses=REVIEWABLE_STATUSES, reviewed_by=reviewed_by
+            )
+        except DraftStatusConflict as exc:
+            raise _status_conflict(exc) from exc
         if reason:
             database.append_manifest_draft_note(draft_id, {"note": reason, "by": reviewed_by})
         self._release_reservations(draft)
-        updated = database.update_manifest_draft_status(draft_id, "rejected", reviewed_by=reviewed_by)
         return _draft_to_dict(updated)
 
     def flag_field(self, draft_id: str, field_path: str, note: str, reviewed_by: str) -> dict:
         self._get_draft_or_404(draft_id)
-        updated = database.flag_manifest_draft_field(draft_id, field_path, note, reviewed_by)
+        try:
+            updated = database.flag_manifest_draft_field(
+                draft_id, field_path, note, reviewed_by, expected_statuses=REVIEWABLE_STATUSES
+            )
+        except DraftStatusConflict as exc:
+            raise _status_conflict(exc) from exc
         return _draft_to_dict(updated)
 
     def regenerate_draft(self, draft_id: str, reviewed_by: str) -> dict:
@@ -428,29 +472,71 @@ class DraftReviewService(BaseService):
         from dataio.api.services.draft_service import decode_csv_paths, generate_draft
 
         original = self._get_draft_or_404(draft_id)
+        if original.status.value not in REVIEWABLE_STATUSES:
+            # A rejected draft's ids may already have been released (and
+            # re-issued); an approved one is final.
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cannot regenerate a draft that is already {original.status.value}.",
+            )
         table_names = list(original.draft_json.get("tables", {}).keys())
-        csv_paths_by_table = decode_csv_paths(original.source_csv_path, table_names)
+        original_paths = decode_csv_paths(original.source_csv_path, table_names)
 
-        if original.llm_model_id is None:
-            new_draft = self._regenerate_deterministic_draft(
-                original, csv_paths_by_table, reviewed_by
+        # The new draft gets its own copies of the inputs, so deleting either
+        # draft later can't remove the other's files.
+        copied_paths: list[str] = []
+        try:
+            csv_paths_by_table = {}
+            for table_name, path in original_paths.items():
+                csv_paths_by_table[table_name] = copy_into_storage(path)
+                copied_paths.append(csv_paths_by_table[table_name])
+            digitization_log_path = None
+            if original.digitization_log_path:
+                digitization_log_path = copy_into_storage(original.digitization_log_path)
+                copied_paths.append(digitization_log_path)
+        except OSError as exc:
+            for path in copied_paths:
+                delete_managed_file(path)
+            raise HTTPException(
+                status_code=400, detail="This draft's source files are no longer available."
+            ) from exc
+
+        try:
+            if original.llm_model_id is None:
+                new_draft = self._regenerate_deterministic_draft(
+                    original, csv_paths_by_table, reviewed_by
+                )
+            else:
+                new_draft = generate_draft(
+                    csv_paths=list(csv_paths_by_table.values()),
+                    category_id=original.category_id,
+                    collection_id=original.collection_id,
+                    created_by=reviewed_by,
+                    data_owner_name=original.draft_json.get("datasetOwner", ""),
+                    dataset_id=original.dataset_id,
+                    digitization_log_path=digitization_log_path,
+                    superseded_by_draft_id=str(original.draft_id),
+                    # Reuse the same reserved rds_id rather than reserving a
+                    # second one - this is a redraft of the same dataset, not a
+                    # new one.
+                    raw_dataset_id=original.raw_dataset_id,
+                )
+        except BaseException:
+            for path in copied_paths:
+                delete_managed_file(path)
+            raise
+
+        try:
+            database.update_manifest_draft_status(
+                draft_id, "rejected", expected_statuses=REVIEWABLE_STATUSES, reviewed_by=reviewed_by
             )
-        else:
-            new_draft = generate_draft(
-                csv_paths=list(csv_paths_by_table.values()),
-                category_id=original.category_id,
-                collection_id=original.collection_id,
-                created_by=reviewed_by,
-                data_owner_name=original.draft_json.get("datasetOwner", ""),
-                dataset_id=original.dataset_id,
-                digitization_log_path=original.digitization_log_path,
-                superseded_by_draft_id=str(original.draft_id),
-                # Reuse the same reserved rds_id rather than reserving a
-                # second one - this is a redraft of the same dataset, not a
-                # new one.
-                raw_dataset_id=original.raw_dataset_id,
-            )
-        database.update_manifest_draft_status(draft_id, "rejected", reviewed_by=reviewed_by)
+        except DraftStatusConflict as exc:
+            # The original was approved/rejected while regenerating: drop the
+            # new draft rather than leave two drafts holding the same ids.
+            database.delete_manifest_draft(new_draft.draft_id)
+            for path in copied_paths:
+                delete_managed_file(path)
+            raise _status_conflict(exc) from exc
         return new_draft.model_dump()
 
     def _regenerate_deterministic_draft(self, original, csv_paths_by_table: dict, reviewed_by: str):

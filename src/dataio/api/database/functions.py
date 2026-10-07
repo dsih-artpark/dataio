@@ -6,7 +6,7 @@ from sqlalchemy.orm import joinedload
 import bcrypt
 import secrets
 import dateutil
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from datetime import datetime, timedelta
 
 from dataio.api.database.config import Session
@@ -243,6 +243,34 @@ def _coerce_draft_id(draft_id) -> uuid.UUID:
     return draft_id if isinstance(draft_id, uuid.UUID) else uuid.UUID(str(draft_id))
 
 
+class DraftStatusConflict(ValueError):
+    """A draft was not in one of the statuses an update required (e.g. approving
+    a draft that was rejected, or a concurrent review changed it first)."""
+
+    def __init__(self, draft_id, current: str, expected):
+        super().__init__(
+            f"Manifest draft {draft_id} is {current}; expected one of {', '.join(sorted(expected))}"
+        )
+        self.current = current
+        self.expected = set(expected)
+
+
+def _get_draft_for_update(session, draft_id, expected_statuses=None):
+    """Loads a draft row locked FOR UPDATE and, when expected_statuses is given,
+    checks its current status under that lock (compare-and-set)."""
+    draft = (
+        session.query(DatasetManifestDraft)
+        .filter(DatasetManifestDraft.draft_id == _coerce_draft_id(draft_id))
+        .with_for_update()
+        .first()
+    )
+    if not draft:
+        raise ValueError(f"Manifest draft {draft_id} not found")
+    if expected_statuses is not None and draft.status.value not in expected_statuses:
+        raise DraftStatusConflict(draft_id, draft.status.value, expected_statuses)
+    return draft
+
+
 def create_manifest_draft(
     *,
     collection_id: str,
@@ -339,21 +367,18 @@ def update_manifest_draft_status(
     draft_id,
     status: str,
     *,
+    expected_statuses=None,
     reviewed_by: str | None = None,
     dataset_id: str | None = None,
     validation_result: dict | None = None,
     session=None,
 ):
+    """Sets a draft's status. With expected_statuses, raises DraftStatusConflict
+    unless the draft is currently in one of them (checked under a row lock)."""
     owns_session = session is None
     session = session or Session()
     try:
-        draft = (
-            session.query(DatasetManifestDraft)
-            .filter(DatasetManifestDraft.draft_id == _coerce_draft_id(draft_id))
-            .first()
-        )
-        if not draft:
-            raise ValueError(f"Manifest draft {draft_id} not found")
+        draft = _get_draft_for_update(session, draft_id, expected_statuses)
         draft.status = DatasetManifestDraftStatus(status)
         if reviewed_by is not None:
             draft.reviewed_by = reviewed_by
@@ -366,11 +391,78 @@ def update_manifest_draft_status(
         session.refresh(draft)
         return draft
     except Exception as e:
+        session.rollback()
         logger.error(f"Error updating manifest draft {draft_id}: {str(e)}")
         raise
     finally:
         if owns_session:
             session.close()
+
+
+def update_manifest_draft_validation(draft_id, validation_result: dict, session=None):
+    """Stores a fresh validation result without touching status or content, so a
+    slow revalidation can't overwrite a review decision made while it ran."""
+    owns_session = session is None
+    session = session or Session()
+    try:
+        draft = _get_draft_for_update(session, draft_id)
+        draft.validation_result = validation_result
+        session.commit()
+        session.refresh(draft)
+        return draft
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error updating manifest draft validation {draft_id}: {str(e)}")
+        raise
+    finally:
+        if owns_session:
+            session.close()
+
+
+def other_live_draft_uses_ids(exclude_draft_id, *, dataset_id=None, raw_dataset_id=None) -> bool:
+    """True when another pending/flagged/approved draft holds dataset_id or
+    raw_dataset_id - e.g. the draft that superseded this one via regenerate -
+    so releasing that reservation would hand a live draft's ID to someone else."""
+    conditions = []
+    if dataset_id:
+        conditions.append(DatasetManifestDraft.dataset_id == dataset_id)
+    if raw_dataset_id:
+        conditions.append(DatasetManifestDraft.raw_dataset_id == raw_dataset_id)
+    if not conditions:
+        return False
+    session = Session()
+    try:
+        query = session.query(DatasetManifestDraft.draft_id).filter(
+            DatasetManifestDraft.draft_id != _coerce_draft_id(exclude_draft_id),
+            DatasetManifestDraft.status.in_(
+                [
+                    DatasetManifestDraftStatus.PENDING,
+                    DatasetManifestDraftStatus.FLAGGED,
+                    DatasetManifestDraftStatus.APPROVED,
+                ]
+            ),
+            or_(*conditions),
+        )
+        return session.query(query.exists()).scalar()
+    finally:
+        session.close()
+
+
+def other_draft_uses_path(exclude_draft_id, path: str) -> bool:
+    """True when another draft row still points at this source CSV/log path
+    (drafts regenerated before each draft got its own file copies share them)."""
+    session = Session()
+    try:
+        query = session.query(DatasetManifestDraft.draft_id).filter(
+            DatasetManifestDraft.draft_id != _coerce_draft_id(exclude_draft_id),
+            or_(
+                DatasetManifestDraft.source_csv_path.contains(path, autoescape=True),
+                DatasetManifestDraft.digitization_log_path == path,
+            ),
+        )
+        return session.query(query.exists()).scalar()
+    finally:
+        session.close()
 
 
 def update_manifest_draft_content(
@@ -379,6 +471,7 @@ def update_manifest_draft_content(
     draft_yaml: str,
     draft_json: dict,
     validation_result: dict | None = None,
+    expected_statuses=None,
     session=None,
 ):
     """Overwrites a draft's manifest content in place (curator-edited YAML,
@@ -389,13 +482,7 @@ def update_manifest_draft_content(
     owns_session = session is None
     session = session or Session()
     try:
-        draft = (
-            session.query(DatasetManifestDraft)
-            .filter(DatasetManifestDraft.draft_id == _coerce_draft_id(draft_id))
-            .first()
-        )
-        if not draft:
-            raise ValueError(f"Manifest draft {draft_id} not found")
+        draft = _get_draft_for_update(session, draft_id, expected_statuses)
         draft.draft_yaml = draft_yaml
         draft.draft_json = draft_json
         if validation_result is not None:
@@ -404,6 +491,7 @@ def update_manifest_draft_content(
         session.refresh(draft)
         return draft
     except Exception as e:
+        session.rollback()
         logger.error(f"Error updating manifest draft content {draft_id}: {str(e)}")
         raise
     finally:
@@ -411,7 +499,9 @@ def update_manifest_draft_content(
             session.close()
 
 
-def flag_manifest_draft_field(draft_id, field_path: str, reason: str, flagged_by: str, session=None):
+def flag_manifest_draft_field(
+    draft_id, field_path: str, reason: str, flagged_by: str, expected_statuses=None, session=None
+):
     """Appends one entry to a draft's flagged_fields, sets its status to
     'flagged', and records a matching reviewer note - the one place a
     curator marks a specific field as needing attention/regeneration.
@@ -419,13 +509,7 @@ def flag_manifest_draft_field(draft_id, field_path: str, reason: str, flagged_by
     owns_session = session is None
     session = session or Session()
     try:
-        draft = (
-            session.query(DatasetManifestDraft)
-            .filter(DatasetManifestDraft.draft_id == _coerce_draft_id(draft_id))
-            .first()
-        )
-        if not draft:
-            raise ValueError(f"Manifest draft {draft_id} not found")
+        draft = _get_draft_for_update(session, draft_id, expected_statuses)
         draft.flagged_fields = [*(draft.flagged_fields or []), {"field": field_path, "reason": reason}]
         draft.reviewer_notes = [*(draft.reviewer_notes or []), {"field": field_path, "note": reason, "by": flagged_by}]
         draft.status = DatasetManifestDraftStatus.FLAGGED
@@ -433,6 +517,7 @@ def flag_manifest_draft_field(draft_id, field_path: str, reason: str, flagged_by
         session.refresh(draft)
         return draft
     except Exception as e:
+        session.rollback()
         logger.error(f"Error flagging field on manifest draft {draft_id}: {str(e)}")
         raise
     finally:

@@ -52,6 +52,14 @@ def _fake_draft(**overrides):
     return SimpleNamespace(**defaults)
 
 
+@pytest.fixture(autouse=True)
+def _no_other_drafts(monkeypatch):
+    """By default no other draft shares this draft's ids or files; tests that
+    exercise sharing (regenerated drafts) override these."""
+    monkeypatch.setattr(service_module.database, "other_live_draft_uses_ids", lambda *a, **kw: False)
+    monkeypatch.setattr(service_module.database, "other_draft_uses_path", lambda *a, **kw: False)
+
+
 def _make_service():
     service = object.__new__(DraftReviewService)
     service.logger = logging.getLogger(__name__)
@@ -191,6 +199,7 @@ def test_delete_draft_cleans_up_uploaded_files(monkeypatch, tmp_path):
     monkeypatch.setattr(service_module.database, "check_if_dataset_exists", lambda dataset_id: True)
     monkeypatch.setattr(service_module, "check_if_raw_dataset_exists", lambda rds_id: True)
     monkeypatch.setattr(service_module.database, "delete_manifest_draft", lambda draft_id: None)
+    monkeypatch.setattr("dataio.api.services.draft_upload_storage.DRAFT_UPLOAD_DIR", str(tmp_path))
 
     service.delete_draft(str(draft.draft_id))
 
@@ -220,15 +229,15 @@ def test_revalidate_draft_converts_and_uses_existing_validator(monkeypatch):
 
     monkeypatch.setattr(service_module, "DataIOValidator", FakeValidator)
 
-    def fake_update_status(draft_id, status, **kw):
-        recorded["kwargs"] = kw
+    def fake_update_validation(draft_id, validation_result):
+        recorded["validation_result"] = validation_result
         return _fake_draft()
 
-    monkeypatch.setattr(service_module.database, "update_manifest_draft_status", fake_update_status)
+    monkeypatch.setattr(service_module.database, "update_manifest_draft_validation", fake_update_validation)
 
     service.revalidate_draft(str(draft.draft_id))
 
-    assert recorded["kwargs"]["validation_result"]["dataset_kind"] == "tabular"
+    assert recorded["validation_result"]["dataset_kind"] == "tabular"
     assert "datasetTables" in recorded["manifest"]
     assert "tables:" not in recorded["manifest"]
     assert recorded["data_files"] == {"main": draft.source_csv_path}
@@ -251,7 +260,7 @@ def test_update_draft_content_revalidates_and_persists(monkeypatch):
 
     monkeypatch.setattr(service_module, "DataIOValidator", FakeValidator)
 
-    def fake_update_content(draft_id, *, draft_yaml, draft_json, validation_result=None):
+    def fake_update_content(draft_id, *, draft_yaml, draft_json, validation_result=None, expected_statuses=None):
         recorded["draft_yaml"] = draft_yaml
         recorded["draft_json"] = draft_json
         recorded["validation_result"] = validation_result
@@ -287,7 +296,7 @@ def test_update_draft_content_stringifies_yaml_implicit_dates(monkeypatch):
 
     recorded = {}
 
-    def fake_update_content(draft_id, *, draft_yaml, draft_json, validation_result=None):
+    def fake_update_content(draft_id, *, draft_yaml, draft_json, validation_result=None, expected_statuses=None):
         recorded["draft_json"] = draft_json
         return _fake_draft(draft_yaml=draft_yaml, draft_json=draft_json)
 
@@ -322,7 +331,7 @@ def test_update_draft_content_reorders_keys_to_canonical_order(monkeypatch):
 
     recorded = {}
 
-    def fake_update_content(draft_id, *, draft_yaml, draft_json, validation_result=None):
+    def fake_update_content(draft_id, *, draft_yaml, draft_json, validation_result=None, expected_statuses=None):
         recorded["draft_yaml"] = draft_yaml
         recorded["draft_json"] = draft_json
         return _fake_draft(draft_yaml=draft_yaml, draft_json=draft_json)
@@ -382,7 +391,7 @@ def test_update_draft_content_restores_data_dictionary_column_and_field_order(
 
     recorded = {}
 
-    def fake_update_content(draft_id, *, draft_yaml, draft_json, validation_result=None):
+    def fake_update_content(draft_id, *, draft_yaml, draft_json, validation_result=None, expected_statuses=None):
         recorded["draft_json"] = draft_json
         return _fake_draft(draft_yaml=draft_yaml, draft_json=draft_json)
 
@@ -820,6 +829,7 @@ def test_regenerate_draft_dispatches_to_deterministic_path_when_llm_model_id_is_
         service_module.database, "update_manifest_draft_status",
         lambda draft_id, status, **kw: None,
     )
+    monkeypatch.setattr(service_module, "copy_into_storage", lambda path: path)
     monkeypatch.setattr(
         "dataio.api.services.draft_service.decode_csv_paths",
         lambda source_csv_path, table_names=None: {"main": "foo.csv"},
@@ -908,7 +918,7 @@ def test_flag_field_delegates_to_db_function(monkeypatch):
 
     recorded = {}
 
-    def fake_flag(draft_id, field_path, reason, flagged_by):
+    def fake_flag(draft_id, field_path, reason, flagged_by, expected_statuses=None):
         recorded.update(draft_id=draft_id, field_path=field_path, reason=reason, flagged_by=flagged_by)
         return _fake_draft(status=DatasetManifestDraftStatus.FLAGGED, flagged_fields=[{"field": field_path, "reason": reason}])
 
@@ -933,6 +943,7 @@ def test_regenerate_draft_reuses_original_raw_dataset_id(monkeypatch):
         service_module.database, "update_manifest_draft_status",
         lambda draft_id, status, **kw: None,
     )
+    monkeypatch.setattr(service_module, "copy_into_storage", lambda path: path)
 
     recorded = {}
 
@@ -950,3 +961,173 @@ def test_regenerate_draft_reuses_original_raw_dataset_id(monkeypatch):
 
     assert recorded["raw_dataset_id"] == "CSRDS0016"
     assert result["draft_id"] == "new-draft-id"
+
+
+# --- status transitions and shared ids/files (go-live fixes) -----------------
+
+
+def _conflict_on_status_update(draft_id, status, *, expected_statuses=None, **kw):
+    raise service_module.DraftStatusConflict(draft_id, "rejected", expected_statuses)
+
+
+def test_approve_rejected_draft_returns_409(monkeypatch):
+    service = _make_service()
+    draft = _fake_draft(status=DatasetManifestDraftStatus.REJECTED)
+    monkeypatch.setattr(service_module.database, "get_manifest_draft", lambda draft_id: draft)
+    monkeypatch.setattr(service_module.database, "update_manifest_draft_status", _conflict_on_status_update)
+
+    with pytest.raises(HTTPException) as exc_info:
+        service.approve_draft(str(draft.draft_id), "reviewer@artpark.in")
+    assert exc_info.value.status_code == 409
+
+
+def test_reject_refused_does_not_release_reservations(monkeypatch):
+    service = _make_service()
+    draft = _fake_draft(status=DatasetManifestDraftStatus.APPROVED, dataset_id="CS0007DS0999")
+    monkeypatch.setattr(service_module.database, "get_manifest_draft", lambda draft_id: draft)
+    monkeypatch.setattr(service_module.database, "check_if_dataset_exists", lambda dataset_id: False)
+    monkeypatch.setattr(service_module.database, "update_manifest_draft_status", _conflict_on_status_update)
+    released = []
+    monkeypatch.setattr(service_module, "delete_reserved_dataset_id", released.append)
+
+    with pytest.raises(HTTPException) as exc_info:
+        service.reject_draft(str(draft.draft_id), "reviewer@artpark.in")
+    assert exc_info.value.status_code == 409
+    assert released == []
+
+
+def test_regenerate_rejected_draft_returns_409(monkeypatch):
+    service = _make_service()
+    draft = _fake_draft(status=DatasetManifestDraftStatus.REJECTED)
+    monkeypatch.setattr(service_module.database, "get_manifest_draft", lambda draft_id: draft)
+
+    with pytest.raises(HTTPException) as exc_info:
+        service.regenerate_draft(str(draft.draft_id), "reviewer@artpark.in")
+    assert exc_info.value.status_code == 409
+
+
+def test_regenerate_gives_new_draft_its_own_file_copies(monkeypatch, tmp_path):
+    monkeypatch.setattr("dataio.api.services.draft_upload_storage.DRAFT_UPLOAD_DIR", str(tmp_path))
+    original_csv = tmp_path / "orig" / "foo.csv"
+    original_csv.parent.mkdir()
+    original_csv.write_text("count\n1\n")
+    service = _make_service()
+    original = _fake_draft(source_csv_path=f'{{"main": "{original_csv.as_posix()}"}}')
+    monkeypatch.setattr(service_module.database, "get_manifest_draft", lambda draft_id: original)
+    monkeypatch.setattr(service_module.database, "update_manifest_draft_status", lambda *a, **kw: None)
+    recorded = {}
+
+    def fake_generate_draft(**kwargs):
+        recorded.update(kwargs)
+        return SimpleNamespace(draft_id="new", model_dump=lambda: {"draft_id": "new"})
+
+    monkeypatch.setattr("dataio.api.services.draft_service.generate_draft", fake_generate_draft)
+
+    service.regenerate_draft(str(original.draft_id), "reviewer@artpark.in")
+
+    (new_csv,) = recorded["csv_paths"]
+    assert new_csv != str(original_csv.resolve())
+    assert open(new_csv).read() == "count\n1\n"
+
+
+def test_regenerate_drops_new_draft_when_original_changed_meanwhile(monkeypatch, tmp_path):
+    monkeypatch.setattr("dataio.api.services.draft_upload_storage.DRAFT_UPLOAD_DIR", str(tmp_path))
+    original_csv = tmp_path / "foo.csv"
+    original_csv.write_text("count\n1\n")
+    service = _make_service()
+    original = _fake_draft(source_csv_path=f'{{"main": "{original_csv.as_posix()}"}}')
+    monkeypatch.setattr(service_module.database, "get_manifest_draft", lambda draft_id: original)
+    monkeypatch.setattr(service_module.database, "update_manifest_draft_status", _conflict_on_status_update)
+    deleted = []
+    monkeypatch.setattr(service_module.database, "delete_manifest_draft", deleted.append)
+    recorded = {}
+
+    def fake_generate_draft(**kwargs):
+        recorded.update(kwargs)
+        return SimpleNamespace(draft_id="new", model_dump=lambda: {"draft_id": "new"})
+
+    monkeypatch.setattr("dataio.api.services.draft_service.generate_draft", fake_generate_draft)
+
+    with pytest.raises(HTTPException) as exc_info:
+        service.regenerate_draft(str(original.draft_id), "reviewer@artpark.in")
+
+    assert exc_info.value.status_code == 409
+    assert deleted == ["new"]
+    assert not os.path.exists(recorded["csv_paths"][0])
+    assert original_csv.exists()
+
+
+def test_delete_keeps_reservation_held_by_a_live_regenerated_draft(monkeypatch):
+    service = _make_service()
+    draft = _fake_draft(status=DatasetManifestDraftStatus.REJECTED, dataset_id="CS0007DS0999")
+    monkeypatch.setattr(service_module.database, "get_manifest_draft", lambda draft_id: draft)
+    monkeypatch.setattr(service_module.database, "check_if_dataset_exists", lambda dataset_id: False)
+    monkeypatch.setattr(service_module, "check_if_raw_dataset_exists", lambda rds_id: False)
+    monkeypatch.setattr(service_module.database, "other_live_draft_uses_ids", lambda *a, **kw: True)
+    monkeypatch.setattr(service_module.database, "delete_manifest_draft", lambda draft_id: None)
+    released = []
+    monkeypatch.setattr(service_module, "delete_reserved_dataset_id", released.append)
+    monkeypatch.setattr(service_module, "delete_reserved_raw_dataset_id", released.append)
+
+    service.delete_draft(str(draft.draft_id))
+
+    assert released == []
+
+
+def test_delete_never_removes_files_outside_the_upload_dir(monkeypatch, tmp_path):
+    """CLI-created drafts store the operator's own source paths."""
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    monkeypatch.setattr("dataio.api.services.draft_upload_storage.DRAFT_UPLOAD_DIR", str(upload_dir))
+    operator_csv = tmp_path / "operator" / "census.csv"
+    operator_csv.parent.mkdir()
+    operator_csv.write_text("a\n1\n")
+    service = _make_service()
+    draft = _fake_draft(source_csv_path=f'{{"main": "{operator_csv.as_posix()}"}}')
+    monkeypatch.setattr(service_module.database, "get_manifest_draft", lambda draft_id: draft)
+    monkeypatch.setattr(service_module.database, "check_if_dataset_exists", lambda dataset_id: True)
+    monkeypatch.setattr(service_module, "check_if_raw_dataset_exists", lambda rds_id: True)
+    monkeypatch.setattr(service_module.database, "delete_manifest_draft", lambda draft_id: None)
+
+    service.delete_draft(str(draft.draft_id))
+
+    assert operator_csv.exists()
+
+
+def test_delete_keeps_files_another_draft_still_uses(monkeypatch, tmp_path):
+    monkeypatch.setattr("dataio.api.services.draft_upload_storage.DRAFT_UPLOAD_DIR", str(tmp_path))
+    shared_csv = tmp_path / "foo.csv"
+    shared_csv.write_text("a\n1\n")
+    service = _make_service()
+    draft = _fake_draft(source_csv_path=f'{{"main": "{shared_csv.as_posix()}"}}')
+    monkeypatch.setattr(service_module.database, "get_manifest_draft", lambda draft_id: draft)
+    monkeypatch.setattr(service_module.database, "check_if_dataset_exists", lambda dataset_id: True)
+    monkeypatch.setattr(service_module, "check_if_raw_dataset_exists", lambda rds_id: True)
+    monkeypatch.setattr(service_module.database, "other_draft_uses_path", lambda *a, **kw: True)
+    monkeypatch.setattr(service_module.database, "delete_manifest_draft", lambda draft_id: None)
+
+    service.delete_draft(str(draft.draft_id))
+
+    assert shared_csv.exists()
+
+
+def test_revalidate_never_writes_status(monkeypatch):
+    service = _make_service()
+    draft = _fake_draft()
+    monkeypatch.setattr(service_module.database, "get_manifest_draft", lambda draft_id: draft)
+
+    class FakeValidator:
+        def validate_tabular(self, **_kw):
+            return ValidationResult(dataset_kind="tabular")
+
+    monkeypatch.setattr(service_module, "DataIOValidator", FakeValidator)
+
+    def fail_status_write(*_a, **_kw):
+        raise AssertionError("revalidate must not write status")
+
+    monkeypatch.setattr(service_module.database, "update_manifest_draft_status", fail_status_write)
+    monkeypatch.setattr(
+        service_module.database, "update_manifest_draft_validation", lambda draft_id, result: draft
+    )
+
+    service.revalidate_draft(str(draft.draft_id))

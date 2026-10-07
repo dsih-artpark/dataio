@@ -1274,6 +1274,8 @@ function DraftDetail({ draftId }: { draftId: string }) {
   // dataset_id is always set (a reserved ID) - dataset_exists is what
   // actually tells us whether that ID belongs to a real Dataset row yet.
   const isNewDataset = draft.dataset_exists === false;
+  // Mirrors the backend's REVIEWABLE_STATUSES: approved and rejected are final.
+  const isReviewable = draft.status === 'pending' || draft.status === 'flagged';
 
   return (
     <div class="space-y-6">
@@ -1293,7 +1295,7 @@ function DraftDetail({ draftId }: { draftId: string }) {
           </span>
           <button
             type="button"
-            disabled={busy || draft.status === 'approved'}
+            disabled={busy || !isReviewable}
             onClick={() => runAction(() => api.adminApproveManifestDraft(draftId))}
             class="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
           >
@@ -1301,10 +1303,12 @@ function DraftDetail({ draftId }: { draftId: string }) {
           </button>
           <button
             type="button"
-            disabled={busy || draft.status === 'approved' || draft.status === 'rejected'}
+            disabled={busy || !isReviewable}
             onClick={() => {
-              const reason = window.prompt('Reason for rejecting this draft (optional):') ?? undefined;
-              runAction(() => api.adminRejectManifestDraft(draftId, reason || undefined));
+              const reason = window.prompt('Reason for rejecting this draft (optional):');
+              // Cancel returns null: abort rather than reject without a reason
+              if (reason === null) return;
+              runAction(() => api.adminRejectManifestDraft(draftId, reason.trim() || undefined));
             }}
             class="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-red-700 ring-1 ring-red-200 hover:bg-red-50 disabled:opacity-50"
           >
@@ -1312,7 +1316,7 @@ function DraftDetail({ draftId }: { draftId: string }) {
           </button>
           <button
             type="button"
-            disabled={busy || draft.status === 'approved'}
+            disabled={busy || !isReviewable}
             onClick={async () => {
               if (!window.confirm('Regenerate this draft from the same CSV(s)? The current draft will be marked rejected and superseded by a new one.')) return;
               setBusy(true);
@@ -1436,7 +1440,7 @@ function DraftDetail({ draftId }: { draftId: string }) {
           </label>
           <button
             type="submit"
-            disabled={busy || !flagFieldPath.trim() || !flagNote.trim()}
+            disabled={busy || !isReviewable || !flagFieldPath.trim() || !flagNote.trim()}
             class="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-600 disabled:opacity-50"
           >
             Flag field

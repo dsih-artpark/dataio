@@ -9,6 +9,8 @@ transient tempfile.
 
 from __future__ import annotations
 
+import contextlib
+import logging
 import os
 import shutil
 import uuid
@@ -17,6 +19,16 @@ from pathlib import Path
 from fastapi import UploadFile
 
 DRAFT_UPLOAD_DIR = os.getenv("DRAFT_UPLOAD_DIR", "data/manifest_draft_uploads")
+
+if not os.path.isabs(DRAFT_UPLOAD_DIR):
+    # The deploy script deletes and re-clones the checkout, so a relative
+    # path (resolved against the working directory) loses every pending
+    # draft's files on the next deploy.
+    logging.getLogger(__name__).warning(
+        "DRAFT_UPLOAD_DIR=%r is relative; set an absolute path outside the "
+        "deploy checkout or uploaded draft files will not survive a redeploy",
+        DRAFT_UPLOAD_DIR,
+    )
 
 # A CSV saved by Excel as "CSV UTF-8" carries this 3-byte marker at the
 # very start of the file. It's invisible to a human and to pandas (which
@@ -60,3 +72,35 @@ def save_upload(upload_file: UploadFile) -> str:
         shutil.copyfileobj(upload_file.file, f)
 
     return str(dest_path.resolve())
+
+
+def copy_into_storage(source_path: str) -> str:
+    """Copies an already-stored draft file into its own UUID directory, so a
+    regenerated draft owns its inputs instead of sharing the original's -
+    deleting either draft then can't remove the other's CSVs."""
+    upload_dir = Path(DRAFT_UPLOAD_DIR) / str(uuid.uuid4())
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    dest_path = upload_dir / Path(source_path).name
+    shutil.copyfile(source_path, dest_path)
+    return str(dest_path.resolve())
+
+
+def is_managed_path(path: str) -> bool:
+    """True only for files this module wrote under DRAFT_UPLOAD_DIR. Drafts
+    created by the CLI store the operator's own source paths, which must
+    never be deleted on the server's behalf."""
+    try:
+        return Path(path).resolve().is_relative_to(Path(DRAFT_UPLOAD_DIR).resolve())
+    except (OSError, ValueError):
+        return False
+
+
+def delete_managed_file(path: str) -> None:
+    """Best-effort removal of a stored draft file and its (then empty) UUID
+    directory. Paths outside DRAFT_UPLOAD_DIR are left alone."""
+    if not path or not is_managed_path(path):
+        return
+    resolved = Path(path).resolve()
+    resolved.unlink(missing_ok=True)
+    with contextlib.suppress(OSError):
+        resolved.parent.rmdir()

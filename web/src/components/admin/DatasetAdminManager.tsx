@@ -360,11 +360,13 @@ export default function DatasetAdminManager({
   };
 
   // Re-checks only these datasets and updates their rows in place - after a
-  // bulk sync, re-checking every dataset in filestore again is slow.
-  const refreshDocumentationStatuses = async (dsIds: string[]) => {
+  // bulk sync, re-checking every dataset in filestore again is slow. Returns
+  // the ids whose status could not be confirmed (check failed or errored).
+  const refreshDocumentationStatuses = async (dsIds: string[]): Promise<string[]> => {
     const requestId = documentationCheckRequestRef.current + 1;
     documentationCheckRequestRef.current = requestId;
     const refreshed = new Map<string, DocumentationSyncDatasetStatus>();
+    const unconfirmed: string[] = [];
     // A few checks at a time: each reads S3, so one-by-one is slow for a big
     // selection, and all at once would flood the API.
     const queue = [...dsIds];
@@ -372,15 +374,20 @@ export default function DatasetAdminManager({
       for (let dsId = queue.shift(); dsId !== undefined; dsId = queue.shift()) {
         try {
           const response = await api.adminCheckDocumentationSync(dsId);
-          for (const row of response.datasets) refreshed.set(row.ds_id, row);
+          for (const row of response.datasets) {
+            refreshed.set(row.ds_id, row);
+            if (row.error) unconfirmed.push(row.ds_id);
+          }
         } catch {
-          // Keep the row as it was; the sync summary already names failures.
+          unconfirmed.push(dsId); // keep the old row, but say it wasn't re-checked
         }
       }
     };
     await Promise.all(Array.from({ length: Math.min(4, dsIds.length) }, worker));
-    if (documentationCheckRequestRef.current !== requestId) return;
+    // A newer check replaced this one and will show the current state.
+    if (documentationCheckRequestRef.current !== requestId) return [];
     setDocumentationStatuses((rows) => rows.map((row) => refreshed.get(row.ds_id) ?? row));
+    return unconfirmed;
   };
 
   const toggleSyncSelection = (dsId: string) => {
@@ -872,14 +879,25 @@ export default function DatasetAdminManager({
         failedIds.push(id);
       }
     }
+    const unconfirmedIds = await refreshDocumentationStatuses(
+      ids.filter((id) => !failedIds.includes(id))
+    );
     setSyncingSelectedIds(false);
     setSelectedSyncIds(new Set());
+    const problems: string[] = [];
     if (failedIds.length > 0) {
-      setErrorMessage(`Synced ${ids.length - failedIds.length} of ${ids.length}. Failed: ${failedIds.join(', ')}`);
+      problems.push(`Synced ${ids.length - failedIds.length} of ${ids.length}. Failed: ${failedIds.join(', ')}.`);
+    }
+    if (unconfirmedIds.length > 0) {
+      problems.push(
+        `Could not confirm the status of ${unconfirmedIds.join(', ')} after syncing; check them again.`
+      );
+    }
+    if (problems.length > 0) {
+      setErrorMessage(problems.join(' '));
     } else {
       setStatusMessage(`Documentation sync finished. Updated ${updatedCount} of ${ids.length} selected dataset(s).`);
     }
-    await refreshDocumentationStatuses(ids);
   };
 
   const handleQuickAccessLevelUpdate = async (datasetId: string, accessLevel: string) => {

@@ -36,7 +36,7 @@ def load_tabular_rows(source: str | bytes, max_rows: int | None = None) -> list[
                 if max_rows is not None and index + 1 >= max_rows:
                     break
     else:
-        with io.StringIO(source.removeprefix("﻿")) as handle:
+        with io.StringIO(source.removeprefix("\ufeff")) as handle:
             reader = csv.DictReader(handle)
             for index, row in enumerate(reader):
                 rows.append(dict(row))

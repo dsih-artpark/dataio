@@ -86,6 +86,18 @@ def test_save_upload_rejects_absolute_path_filename(tmp_path, monkeypatch):
     assert not absolute_target.exists()
 
 
+def test_relative_upload_dir_resolves_against_home_not_the_checkout(monkeypatch, tmp_path):
+    # the deploy re-clones the working directory, so a relative path must not
+    # land inside it
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    assert draft_upload_storage.resolve_upload_dir("data/uploads") == str(tmp_path / "data" / "uploads")
+
+
+def test_absolute_upload_dir_is_kept(tmp_path):
+    assert draft_upload_storage.resolve_upload_dir(str(tmp_path / "x")) == str(tmp_path / "x")
+
+
 def test_delete_managed_file_logs_instead_of_raising_when_the_file_cannot_be_removed(
     tmp_path, monkeypatch, caplog
 ):

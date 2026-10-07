@@ -1,4 +1,3 @@
-import codecs
 import json
 import os
 from pathlib import Path
@@ -11,6 +10,7 @@ from fastapi import UploadFile
 
 from dataio.api.models import TableMetadata, VersionType
 from dataio.api.services.base_service import BaseService, get_aws_access_key_id
+from dataio.api.services.draft_upload_storage import skip_utf8_bom
 
 dotenv.load_dotenv()
 
@@ -145,9 +145,7 @@ class FilestoreService(BaseService):
             )
             # Store Excel "CSV UTF-8" files without their byte-order mark, so
             # every later reader sees the real first column name.
-            file.file.seek(0)
-            if file.file.read(len(codecs.BOM_UTF8)) != codecs.BOM_UTF8:
-                file.file.seek(0)
+            skip_utf8_bom(file.file)
             self.bucket.upload_fileobj(file.file, remote_filepath)
             self.bucket.put_object(
                 Body=json.dumps(metadata_object).encode("UTF-8"),

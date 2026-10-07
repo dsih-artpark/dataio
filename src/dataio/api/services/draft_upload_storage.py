@@ -18,28 +18,36 @@ from pathlib import Path
 
 from fastapi import UploadFile
 
-DRAFT_UPLOAD_DIR = os.getenv("DRAFT_UPLOAD_DIR", "data/manifest_draft_uploads")
+def resolve_upload_dir(configured: str) -> str:
+    """A relative DRAFT_UPLOAD_DIR is resolved against the home directory,
+    not the working directory: the deploy script deletes and re-clones the
+    checkout the app runs from, so files kept inside it would be lost on
+    every deploy."""
+    path = Path(configured).expanduser()
+    return str(path if path.is_absolute() else Path.home() / path)
 
-if not os.path.isabs(DRAFT_UPLOAD_DIR):
-    # The deploy script deletes and re-clones the checkout, so a relative
-    # path (resolved against the working directory) loses every pending
-    # draft's files on the next deploy.
-    logging.getLogger(__name__).warning(
-        "DRAFT_UPLOAD_DIR=%r is relative; set an absolute path outside the "
-        "deploy checkout or uploaded draft files will not survive a redeploy",
-        DRAFT_UPLOAD_DIR,
-    )
+
+DRAFT_UPLOAD_DIR = resolve_upload_dir(os.getenv("DRAFT_UPLOAD_DIR", "data/manifest_draft_uploads"))
+logging.getLogger(__name__).info("Draft uploads are stored under %s", DRAFT_UPLOAD_DIR)
 
 # A CSV saved by Excel as "CSV UTF-8" carries this 3-byte marker at the
 # very start of the file. It's invisible to a human and to pandas (which
 # strips it automatically), but Python's stdlib csv module does not - it
-# silently glues ﻿ onto the first column's name, so e.g. "state.
+# silently glues U+FEFF onto the first column's name, so e.g. "state.
 # lgd_code" as declared in a manifest no longer matches the actual first
 # column header the file contains, byte for byte. Stripping it here, once,
 # at intake means no CSV saved to disk (or later validated, uploaded to
 # S3, etc.) ever carries one - simpler than making every downstream reader
 # BOM-aware individually.
 _UTF8_BOM = b"\xef\xbb\xbf"
+
+
+def skip_utf8_bom(fileobj) -> None:
+    """Rewinds a seekable binary stream to its start, then past a UTF-8 BOM
+    if it begins with one, so whatever reads on gets the content without it."""
+    fileobj.seek(0)
+    if fileobj.read(len(_UTF8_BOM)) != _UTF8_BOM:
+        fileobj.seek(0)
 
 
 def save_upload(upload_file: UploadFile) -> str:
@@ -61,13 +69,9 @@ def save_upload(upload_file: UploadFile) -> str:
 
     # Streamed in chunks (not upload_file.file.read() then write()) - a
     # large CSV would otherwise be buffered whole in memory before any of
-    # it reaches disk. Peek at the first 3 bytes to strip a UTF-8 BOM if
-    # present (see _UTF8_BOM above); leave the stream positioned right
-    # after it so copyfileobj picks up from there, or rewind to the very
-    # start if there was no BOM to strip.
-    upload_file.file.seek(0)
-    if upload_file.file.read(len(_UTF8_BOM)) != _UTF8_BOM:
-        upload_file.file.seek(0)
+    # it reaches disk. copyfileobj picks up after any UTF-8 BOM (see
+    # _UTF8_BOM above).
+    skip_utf8_bom(upload_file.file)
     with open(dest_path, "wb") as f:
         shutil.copyfileobj(upload_file.file, f)
 

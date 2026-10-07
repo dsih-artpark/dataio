@@ -29,7 +29,7 @@ BOM = b"\xef\xbb\xbf"
     "make_source",
     [
         lambda tmp_path: BOM + CSV.encode("utf-8"),
-        lambda tmp_path: "﻿" + CSV,
+        lambda tmp_path: "\ufeff" + CSV,
         lambda tmp_path: str(_write(tmp_path / "t.csv", BOM + CSV.encode("utf-8"))),
     ],
     ids=["bytes", "inline-text", "file-path"],

@@ -318,3 +318,28 @@ def test_get_dataset_download_urls_denies_without_permission(monkeypatch):
     # Permission was denied before the audit-log step - nothing should have
     # been logged for a download that never happened.
     assert session.added == []
+
+
+class EmptyFilestoreStub:
+    def list_files_in_s3(self, _dataset_id, _version_type):
+        return []
+
+
+def test_get_dataset_download_urls_does_not_log_when_no_files(monkeypatch):
+    """A request that yields no downloadable tables (empty dataset, S3 error)
+    must not be counted as a download."""
+    service = object.__new__(WebUserService)
+    service.logger = logging.getLogger(__name__)
+
+    monkeypatch.setattr("dataio.api.services.web_user_service.database.get_dataset", lambda _id: _downloadable_dataset())
+    monkeypatch.setattr("dataio.api.services.web_user_service.determine_user_permissions", lambda _user: [])
+    monkeypatch.setattr("dataio.api.services.filestore_service.FilestoreService", EmptyFilestoreStub)
+
+    session = UserDBSessionStub()
+    monkeypatch.setattr("dataio.api.services.web_user_service.DBSession", lambda: session)
+
+    user = SimpleNamespace(email="reader@example.com", is_admin=False)
+    result = service.get_dataset_download_urls(user, "TS0001DS0001")
+
+    assert result["tables"] == []
+    assert session.added == []

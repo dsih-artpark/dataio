@@ -46,6 +46,9 @@ jobs:
           proxy_username: ${{ secrets.USER }}
           proxy_key: ${{ secrets.JUMP_SERVER_PRIVATE_KEY }}
           script: |
+            # Stop on the first failure so a failed migration never restarts
+            # the new code against a partially migrated database.
+            set -eo pipefail
             export ENV=${{ github.ref_name }}
             export PATH="/home/ubuntu/.local/bin:$PATH"
             d=$(date +%Y%m%d-%H%M%S)
@@ -57,8 +60,10 @@ jobs:
             cd dataio
             mkdir logs
             uv sync --group docs --group api
-            uv run all-migrations
+            # Docs first: a failed docs build then stops the deploy before
+            # migrations, not between migrations and the restart.
             uv run sphinx-build -b html docs/source docs/build
+            uv run all-migrations
             sudo supervisorctl restart dataio-app
 
   deploy_web:

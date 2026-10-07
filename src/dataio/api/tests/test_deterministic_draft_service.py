@@ -62,13 +62,8 @@ def _patch_common(monkeypatch):
         draft_service, "_validate_manifest",
         lambda manifest_dict, csv_paths_by_table: ValidationResult(dataset_kind="tabular"),
     )
-    monkeypatch.setattr(draft_service, "suggest_next_dataset_id", lambda collection_id: "CS0007DS0999")
-    monkeypatch.setattr(draft_service, "create_reserved_dataset_id", lambda *a, **kw: None)
-    monkeypatch.setattr(draft_service, "create_reserved_raw_dataset_id", lambda *a, **kw: None)
-    monkeypatch.setattr(
-        "dataio.api.database.rds_id_helpers.suggest_next_raw_dataset_id_for_category",
-        lambda category_id: "CSRDS0099",
-    )
+    monkeypatch.setattr(draft_service, "reserve_next_dataset_id", lambda *a, **kw: "CS0007DS0999")
+    monkeypatch.setattr(draft_service, "reserve_next_raw_dataset_id", lambda *a, **kw: "CSRDS0099")
 
 
 def _fake_create_manifest_draft(recorded):

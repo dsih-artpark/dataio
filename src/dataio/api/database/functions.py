@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from typing import List, Optional
 import logging
 import re
@@ -6,10 +7,10 @@ from sqlalchemy.orm import joinedload
 import bcrypt
 import secrets
 import dateutil
-from sqlalchemy import select
+from sqlalchemy import or_, select, text
 from datetime import datetime, timedelta
 
-from dataio.api.database.config import Session
+from dataio.api.database.config import Session, engine
 from dataio.api.database.enums import ResourceType, DatasetManifestDraftStatus
 
 from dataio.api.database.models import (
@@ -63,6 +64,8 @@ def check_if_dataset_exists(dataset_id: str):
     except Exception as e:
         logger.error(f"Error checking if dataset exists: {str(e)}")
         raise
+    finally:
+        session.close()
 
 
 def get_dataset(dataset_id: str):
@@ -141,14 +144,118 @@ def list_reserved_dataset_ids(search: str | None = None, limit: int = 100, offse
         session.close()
 
 
+class ReservedIdConflict(ValueError):
+    """The ID, or for a dataset ID its catalogue-wide number, is already taken."""
+
+
+class IdCounterExhausted(ValueError):
+    """The four-digit dataset number counter has no numbers left."""
+
+
+class DatasetBusy(ValueError):
+    """Another import or upload currently holds the dataset."""
+
+
+# Advisory-lock class for dataset_upload_lock; the second key is hashtext(ds_id).
+_DATASET_UPLOAD_LOCK_CLASS = 7_340_003
+
+
+@contextmanager
+def dataset_upload_lock(ds_id: str, *, exclusive: bool):
+    """Holds a per-dataset advisory lock for the duration of the block, on a
+    connection of its own (so it survives the commits made inside the block).
+    A package import takes it exclusively from its S3 pre-check until it has
+    finished or been undone; manual table and manifest uploads take it shared.
+    So a manual upload never lands in the S3 folder a failed import's undo
+    deletes, while manual uploads don't block each other. Raises DatasetBusy
+    instead of waiting when the other side holds it."""
+    lock, unlock = (
+        ("pg_try_advisory_lock", "pg_advisory_unlock")
+        if exclusive
+        else ("pg_try_advisory_lock_shared", "pg_advisory_unlock_shared")
+    )
+    params = {"lock_class": _DATASET_UPLOAD_LOCK_CLASS, "ds_id": ds_id}
+    conn = engine.connect()
+    try:
+        acquired = conn.execute(
+            text(f"SELECT {lock}(:lock_class, hashtext(:ds_id))"), params
+        ).scalar()
+        conn.commit()  # don't sit "idle in transaction" while the block runs
+    except Exception:
+        conn.close()
+        raise
+    if not acquired:
+        conn.close()
+        raise DatasetBusy(
+            f"Files are being uploaded to dataset {ds_id} right now; try again when that finishes."
+            if exclusive
+            else f"Dataset {ds_id} is being imported right now; try again in a few minutes."
+        )
+    try:
+        yield
+    finally:
+        try:
+            conn.execute(text(f"SELECT {unlock}(:lock_class, hashtext(:ds_id))"), params)
+            conn.commit()
+            conn.close()
+        except Exception:
+            # A session-level lock must never go back to the pool still held:
+            # discard the connection (closing it releases the lock).
+            logger.exception("Could not release the upload lock on dataset %s", ds_id)
+            conn.invalidate()
+
+
+# pg_advisory_xact_lock keys, one per ID counter. Held until the reserving
+# transaction ends, so two reservations can't both pass the "is it taken?"
+# checks before either is inserted.
+_DATASET_ID_LOCK_KEY = 7_340_001
+_RAW_DATASET_ID_LOCK_KEY = 7_340_002
+
+DATASET_SERIAL_RE = re.compile(r"DS(\d{4})$")
+MAX_DATASET_SERIAL = 9999
+
+
+def _lock_id_counter(session, key: int) -> None:
+    session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
+
+
+def _dataset_serial_owner(session, ds_id: str) -> str | None:
+    """Another dataset or reservation already using ds_id's DSnnnn number.
+    The number is one counter shared by every collection, so CS0026DS0113
+    clashes with CS0007DS0113."""
+    match = DATASET_SERIAL_RE.search(ds_id)
+    if not match:
+        return None
+    suffix = f"%DS{match.group(1)}"
+    for model in (Dataset, ReservedDatasetID):
+        owner = (
+            session.query(model.ds_id)
+            .filter(model.ds_id.like(suffix), model.ds_id != ds_id)
+            .first()
+        )
+        if owner:
+            return owner[0]
+    return None
+
+
 def create_reserved_dataset_id(ds_id: str, collection_id: str | None, note: str | None, reserved_by: str):
     session = Session()
     try:
-        if check_if_dataset_exists(ds_id):
-            raise ValueError(f"Dataset with ID {ds_id} already exists")
+        # Checks use this locked session, so a concurrent reservation can't
+        # slip in between them and the insert.
+        _lock_id_counter(session, _DATASET_ID_LOCK_KEY)
+        if session.query(Dataset.id).filter(Dataset.ds_id == ds_id).first():
+            raise ReservedIdConflict(f"Dataset with ID {ds_id} already exists")
         existing = session.query(ReservedDatasetID).filter(ReservedDatasetID.ds_id == ds_id).first()
         if existing:
-            raise ValueError(f"Dataset ID {ds_id} is already reserved")
+            raise ReservedIdConflict(f"Dataset ID {ds_id} is already reserved")
+        serial_owner = _dataset_serial_owner(session, ds_id)
+        if serial_owner:
+            raise ReservedIdConflict(
+                f"Dataset number {DATASET_SERIAL_RE.search(ds_id).group(1)} is already used by "
+                f"{serial_owner}. Numbers are shared across all collections; "
+                "use the next suggested ID."
+            )
         reservation = ReservedDatasetID(
             ds_id=ds_id,
             collection_id=collection_id,
@@ -160,8 +267,58 @@ def create_reserved_dataset_id(ds_id: str, collection_id: str | None, note: str 
         session.refresh(reservation)
         return reservation
     except Exception as e:
+        session.rollback()
         logger.error(f"Error creating reserved dataset ID: {str(e)}")
         raise
+    finally:
+        session.close()
+
+
+def reserve_next_dataset_id(collection_id: str, note: str | None, reserved_by: str) -> str:
+    """Reserves the next free dataset ID in collection_id. The number is
+    computed and reserved under one lock, so concurrent callers (e.g. two
+    draft generations) always get different numbers."""
+    session = Session()
+    try:
+        _lock_id_counter(session, _DATASET_ID_LOCK_KEY)
+        next_number = get_next_dataset_serial_number(session)
+        if next_number > MAX_DATASET_SERIAL:
+            raise IdCounterExhausted(
+                f"The dataset number counter is past {MAX_DATASET_SERIAL}; "
+                "dataset IDs only have four digits."
+            )
+        ds_id = f"{collection_id}DS{next_number:04d}"
+        session.add(
+            ReservedDatasetID(
+                ds_id=ds_id, collection_id=collection_id, note=note, reserved_by=reserved_by
+            )
+        )
+        session.commit()
+        return ds_id
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error reserving the next dataset ID: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def get_reserved_dataset_id(ds_id: str):
+    session = Session()
+    try:
+        return session.query(ReservedDatasetID).filter(ReservedDatasetID.ds_id == ds_id).first()
+    finally:
+        session.close()
+
+
+def get_reserved_raw_dataset_id(rds_id: str):
+    session = Session()
+    try:
+        return (
+            session.query(ReservedRawDatasetID)
+            .filter(ReservedRawDatasetID.rds_id == rds_id)
+            .first()
+        )
     finally:
         session.close()
 
@@ -194,19 +351,17 @@ def check_if_raw_dataset_exists(rds_id: str) -> bool:
 
 
 def create_reserved_raw_dataset_id(rds_id: str, category_id: str | None, note: str | None, reserved_by: str):
-    """Mirrors create_reserved_dataset_id, for rds_id. Called immediately
-    after resolving a suggested rds_id (e.g. in draft_service.generate_draft)
-    so two concurrent callers in the same category can't be handed the same
-    suggestion - suggest_next_raw_dataset_id_for_category folds these
-    reservations into its max-suffix computation.
+    """Mirrors create_reserved_dataset_id, for rds_id. To reserve the next
+    free rds_id of a category, use reserve_next_raw_dataset_id instead.
     """
     session = Session()
     try:
-        if check_if_raw_dataset_exists(rds_id):
-            raise ValueError(f"Raw dataset with ID {rds_id} already exists")
+        _lock_id_counter(session, _RAW_DATASET_ID_LOCK_KEY)
+        if session.query(RawDataset.id).filter(RawDataset.rds_id == rds_id).first():
+            raise ReservedIdConflict(f"Raw dataset with ID {rds_id} already exists")
         existing = session.query(ReservedRawDatasetID).filter(ReservedRawDatasetID.rds_id == rds_id).first()
         if existing:
-            raise ValueError(f"Raw dataset ID {rds_id} is already reserved")
+            raise ReservedIdConflict(f"Raw dataset ID {rds_id} is already reserved")
         reservation = ReservedRawDatasetID(
             rds_id=rds_id,
             category_id=category_id,
@@ -218,7 +373,31 @@ def create_reserved_raw_dataset_id(rds_id: str, category_id: str | None, note: s
         session.refresh(reservation)
         return reservation
     except Exception as e:
+        session.rollback()
         logger.error(f"Error creating reserved raw dataset ID: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def reserve_next_raw_dataset_id(category_id: str, note: str | None, reserved_by: str) -> str:
+    """Reserves the next free rds_id of a category (see
+    suggest_next_raw_dataset_id_for_category), computed and reserved under
+    one lock so concurrent callers always get different IDs."""
+    session = Session()
+    try:
+        _lock_id_counter(session, _RAW_DATASET_ID_LOCK_KEY)
+        rds_id = suggest_next_raw_dataset_id_for_category(category_id, session)
+        session.add(
+            ReservedRawDatasetID(
+                rds_id=rds_id, category_id=category_id, note=note, reserved_by=reserved_by
+            )
+        )
+        session.commit()
+        return rds_id
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error reserving the next raw dataset ID: {str(e)}")
         raise
     finally:
         session.close()
@@ -241,6 +420,34 @@ def delete_reserved_raw_dataset_id(rds_id: str):
 
 def _coerce_draft_id(draft_id) -> uuid.UUID:
     return draft_id if isinstance(draft_id, uuid.UUID) else uuid.UUID(str(draft_id))
+
+
+class DraftStatusConflict(ValueError):
+    """A draft was not in one of the statuses an update required (e.g. approving
+    a draft that was rejected, or a concurrent review changed it first)."""
+
+    def __init__(self, draft_id, current: str, expected):
+        super().__init__(
+            f"Manifest draft {draft_id} is {current}; expected one of {', '.join(sorted(expected))}"
+        )
+        self.current = current
+        self.expected = set(expected)
+
+
+def _get_draft_for_update(session, draft_id, expected_statuses=None):
+    """Loads a draft row locked FOR UPDATE and, when expected_statuses is given,
+    checks its current status under that lock (compare-and-set)."""
+    draft = (
+        session.query(DatasetManifestDraft)
+        .filter(DatasetManifestDraft.draft_id == _coerce_draft_id(draft_id))
+        .with_for_update()
+        .first()
+    )
+    if not draft:
+        raise ValueError(f"Manifest draft {draft_id} not found")
+    if expected_statuses is not None and draft.status.value not in expected_statuses:
+        raise DraftStatusConflict(draft_id, draft.status.value, expected_statuses)
+    return draft
 
 
 def create_manifest_draft(
@@ -339,21 +546,18 @@ def update_manifest_draft_status(
     draft_id,
     status: str,
     *,
+    expected_statuses=None,
     reviewed_by: str | None = None,
     dataset_id: str | None = None,
     validation_result: dict | None = None,
     session=None,
 ):
+    """Sets a draft's status. With expected_statuses, raises DraftStatusConflict
+    unless the draft is currently in one of them (checked under a row lock)."""
     owns_session = session is None
     session = session or Session()
     try:
-        draft = (
-            session.query(DatasetManifestDraft)
-            .filter(DatasetManifestDraft.draft_id == _coerce_draft_id(draft_id))
-            .first()
-        )
-        if not draft:
-            raise ValueError(f"Manifest draft {draft_id} not found")
+        draft = _get_draft_for_update(session, draft_id, expected_statuses)
         draft.status = DatasetManifestDraftStatus(status)
         if reviewed_by is not None:
             draft.reviewed_by = reviewed_by
@@ -366,7 +570,147 @@ def update_manifest_draft_status(
         session.refresh(draft)
         return draft
     except Exception as e:
+        session.rollback()
         logger.error(f"Error updating manifest draft {draft_id}: {str(e)}")
+        raise
+    finally:
+        if owns_session:
+            session.close()
+
+
+def update_manifest_draft_validation(draft_id, validation_result: dict, session=None):
+    """Stores a fresh validation result without touching status or content, so a
+    slow revalidation can't overwrite a review decision made while it ran."""
+    owns_session = session is None
+    session = session or Session()
+    try:
+        draft = _get_draft_for_update(session, draft_id)
+        draft.validation_result = validation_result
+        session.commit()
+        session.refresh(draft)
+        return draft
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error updating manifest draft validation {draft_id}: {str(e)}")
+        raise
+    finally:
+        if owns_session:
+            session.close()
+
+
+def other_live_draft_uses_ids(exclude_draft_id, *, dataset_id=None, raw_dataset_id=None) -> bool:
+    """True when another pending/flagged/approved draft holds dataset_id or
+    raw_dataset_id - e.g. the draft that superseded this one via regenerate -
+    so releasing that reservation would hand a live draft's ID to someone else."""
+    conditions = []
+    if dataset_id:
+        conditions.append(DatasetManifestDraft.dataset_id == dataset_id)
+    if raw_dataset_id:
+        conditions.append(DatasetManifestDraft.raw_dataset_id == raw_dataset_id)
+    if not conditions:
+        return False
+    session = Session()
+    try:
+        query = session.query(DatasetManifestDraft.draft_id).filter(
+            DatasetManifestDraft.draft_id != _coerce_draft_id(exclude_draft_id),
+            DatasetManifestDraft.status.in_(
+                [
+                    DatasetManifestDraftStatus.PENDING,
+                    DatasetManifestDraftStatus.FLAGGED,
+                    DatasetManifestDraftStatus.APPROVED,
+                ]
+            ),
+            or_(*conditions),
+        )
+        return session.query(query.exists()).scalar()
+    finally:
+        session.close()
+
+
+def other_draft_uses_path(exclude_draft_id, path: str) -> bool:
+    """True when another draft row still points at this source CSV/log path
+    (drafts regenerated before each draft got its own file copies share them)."""
+    session = Session()
+    try:
+        query = session.query(DatasetManifestDraft.draft_id).filter(
+            DatasetManifestDraft.draft_id != _coerce_draft_id(exclude_draft_id),
+            or_(
+                DatasetManifestDraft.source_csv_path.contains(path, autoescape=True),
+                DatasetManifestDraft.digitization_log_path == path,
+            ),
+        )
+        return session.query(query.exists()).scalar()
+    finally:
+        session.close()
+
+
+# An import that claimed a draft this long ago without finishing is treated
+# as dead (e.g. the worker was restarted mid-upload) and can be claimed again.
+DRAFT_IMPORT_STALE_AFTER = timedelta(minutes=30)
+
+
+class DraftImportConflict(ValueError):
+    """An "Upload dataset now" import was refused because the draft is already
+    imported or another import of it is still running."""
+
+
+def draft_import_running(draft) -> bool:
+    """True while an import holds the draft (claimed, not finished, not stale)."""
+    return (
+        draft.import_started_at is not None
+        and draft.imported_at is None
+        and datetime.utcnow() - draft.import_started_at < DRAFT_IMPORT_STALE_AFTER
+    )
+
+
+def claim_manifest_draft_import(draft_id, session=None):
+    """Marks an approved draft's import as started, under the row lock, so two
+    imports of the same draft can't run at once."""
+    owns_session = session is None
+    session = session or Session()
+    try:
+        draft = _get_draft_for_update(session, draft_id, expected_statuses=("approved",))
+        if draft.imported_at is not None:
+            raise DraftImportConflict(f"Manifest draft {draft_id} has already been uploaded")
+        if draft_import_running(draft):
+            raise DraftImportConflict(
+                f"An upload of manifest draft {draft_id} is already running "
+                f"(started {draft.import_started_at.isoformat()} UTC)"
+            )
+        draft.import_started_at = datetime.utcnow()
+        session.commit()
+        session.refresh(draft)
+        return draft
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error claiming import of manifest draft {draft_id}: {str(e)}")
+        raise
+    finally:
+        if owns_session:
+            session.close()
+
+
+def finish_manifest_draft_import(
+    draft_id, *, succeeded: bool, result: dict, imported_by: str | None = None, session=None
+):
+    """Records how a claimed import ended. On success the draft is stamped as
+    imported; on failure the claim is released so the upload can be retried."""
+    owns_session = session is None
+    session = session or Session()
+    try:
+        draft = _get_draft_for_update(session, draft_id)
+        draft.import_result = result
+        if succeeded:
+            draft.imported_at = datetime.utcnow()
+            draft.imported_by = imported_by
+        else:
+            draft.import_started_at = None
+        session.commit()
+        session.refresh(draft)
+        return draft
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error recording import result of manifest draft {draft_id}: {str(e)}")
         raise
     finally:
         if owns_session:
@@ -379,6 +723,7 @@ def update_manifest_draft_content(
     draft_yaml: str,
     draft_json: dict,
     validation_result: dict | None = None,
+    expected_statuses=None,
     session=None,
 ):
     """Overwrites a draft's manifest content in place (curator-edited YAML,
@@ -389,13 +734,7 @@ def update_manifest_draft_content(
     owns_session = session is None
     session = session or Session()
     try:
-        draft = (
-            session.query(DatasetManifestDraft)
-            .filter(DatasetManifestDraft.draft_id == _coerce_draft_id(draft_id))
-            .first()
-        )
-        if not draft:
-            raise ValueError(f"Manifest draft {draft_id} not found")
+        draft = _get_draft_for_update(session, draft_id, expected_statuses)
         draft.draft_yaml = draft_yaml
         draft.draft_json = draft_json
         if validation_result is not None:
@@ -404,6 +743,7 @@ def update_manifest_draft_content(
         session.refresh(draft)
         return draft
     except Exception as e:
+        session.rollback()
         logger.error(f"Error updating manifest draft content {draft_id}: {str(e)}")
         raise
     finally:
@@ -411,7 +751,9 @@ def update_manifest_draft_content(
             session.close()
 
 
-def flag_manifest_draft_field(draft_id, field_path: str, reason: str, flagged_by: str, session=None):
+def flag_manifest_draft_field(
+    draft_id, field_path: str, reason: str, flagged_by: str, expected_statuses=None, session=None
+):
     """Appends one entry to a draft's flagged_fields, sets its status to
     'flagged', and records a matching reviewer note - the one place a
     curator marks a specific field as needing attention/regeneration.
@@ -419,13 +761,7 @@ def flag_manifest_draft_field(draft_id, field_path: str, reason: str, flagged_by
     owns_session = session is None
     session = session or Session()
     try:
-        draft = (
-            session.query(DatasetManifestDraft)
-            .filter(DatasetManifestDraft.draft_id == _coerce_draft_id(draft_id))
-            .first()
-        )
-        if not draft:
-            raise ValueError(f"Manifest draft {draft_id} not found")
+        draft = _get_draft_for_update(session, draft_id, expected_statuses)
         draft.flagged_fields = [*(draft.flagged_fields or []), {"field": field_path, "reason": reason}]
         draft.reviewer_notes = [*(draft.reviewer_notes or []), {"field": field_path, "note": reason, "by": flagged_by}]
         draft.status = DatasetManifestDraftStatus.FLAGGED
@@ -433,6 +769,7 @@ def flag_manifest_draft_field(draft_id, field_path: str, reason: str, flagged_by
         session.refresh(draft)
         return draft
     except Exception as e:
+        session.rollback()
         logger.error(f"Error flagging field on manifest draft {draft_id}: {str(e)}")
         raise
     finally:
@@ -861,6 +1198,11 @@ def suggest_next_dataset_id(collection_id: str) -> str:
     session = Session()
     try:
         next_number = get_next_dataset_serial_number(session)
+        if next_number > MAX_DATASET_SERIAL:
+            raise IdCounterExhausted(
+                f"The dataset number counter is past {MAX_DATASET_SERIAL}; "
+                "dataset IDs only have four digits."
+            )
         prefix = f"{collection_id}DS"
         return f"{prefix}{next_number:04d}"
     except Exception as e:
@@ -999,7 +1341,9 @@ def create_user(user_create: UserCreate):
             key = secrets.token_urlsafe()
             bytes = key.encode("utf-8")
             salt = bcrypt.gensalt()
-            hash = bcrypt.hashpw(bytes, salt)
+            # users.key is TEXT: store the hash as str, not bytes (psycopg2 would
+            # bind bytes as bytea and store its '\x...' hex form)
+            hash = bcrypt.hashpw(bytes, salt).decode("utf-8")
             user = User(
                 email=user_create.email, is_group=user_create.is_group, key=hash
             )
@@ -1197,11 +1541,46 @@ def create_raw_dataset(raw_dataset: RawDatasetCreate):
     try:
         raw_dataset = RawDataset(**raw_dataset.model_dump())
         session.add(raw_dataset)
+        # The id is now a real row: drop its reservation in the same commit,
+        # as create_dataset does for reserved_dataset_ids.
+        reserved = (
+            session.query(ReservedRawDatasetID)
+            .filter(ReservedRawDatasetID.rds_id == raw_dataset.rds_id)
+            .first()
+        )
+        if reserved:
+            session.delete(reserved)
         session.commit()
         session.refresh(raw_dataset)
         return raw_dataset
     except Exception as e:
+        session.rollback()
         logger.error(f"Error creating raw dataset: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def delete_raw_dataset(rds_id: str):
+    """Deletes a raw dataset that no dataset links to. Used to undo a failed
+    import that created it; a linked raw dataset is never removed."""
+    session = Session()
+    try:
+        raw_dataset = session.query(RawDataset).filter(RawDataset.rds_id == rds_id).first()
+        if not raw_dataset:
+            raise ValueError(f"Raw dataset with ID {rds_id} not found")
+        linked = (
+            session.query(DatasetRawDataset)
+            .filter(DatasetRawDataset.raw_dataset_id == raw_dataset.id)
+            .first()
+        )
+        if linked:
+            raise ValueError(f"Raw dataset {rds_id} is still linked to a dataset")
+        session.delete(raw_dataset)
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error deleting raw dataset: {str(e)}")
         raise
     finally:
         session.close()

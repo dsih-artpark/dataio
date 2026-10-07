@@ -12,8 +12,8 @@ from sqlalchemy import (
     ARRAY,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import relationship, declarative_base
-from datetime import datetime
+from sqlalchemy.orm import backref, relationship, declarative_base
+from datetime import datetime, timezone
 import uuid
 from dataio.api.database.enums import (
     AccessLevel,
@@ -111,7 +111,7 @@ class ReservedDatasetID(Base):
     ds_id = Column(Text, nullable=False, unique=True)
     collection_id = Column(Text, nullable=True)
     note = Column(Text, nullable=True)
-    reserved_by = Column(Text, nullable=False)
+    reserved_by = Column(Text, nullable=True)  # SET NULL when the user is deleted (migration 023)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 
@@ -122,7 +122,7 @@ class ReservedRawDatasetID(Base):
     rds_id = Column(Text, nullable=False, unique=True)
     category_id = Column(Text, nullable=True)
     note = Column(Text, nullable=True)
-    reserved_by = Column(Text, nullable=False)
+    reserved_by = Column(Text, nullable=True)  # SET NULL when the user is deleted (migration 023)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 
@@ -227,7 +227,7 @@ class Session(Base):
     revoked_at = Column(DateTime, nullable=True)
 
     # Relationship
-    user = relationship("User", backref="sessions")
+    user = relationship("User", backref=backref("sessions", passive_deletes=True))
 
 
 class AuthRateLimit(Base):
@@ -275,7 +275,7 @@ class OAuthIdentity(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     last_login_at = Column(DateTime, nullable=True)
 
-    user = relationship("User", backref="oauth_identities")
+    user = relationship("User", backref=backref("oauth_identities", passive_deletes=True))
 
 
 class OTPToken(Base):
@@ -309,7 +309,7 @@ class WebAuthnCredential(Base):
     last_used_at = Column(DateTime, nullable=True)
 
     # Relationship
-    user = relationship("User", backref="webauthn_credentials")
+    user = relationship("User", backref=backref("webauthn_credentials", passive_deletes=True))
 
 
 class WebAuthnChallenge(Base):
@@ -341,7 +341,7 @@ class UserAPIKey(Base):
     revoked_at = Column(DateTime, nullable=True)
 
     # Relationship
-    user = relationship("User", backref="api_keys")
+    user = relationship("User", backref=backref("api_keys", passive_deletes=True))
 
 
 class MagicLinkToken(Base):
@@ -377,7 +377,7 @@ class ChatSession(Base):
     deleted_at = Column(DateTime, nullable=True)
 
     # Relationships
-    user = relationship("User", backref="chat_sessions")
+    user = relationship("User", backref=backref("chat_sessions", passive_deletes=True))
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
 
 
@@ -437,14 +437,22 @@ class DatasetManifestDraft(Base):
     flagged_fields = Column(JSONB, nullable=False, default=list)
     reviewer_notes = Column(JSONB, nullable=False, default=list)
     validation_result = Column(JSONB, nullable=True)
-    llm_model_id = Column(Text, nullable=False)
+    # NULL for a deterministic (rule-based) draft; migration 021 dropped NOT NULL.
+    llm_model_id = Column(Text, nullable=True)
     llm_prompt_tokens = Column(Integer, nullable=True)
     llm_completion_tokens = Column(Integer, nullable=True)
-    created_by = Column(Text, ForeignKey("users.email"), nullable=False)
+    created_by = Column(Text, ForeignKey("users.email", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    reviewed_by = Column(Text, ForeignKey("users.email"), nullable=True)
+    reviewed_by = Column(Text, ForeignKey("users.email", ondelete="SET NULL"), nullable=True)
     reviewed_at = Column(DateTime, nullable=True)
     superseded_by_draft_id = Column(UUID(as_uuid=True), ForeignKey("dataset_manifest_drafts.draft_id"), nullable=True)
+    # "Upload dataset now" tracking (migration 024). import_started_at is set
+    # while an upload holds the draft and cleared if it fails; imported_at/by
+    # are set once the dataset is fully published.
+    import_started_at = Column(DateTime, nullable=True)
+    imported_at = Column(DateTime, nullable=True)
+    imported_by = Column(Text, ForeignKey("users.email", ondelete="SET NULL"), nullable=True)
+    import_result = Column(JSONB, nullable=True)
 
 
 class DatasetDownload(Base):
@@ -458,8 +466,10 @@ class DatasetDownload(Base):
     access_channel = Column(Text, nullable=False, default="WEB")  # 'WEB', 'SDK', 'MCP'
     ip_address = Column(Text, nullable=True)
     user_agent = Column(Text, nullable=True)
-    downloaded_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    # TIMESTAMPTZ in migration 022: write an aware UTC value so the stored
+    # instant doesn't depend on the database session's TimeZone
+    downloaded_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Relationship
-    user = relationship("User", backref="downloads")
+    user = relationship("User", backref=backref("downloads", passive_deletes=True))
 

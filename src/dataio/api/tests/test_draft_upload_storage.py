@@ -84,3 +84,36 @@ def test_save_upload_rejects_absolute_path_filename(tmp_path, monkeypatch):
     saved = Path(saved_path).resolve()
     assert saved.is_relative_to(tmp_path.resolve())
     assert not absolute_target.exists()
+
+
+def test_relative_upload_dir_resolves_against_home_not_the_checkout(monkeypatch, tmp_path):
+    # the deploy re-clones the working directory, so a relative path must not
+    # land inside it
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    assert draft_upload_storage.resolve_upload_dir("data/uploads") == str(tmp_path / "data" / "uploads")
+
+
+def test_absolute_upload_dir_is_kept(tmp_path):
+    assert draft_upload_storage.resolve_upload_dir(str(tmp_path / "x")) == str(tmp_path / "x")
+
+
+def test_delete_managed_file_logs_instead_of_raising_when_the_file_cannot_be_removed(
+    tmp_path, monkeypatch, caplog
+):
+    # Callers run this mid-delete (after releasing IDs) or inside error
+    # handling, so a locked file must not abort them.
+    monkeypatch.setattr(draft_upload_storage, "DRAFT_UPLOAD_DIR", str(tmp_path))
+    locked = tmp_path / "abc" / "data.csv"
+    locked.parent.mkdir()
+    locked.write_bytes(b"a\n1\n")
+
+    def refuse(self, missing_ok=False):
+        raise PermissionError("file is in use")
+
+    monkeypatch.setattr(Path, "unlink", refuse)
+
+    draft_upload_storage.delete_managed_file(str(locked))
+
+    assert locked.exists()
+    assert "Could not delete draft file" in caplog.text

@@ -24,6 +24,7 @@ import yaml
 
 from dataio.api.services.csv_profiler import CsvProfile
 from dataio.api.services.digitization_log import DigitizationLog
+from dataio.api.services.yaml_utils import stringify_yaml_dates
 
 # A real, trimmed metadata.yaml (condensed from the actual CS0007DS0112
 # dataset in data/) shown to the LLM verbatim as a structural template - not
@@ -503,7 +504,7 @@ def parse_llm_output(text: str) -> tuple[dict, list[dict]]:
     manifest_text, flags_text = rest.split("---FLAGS---", 1)
 
     try:
-        manifest_dict = yaml.safe_load(manifest_text)
+        manifest_dict = stringify_yaml_dates(yaml.safe_load(manifest_text))
     except yaml.YAMLError as exc:
         raise ValueError(f"Manifest block is not valid YAML: {exc}") from exc
     if not isinstance(manifest_dict, dict):
@@ -513,6 +514,13 @@ def parse_llm_output(text: str) -> tuple[dict, list[dict]]:
         flags_doc = yaml.safe_load(flags_text) or {}
     except yaml.YAMLError as exc:
         raise ValueError(f"Flags block is not valid YAML: {exc}") from exc
-    flags = flags_doc.get("flags", []) if isinstance(flags_doc, dict) else []
+    flags = flags_doc.get("flags") if isinstance(flags_doc, dict) else []
+    # "flags:" with nothing under it parses as None and means no flags. Any
+    # other shape is malformed output: raise ValueError so the caller retries
+    # instead of crashing later with a TypeError the retry doesn't catch.
+    if flags is None:
+        flags = []
+    if not isinstance(flags, list) or not all(isinstance(flag, dict) for flag in flags):
+        raise ValueError("Flags block must be a list of mappings with 'field' and 'reason' keys")
 
     return manifest_dict, flags

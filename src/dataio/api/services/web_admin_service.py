@@ -10,6 +10,8 @@ import json
 import os
 import re
 import tempfile
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import List, Optional
@@ -19,7 +21,7 @@ import yaml
 
 from dataio.api.database import functions as database
 from dataio.api.database.config import Session as DBSession
-from dataio.api.database.enums import VersionType
+from dataio.api.database.enums import SpatialResolution, TemporalResolution, VersionType
 from dataio.api.models import (
     DatasetCreate,
     DatasetDocumentationUpdate,
@@ -31,6 +33,7 @@ from dataio.api.models import (
 from dataio.api.database.models import Collection, DataOwner, Dataset, User, UserGroup, UserPermission, DatasetDownload
 from dataio.api.auth.otp import create_otp, verify_otp
 from dataio.api.auth.security import enforce_rate_limit
+from dataio.api.services.yaml_utils import stringify_yaml_dates
 from dataio.api.services.base_service import BaseService
 from dataio.api.services.admin_dataset_service import AdminDatasetService
 from dataio.api.services.draft_review_service import DraftReviewService
@@ -44,6 +47,84 @@ from dataio.validate import DataIOValidationService, DatasetKind, ValidationRequ
 
 logger = logging.getLogger(__name__)
 
+# <collection ID><DS><4-digit catalogue-wide number>, e.g. CS0007DS0113
+DATASET_ID_RE = re.compile(r"[A-Z]{2}\d{4}DS\d{4}")
+
+
+def _draft_info_problems(info: dict) -> list[str]:
+    """Values in a draft-derived info.yml that create_dataset would reject."""
+    problems = []
+    spatial_resolution = info.get("spatial_resolution")
+    if spatial_resolution not in {member.value for member in SpatialResolution}:
+        problems.append(
+            f"spatial_resolution {spatial_resolution!r} is not one of "
+            f"{', '.join(member.value for member in SpatialResolution)}"
+        )
+    temporal_resolution = info.get("temporal_resolution")
+    if temporal_resolution not in {member.value for member in TemporalResolution}:
+        problems.append(
+            f"temporal_resolution {temporal_resolution!r} is not one of "
+            f"{', '.join(member.value for member in TemporalResolution)} "
+            "(no year column with values was found)"
+        )
+    for key in ("temporal_coverage_start_date", "temporal_coverage_end_date"):
+        value = info.get(key)
+        if value is None:
+            continue
+        try:
+            database.parse_date(str(value))
+        except (ValueError, OverflowError):
+            problems.append(f"{key} {value!r} is not a valid date")
+    return problems
+
+
+@dataclass
+class _ImportUndo:
+    """What import_dataset_package has written so far, so a failure can undo it."""
+
+    ds_id: str
+    rds_id: str
+    # Fields to recreate the ID reservations that creating the rows consumes.
+    ds_reservation: Optional[dict]
+    rds_reservation: Optional[dict]
+    raw_created: bool = False
+    # Title/source of a raw dataset that existed before and was updated.
+    raw_previous: Optional[dict] = None
+    dataset_created: bool = False
+
+
+def _reservation_fields(reservation, scope_field: str) -> Optional[dict]:
+    if reservation is None:
+        return None
+    return {
+        scope_field: getattr(reservation, scope_field),
+        "note": reservation.note,
+        "reserved_by": reservation.reserved_by,
+    }
+
+
+def _import_failed_error(exc: Exception, ds_id: str, leftovers: list[str]) -> HTTPException:
+    """The error for an import that failed part-way and was undone."""
+    detail = exc.detail if isinstance(exc, HTTPException) else None
+    status_code = exc.status_code if isinstance(exc, HTTPException) else 500
+    if isinstance(detail, dict):
+        reason = detail.get("message") or "see details"
+    else:
+        reason = detail or "unexpected error, see the server log"
+    if leftovers:
+        message = (
+            f"Import of {ds_id} failed ({reason}) and could not be fully undone. "
+            f"Still to clean up by hand: {'; '.join(leftovers)}."
+        )
+    else:
+        message = (
+            f"Import of {ds_id} failed ({reason}). Everything it wrote was undone, "
+            "so you can fix the problem and retry."
+        )
+    body = {"message": message, "undone": not leftovers, "leftovers": leftovers}
+    if isinstance(detail, dict) and "findings" in detail:
+        body["findings"] = detail["findings"]
+    return HTTPException(status_code=status_code, detail=body)
 
 class WebAdminService(BaseService):
     """Service for web admin operations."""
@@ -149,7 +230,7 @@ class WebAdminService(BaseService):
         except yaml.YAMLError as exc:
             raise HTTPException(status_code=400, detail=f"Invalid info.yml: {exc}") from exc
         try:
-            metadata = yaml.safe_load(metadata_text) or {}
+            metadata = stringify_yaml_dates(yaml.safe_load(metadata_text) or {})
         except yaml.YAMLError as exc:
             raise HTTPException(status_code=400, detail=f"Invalid metadata.yml: {exc}") from exc
 
@@ -262,7 +343,9 @@ class WebAdminService(BaseService):
                     continue
                 matched_csv_stems.add(table_name)
                 matched_file.file.seek(0)
-                inline_data_files[table_name] = matched_file.file.read().decode("utf-8")
+                # utf-8-sig drops the byte-order mark Excel's "CSV UTF-8" adds,
+                # which would otherwise be read as part of the first column name.
+                inline_data_files[table_name] = matched_file.file.read().decode("utf-8-sig")
                 matched_file.file.seek(0)
 
             for stem in sorted(set(csv_by_stem.keys()) - matched_csv_stems):
@@ -1311,7 +1394,29 @@ class WebAdminService(BaseService):
         note: Optional[str] = None,
     ) -> dict:
         self._require_admin(admin_user)
-        reservation = database.create_reserved_dataset_id(ds_id, collection_id, note, admin_user.email)
+        if not DATASET_ID_RE.fullmatch(ds_id):
+            raise HTTPException(
+                status_code=400, detail=f"{ds_id} is not a dataset ID like CS0007DS0113."
+            )
+        id_collection = ds_id[:6]
+        if collection_id and collection_id != id_collection:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Dataset ID {ds_id} belongs to collection {id_collection}, "
+                    f"not {collection_id}."
+                ),
+            )
+        if database.get_collection_by_identifier(id_collection) is None:
+            raise HTTPException(
+                status_code=404, detail=f"Collection {id_collection} does not exist."
+            )
+        try:
+            reservation = database.create_reserved_dataset_id(
+                ds_id, collection_id, note, admin_user.email
+            )
+        except database.ReservedIdConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {
             "ds_id": reservation.ds_id,
             "collection_id": reservation.collection_id,
@@ -1375,61 +1480,165 @@ class WebAdminService(BaseService):
                 },
             )
 
+        ds_id = preview["dataset"]["ds_id"]
+        # Held from the S3 pre-check until the import has finished or been
+        # undone. Manual table and manifest uploads take it shared, so none can
+        # write into the dataset's S3 folder that a failed import's undo deletes.
+        try:
+            with database.dataset_upload_lock(ds_id, exclusive=True):
+                return self._import_dataset_package_locked(
+                    admin_user, preview, csv_files, bucket_type
+                )
+        except database.DatasetBusy as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    def _import_dataset_package_locked(
+        self, admin_user: User, preview: dict, csv_files: List, bucket_type: VersionType
+    ) -> dict:
         raw_dataset_payload = preview["raw_dataset"]
-        existing_raw = database.get_raw_dataset_by_identifier(raw_dataset_payload["rds_id"])
-        if existing_raw:
-            self.admin_dataset_service.update_raw_dataset(
-                raw_dataset_payload["rds_id"],
-                RawDatasetUpdate(
-                    title=raw_dataset_payload["title"],
-                    source=raw_dataset_payload["source"],
+        rds_id = raw_dataset_payload["rds_id"]
+        dataset_payload = dict(preview["dataset"])
+        dataset_payload["raw_dataset_ids"] = [rds_id]
+        ds_id = dataset_payload["ds_id"]
+
+        # A failed import is undone by deleting everything under the
+        # dataset's S3 folders, so they must start empty.
+        if self.admin_dataset_service.filestore_service.dataset_has_objects(ds_id):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"S3 already has files for dataset {ds_id} (for example left over from an "
+                    "earlier failed upload). Remove them before importing."
                 ),
             )
-        else:
-            self.admin_dataset_service.create_raw_dataset(
-                RawDatasetCreate(**raw_dataset_payload)
-            )
 
-        dataset_payload = dict(preview["dataset"])
-        dataset_payload["raw_dataset_ids"] = [raw_dataset_payload["rds_id"]]
-        self.admin_dataset_service.create_dataset(DatasetCreate(**dataset_payload))
+        existing_raw = database.get_raw_dataset_by_identifier(rds_id)
+        undo = _ImportUndo(
+            ds_id=ds_id,
+            rds_id=rds_id,
+            ds_reservation=_reservation_fields(
+                database.get_reserved_dataset_id(ds_id), "collection_id"
+            ),
+            rds_reservation=(
+                None
+                if existing_raw
+                else _reservation_fields(
+                    database.get_reserved_raw_dataset_id(rds_id), "category_id"
+                )
+            ),
+        )
+        try:
+            if existing_raw:
+                undo.raw_previous = {"title": existing_raw.title, "source": existing_raw.source}
+                self.admin_dataset_service.update_raw_dataset(
+                    rds_id,
+                    RawDatasetUpdate(
+                        title=raw_dataset_payload["title"],
+                        source=raw_dataset_payload["source"],
+                    ),
+                )
+            else:
+                self.admin_dataset_service.create_raw_dataset(
+                    RawDatasetCreate(**raw_dataset_payload)
+                )
+                undo.raw_created = True
 
-        table_files = {Path(file.filename or "").stem: file for file in csv_files if file.filename}
-        uploaded_tables = []
-        for table in preview["tables"]:
-            table_file = table_files.get(table["table_name"])
-            if table_file is None:
-                continue
-            table_file.file.seek(0)
-            metadata_upload = UploadFile(
-                filename="table-metadata.json",
-                file=BytesIO(json.dumps(table["table_metadata"]).encode("utf-8")),
+            self.admin_dataset_service.create_dataset(DatasetCreate(**dataset_payload))
+            undo.dataset_created = True
+
+            table_files = {
+                Path(file.filename or "").stem: file for file in csv_files if file.filename
+            }
+            uploaded_tables = []
+            for table in preview["tables"]:
+                table_file = table_files.get(table["table_name"])
+                if table_file is None:
+                    continue
+                table_file.file.seek(0)
+                metadata_upload = UploadFile(
+                    filename="table-metadata.json",
+                    file=BytesIO(json.dumps(table["table_metadata"]).encode("utf-8")),
+                )
+                self.admin_dataset_service.create_dataset_table(
+                    ds_id,
+                    bucket_type,
+                    table_file,
+                    metadata_upload,
+                    hold_upload_lock=False,  # this import already holds it
+                )
+                uploaded_tables.append(table["table_name"])
+
+            manifest_upload = UploadFile(
+                filename="manifest.yaml",
+                file=BytesIO(preview["manifest_yaml"].encode("utf-8")),
             )
-            self.admin_dataset_service.create_dataset_table(
-                dataset_payload["ds_id"],
+            self.admin_dataset_service.upsert_dataset_manifest(
+                ds_id,
                 bucket_type,
-                table_file,
-                metadata_upload,
+                manifest_upload,
+                admin_user.email,
+                hold_upload_lock=False,  # this import already holds it
             )
-            uploaded_tables.append(table["table_name"])
-
-        manifest_upload = UploadFile(
-            filename="manifest.yaml",
-            file=BytesIO(preview["manifest_yaml"].encode("utf-8")),
-        )
-        self.admin_dataset_service.upsert_dataset_manifest(
-            dataset_payload["ds_id"],
-            bucket_type,
-            manifest_upload,
-            admin_user.email,
-        )
+        except Exception as exc:
+            logger.exception("Import of dataset %s failed; undoing it", ds_id)
+            leftovers = self._undo_dataset_import(undo)
+            raise _import_failed_error(exc, ds_id, leftovers) from exc
 
         return {
-            "dataset_id": dataset_payload["ds_id"],
+            "dataset_id": ds_id,
             "bucket_type": bucket_type.value,
             "uploaded_tables": uploaded_tables,
             "manifest_uploaded": True,
         }
+
+    def _undo_dataset_import(self, undo: "_ImportUndo") -> list[str]:
+        """Removes what a failed import_dataset_package wrote, newest first,
+        and restores the ID reservations it consumed. Only touches what this
+        import created: the dataset row is unique, so S3 files under a dataset
+        this import created (in folders checked empty first) are its own.
+        Returns the steps that could not be undone, for manual cleanup."""
+        leftovers: list[str] = []
+
+        def attempt(description: str, action) -> None:
+            try:
+                action()
+            except Exception:
+                logger.exception("Could not undo failed import step: %s", description)
+                leftovers.append(description)
+
+        if undo.dataset_created:
+            # S3 first: while the dataset row exists, no other import can
+            # claim this ID and write files that this delete would remove.
+            attempt(
+                f"delete S3 files of dataset {undo.ds_id}",
+                lambda: self.admin_dataset_service.filestore_service.delete_dataset(undo.ds_id),
+            )
+            attempt(f"delete dataset {undo.ds_id}", lambda: database.delete_dataset(undo.ds_id))
+            if undo.ds_reservation is not None:
+                attempt(
+                    f"re-reserve dataset ID {undo.ds_id}",
+                    lambda: database.create_reserved_dataset_id(undo.ds_id, **undo.ds_reservation),
+                )
+        if undo.raw_created:
+            attempt(
+                f"delete raw dataset {undo.rds_id}",
+                lambda: database.delete_raw_dataset(undo.rds_id),
+            )
+            if undo.rds_reservation is not None:
+                attempt(
+                    f"re-reserve raw dataset ID {undo.rds_id}",
+                    lambda: database.create_reserved_raw_dataset_id(
+                        undo.rds_id, **undo.rds_reservation
+                    ),
+                )
+        elif undo.raw_previous is not None:
+            attempt(
+                f"restore title and source of raw dataset {undo.rds_id}",
+                lambda: database.update_raw_dataset(
+                    undo.rds_id, RawDatasetUpdate(**undo.raw_previous)
+                ),
+            )
+        return leftovers
 
     def import_dataset_from_draft(
         self,
@@ -1449,8 +1658,42 @@ class WebAdminService(BaseService):
         draft = self.draft_review_service._get_draft_or_404(draft_id)
         if draft.status.value != "approved":
             raise HTTPException(status_code=400, detail="Approve this draft before uploading it.")
+        if draft.imported_at is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"This draft was already uploaded as dataset {draft.dataset_id} "
+                    f"on {draft.imported_at.isoformat()} UTC by "
+                    f"{draft.imported_by or 'a deleted user'}."
+                ),
+            )
+
+        if database.check_if_dataset_exists(draft.dataset_id):
+            # import_dataset_package always creates the dataset; for an
+            # existing one it would commit a new raw dataset and then fail.
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Dataset {draft.dataset_id} already exists. Upload this draft's "
+                    "metadata.yaml through that dataset's manifest upload instead."
+                ),
+            )
 
         info_yaml = self.draft_review_service.generate_info_yaml(draft_id, access_level)["info_yaml"]
+        problems = _draft_info_problems(yaml.safe_load(info_yaml) or {})
+        if problems:
+            # Checked before anything is written: these values otherwise fail
+            # inside create_dataset after the raw dataset is already committed.
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": (
+                        "This draft can't be uploaded with these values, and an approved draft "
+                        "can't be edited. Delete it and generate a new draft with corrected values."
+                    ),
+                    "problems": problems,
+                },
+            )
 
         # Local import matches regenerate_draft's own convention
         # (draft_review_service.py) for reaching into draft_service.py.
@@ -1473,14 +1716,51 @@ class WebAdminService(BaseService):
         info_file = UploadFile(filename="info.yml", file=BytesIO(info_yaml.encode("utf-8")))
         metadata_file = UploadFile(filename="metadata.yaml", file=BytesIO(draft.draft_yaml.encode("utf-8")))
 
-        return self.import_dataset_package(
-            admin_user,
-            info_file,
-            metadata_file,
-            csv_files,
-            dataset_override={"existing_dataset_id": draft.dataset_id},
-            bucket_type=bucket_type,
+        try:
+            database.claim_manifest_draft_import(draft_id)
+        except (database.DraftImportConflict, database.DraftStatusConflict) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        try:
+            result = self.import_dataset_package(
+                admin_user,
+                info_file,
+                metadata_file,
+                csv_files,
+                dataset_override={"existing_dataset_id": draft.dataset_id},
+                bucket_type=bucket_type,
+            )
+        except Exception as exc:
+            detail = exc.detail if isinstance(exc, HTTPException) else None
+            message = detail.get("message") if isinstance(detail, dict) else detail
+            self._record_draft_import(
+                draft_id,
+                succeeded=False,
+                result={
+                    "status": "failed",
+                    "at": datetime.now(timezone.utc).isoformat(),
+                    "by": admin_user.email,
+                    "message": message or "Unexpected error, see the server log.",
+                },
+            )
+            raise
+
+        self._record_draft_import(
+            draft_id,
+            succeeded=True,
+            imported_by=admin_user.email,
+            result={"status": "succeeded", **result},
         )
+        return result
+
+    def _record_draft_import(self, draft_id: str, **outcome) -> None:
+        # The import itself already succeeded or failed; failing to record it
+        # must not change that outcome. A failure stays visible because the
+        # claim then expires instead of being cleared.
+        try:
+            database.finish_manifest_draft_import(draft_id, **outcome)
+        except Exception:
+            logger.exception("Could not record the import outcome of manifest draft %s", draft_id)
 
     def initiate_dataset_deletion(self, admin_user: User, dataset_id: str) -> dict:
         self._require_admin(admin_user)
@@ -1796,7 +2076,8 @@ class WebAdminService(BaseService):
         )
 
         if data_file is not None:
-            data_text = data_file.file.read().decode("utf-8")
+            # utf-8-sig drops the byte-order mark Excel's "CSV UTF-8" adds
+            data_text = data_file.file.read().decode("utf-8-sig")
             if dataset_kind == DatasetKind.TABULAR:
                 resolved_table_name = table_name or Path(data_file.filename or "table.csv").stem
                 request.data_files = {resolved_table_name: data_text}

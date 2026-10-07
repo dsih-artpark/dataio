@@ -519,22 +519,6 @@ class WebUserService(BaseService):
             if not can_download:
                 raise HTTPException(status_code=403, detail="Download permission required")
 
-            # Record download audit entry in database
-            try:
-                download_log = DatasetDownload(
-                    user_email=user.email,
-                    dataset_id=dataset_id,
-                    access_channel=access_channel,
-                    ip_address=ip_address,
-                    user_agent=user_agent,
-                )
-                session.add(download_log)
-                session.commit()
-                self.logger.info(f"Logged dataset download: user={user.email}, dataset={dataset_id}, channel={access_channel}")
-            except Exception as log_err:
-                session.rollback()
-                self.logger.warning(f"Failed to record download log for {dataset_id}: {str(log_err)}")
-
             # Get presigned URLs for all tables
             filestore = FilestoreService()
             tables = []
@@ -564,6 +548,24 @@ class WebUserService(BaseService):
 
             if not tables and last_error:
                 self.logger.error(f"No tables found for {dataset_id}. Last error: {str(last_error)}")
+
+            # Record the download only once there is something to download, so
+            # failed or empty requests (and their retries) aren't counted.
+            if tables:
+                try:
+                    download_log = DatasetDownload(
+                        user_email=user.email,
+                        dataset_id=dataset_id,
+                        access_channel=access_channel,
+                        ip_address=ip_address,
+                        user_agent=user_agent,
+                    )
+                    session.add(download_log)
+                    session.commit()
+                    self.logger.info(f"Logged dataset download: user={user.email}, dataset={dataset_id}, channel={access_channel}")
+                except Exception as log_err:
+                    session.rollback()
+                    self.logger.warning(f"Failed to record download log for {dataset_id}: {str(log_err)}")
 
             manifest_yaml = dataset.manifest_yaml if hasattr(dataset, 'manifest_yaml') else None
             # Postgres JSONB storage does not preserve key order, so the stored

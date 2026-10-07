@@ -60,7 +60,7 @@ def generate_user(email, is_admin=False):
     key = secrets.token_urlsafe()
     bytes = key.encode("utf-8")
     salt = bcrypt.gensalt()
-    hash = bcrypt.hashpw(bytes, salt)
+    hash = bcrypt.hashpw(bytes, salt).decode("utf-8")
     return {
         "email": email,
         "key": hash,

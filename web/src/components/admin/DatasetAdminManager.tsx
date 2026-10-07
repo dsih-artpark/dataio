@@ -145,6 +145,7 @@ export default function DatasetAdminManager({
   const [nextRawDatasetIdLoading, setNextRawDatasetIdLoading] = useState(false);
   const nextDatasetIdRequestRef = useRef(0);
   const nextRawDatasetIdRequestRef = useRef(0);
+  const documentationCheckRequestRef = useRef(0);
   const rawDatasetIdSuggestRequestRef = useRef('');
   const [loading, setLoading] = useState(true);
   const [loadingDatasetDetail, setLoadingDatasetDetail] = useState(false);
@@ -322,29 +323,71 @@ export default function DatasetAdminManager({
     }
   };
 
+  // Each documentation check takes the next request id; a response is shown
+  // only if no newer check started meanwhile, so a slow "Check all" can't
+  // overwrite a later single-dataset check.
   const loadDocumentationStatuses = async (datasetId?: string) => {
+    const requestId = documentationCheckRequestRef.current + 1;
+    documentationCheckRequestRef.current = requestId;
     try {
       const response = await api.adminCheckDocumentationSync(datasetId);
+      if (documentationCheckRequestRef.current !== requestId) return;
       setDocumentationStatuses(response.datasets);
       setDocumentationStatusesCheckedAll(false);
       setSelectedSyncIds(new Set());
     } catch (err) {
+      if (documentationCheckRequestRef.current !== requestId) return;
       setErrorMessage(err instanceof Error ? err.message : 'Failed to check documentation sync');
     }
   };
 
   const loadAllDocumentationStatuses = async () => {
+    const requestId = documentationCheckRequestRef.current + 1;
+    documentationCheckRequestRef.current = requestId;
     setCheckingAllDocumentationStatus(true);
     try {
       const response = await api.adminCheckDocumentationSync(undefined, true);
+      if (documentationCheckRequestRef.current !== requestId) return;
       setDocumentationStatuses(response.datasets);
       setDocumentationStatusesCheckedAll(true);
       setSelectedSyncIds(new Set());
     } catch (err) {
+      if (documentationCheckRequestRef.current !== requestId) return;
       setErrorMessage(err instanceof Error ? err.message : 'Failed to check documentation sync');
     } finally {
       setCheckingAllDocumentationStatus(false);
     }
+  };
+
+  // Re-checks only these datasets and updates their rows in place - after a
+  // bulk sync, re-checking every dataset in filestore again is slow. Returns
+  // the ids whose status could not be confirmed (check failed or errored).
+  const refreshDocumentationStatuses = async (dsIds: string[]): Promise<string[]> => {
+    const requestId = documentationCheckRequestRef.current + 1;
+    documentationCheckRequestRef.current = requestId;
+    const refreshed = new Map<string, DocumentationSyncDatasetStatus>();
+    const unconfirmed: string[] = [];
+    // A few checks at a time: each reads S3, so one-by-one is slow for a big
+    // selection, and all at once would flood the API.
+    const queue = [...dsIds];
+    const worker = async () => {
+      for (let dsId = queue.shift(); dsId !== undefined; dsId = queue.shift()) {
+        try {
+          const response = await api.adminCheckDocumentationSync(dsId);
+          for (const row of response.datasets) {
+            refreshed.set(row.ds_id, row);
+            if (row.error) unconfirmed.push(row.ds_id);
+          }
+        } catch {
+          unconfirmed.push(dsId); // keep the old row, but say it wasn't re-checked
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, dsIds.length) }, worker));
+    // A newer check replaced this one and will show the current state.
+    if (documentationCheckRequestRef.current !== requestId) return [];
+    setDocumentationStatuses((rows) => rows.map((row) => refreshed.get(row.ds_id) ?? row));
+    return unconfirmed;
   };
 
   const toggleSyncSelection = (dsId: string) => {
@@ -809,8 +852,19 @@ export default function DatasetAdminManager({
   // route, unlike the check_all=true read path) - so a multi-select "sync
   // these N" is a sequential loop over the same single-dataset endpoint
   // "Sync selected" already uses, not a new backend capability.
+  // Only ticked rows the "Show only outdated" filter currently shows count:
+  // a ticked row hidden by the filter is never synced unseen. Failed checks
+  // (needs_update false, error set) stay visible so they aren't missed.
+  const visibleDocumentationStatuses = documentationStatuses.filter(
+    (item) =>
+      !(documentationStatusesCheckedAll && showOnlyOutdated) || item.needs_update || !!item.error
+  );
+  const visibleSelectedSyncIds = visibleDocumentationStatuses
+    .filter((item) => selectedSyncIds.has(item.ds_id))
+    .map((item) => item.ds_id);
+
   const handleSyncSelectedItems = async () => {
-    const ids = Array.from(selectedSyncIds);
+    const ids = visibleSelectedSyncIds;
     if (ids.length === 0) return;
     setSyncingSelectedIds(true);
     setErrorMessage('');
@@ -825,17 +879,24 @@ export default function DatasetAdminManager({
         failedIds.push(id);
       }
     }
+    const unconfirmedIds = await refreshDocumentationStatuses(
+      ids.filter((id) => !failedIds.includes(id))
+    );
     setSyncingSelectedIds(false);
     setSelectedSyncIds(new Set());
+    const problems: string[] = [];
     if (failedIds.length > 0) {
-      setErrorMessage(`Synced ${ids.length - failedIds.length} of ${ids.length}. Failed: ${failedIds.join(', ')}`);
+      problems.push(`Synced ${ids.length - failedIds.length} of ${ids.length}. Failed: ${failedIds.join(', ')}.`);
+    }
+    if (unconfirmedIds.length > 0) {
+      problems.push(
+        `Could not confirm the status of ${unconfirmedIds.join(', ')} after syncing; check them again.`
+      );
+    }
+    if (problems.length > 0) {
+      setErrorMessage(problems.join(' '));
     } else {
       setStatusMessage(`Documentation sync finished. Updated ${updatedCount} of ${ids.length} selected dataset(s).`);
-    }
-    if (documentationStatusesCheckedAll) {
-      await loadAllDocumentationStatuses();
-    } else {
-      await loadDocumentationStatuses(selectedDatasetId || undefined);
     }
   };
 
@@ -2201,16 +2262,16 @@ export default function DatasetAdminManager({
           </div>
         ) : null}
 
-        {selectedSyncIds.size > 0 ? (
+        {visibleSelectedSyncIds.length > 0 ? (
           <div class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-300 bg-white px-4 py-2">
-            <p class="text-sm text-slate-700">{selectedSyncIds.size} dataset(s) checked</p>
+            <p class="text-sm text-slate-700">{visibleSelectedSyncIds.length} dataset(s) checked</p>
             <button
               type="button"
               onClick={handleSyncSelectedItems}
               disabled={syncingSelectedIds}
               class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
             >
-              {syncingSelectedIds ? 'Syncing…' : `Sync ${selectedSyncIds.size} checked`}
+              {syncingSelectedIds ? 'Syncing…' : `Sync ${visibleSelectedSyncIds.length} checked`}
             </button>
           </div>
         ) : null}
@@ -2219,8 +2280,7 @@ export default function DatasetAdminManager({
           {documentationStatuses.length === 0 ? (
             <p class="text-sm text-slate-500">Run a check to see documentation sync status.</p>
           ) : (
-            documentationStatuses
-              .filter((item) => !(documentationStatusesCheckedAll && showOnlyOutdated) || item.needs_update)
+            visibleDocumentationStatuses
               .map((item) => (
                 <div key={item.ds_id} class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                   <div class="flex flex-wrap items-center justify-between gap-3">
@@ -2242,8 +2302,8 @@ export default function DatasetAdminManager({
                         </div>
                       </div>
                     </div>
-                    <span class={`rounded-full px-3 py-1 text-xs font-medium ${item.needs_update ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
-                      {item.needs_update ? 'Outdated' : 'Up to date'}
+                    <span class={`rounded-full px-3 py-1 text-xs font-medium ${item.error ? 'bg-red-100 text-red-800' : item.needs_update ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                      {item.error ? 'Check failed' : item.needs_update ? 'Outdated' : 'Up to date'}
                     </span>
                   </div>
                 </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { stringify as stringifyYaml } from 'yaml';
 
 import { ApiRequestError, api } from '../../lib/api';
@@ -60,6 +60,20 @@ function severityClasses(severity: string) {
 function errorMessage(err: unknown, fallback: string): string {
   if (err instanceof ApiRequestError) return err.message;
   return err instanceof Error ? err.message : fallback;
+}
+
+// The specifics behind an "Upload dataset now" error: values the pre-checks
+// rejected, and the failing validation findings (first 5).
+function uploadErrorDetails(err: unknown): string[] {
+  if (!(err instanceof ApiRequestError) || !err.detailData || typeof err.detailData !== 'object') return [];
+  const detail = err.detailData as {
+    problems?: string[];
+    findings?: { severity?: string; message?: string }[];
+  };
+  const findings = (detail.findings ?? [])
+    .filter((finding) => finding.severity === 'error' && finding.message)
+    .map((finding) => finding.message as string);
+  return [...(detail.problems ?? []), ...findings.slice(0, 5)];
 }
 
 function GenerateDraftForm({ onGenerated }: { onGenerated: () => void }) {
@@ -460,6 +474,11 @@ function GenerateDeterministicDraftForm({ onGenerated }: { onGenerated: () => vo
     setCoverageAutoFilled((prev) => (prev[field] ? { ...prev, [field]: false } : prev));
   };
 
+  // Latest coverage values, for the auto-detect below: its closure only holds
+  // the values from when detection started, not anything typed while it ran.
+  const coverageValuesRef = useRef({ spatialCoverage, spatialResolution, temporalCoverage });
+  coverageValuesRef.current = { spatialCoverage, spatialResolution, temporalCoverage };
+
   const tableNames = useMemo(() => csvFiles.map((f) => f.name.replace(/\.csv$/i, '')), [csvFiles]);
 
   useEffect(() => {
@@ -502,16 +521,17 @@ function GenerateDeterministicDraftForm({ onGenerated }: { onGenerated: () => vo
       .adminInferDatasetCoverage(csvFiles)
       .then((result) => {
         if (cancelled) return;
+        const current = coverageValuesRef.current;
         const filled: Record<string, boolean> = {};
-        if (result.spatialCoverage && !spatialCoverage) {
+        if (result.spatialCoverage && !current.spatialCoverage) {
           setSpatialCoverage(result.spatialCoverage);
           filled.spatialCoverage = true;
         }
-        if (result.spatialResolution && !spatialResolution) {
+        if (result.spatialResolution && !current.spatialResolution) {
           setSpatialResolution(result.spatialResolution);
           filled.spatialResolution = true;
         }
-        if (result.temporalCoverage && !temporalCoverage) {
+        if (result.temporalCoverage && !current.temporalCoverage) {
           setTemporalCoverage(result.temporalCoverage);
           filled.temporalCoverage = true;
         }
@@ -999,18 +1019,32 @@ function GenerateDeterministicDraftForm({ onGenerated }: { onGenerated: () => vo
   );
 }
 
+const DRAFTS_PAGE_SIZE = 50;
+
 function DraftQueue() {
   const [drafts, setDrafts] = useState<ManifestDraftSummary[]>([]);
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [actionError, setActionError] = useState('');
 
   const load = async () => {
     setLoading(true);
     setError('');
     try {
-      const result = await api.adminListManifestDrafts(statusFilter ? { status: statusFilter } : undefined);
+      const result = await api.adminListManifestDrafts({
+        status: statusFilter || undefined,
+        limit: DRAFTS_PAGE_SIZE,
+        offset: page * DRAFTS_PAGE_SIZE,
+      });
+      if (result.drafts.length === 0 && page > 0) {
+        setPage(page - 1); // e.g. the last draft on the last page was deleted
+        return;
+      }
       setDrafts(result.drafts);
+      setTotal(result.total);
     } catch (err) {
       setError(errorMessage(err, 'Failed to load manifest drafts'));
     } finally {
@@ -1021,7 +1055,7 @@ function DraftQueue() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter]);
+  }, [statusFilter, page]);
 
   return (
     <div class="space-y-4">
@@ -1035,7 +1069,10 @@ function DraftQueue() {
           <button
             type="button"
             key={value || 'all'}
-            onClick={() => setStatusFilter(value)}
+            onClick={() => {
+              setStatusFilter(value);
+              setPage(0);
+            }}
             class={`rounded-xl px-3 py-1.5 text-sm font-medium transition ${
               statusFilter === value
                 ? 'bg-slate-900 text-white'
@@ -1047,8 +1084,8 @@ function DraftQueue() {
         ))}
       </div>
 
-      {error ? (
-        <div class="rounded-xl bg-red-50 p-4 text-sm text-red-700 ring-1 ring-red-200">{error}</div>
+      {error || actionError ? (
+        <div class="rounded-xl bg-red-50 p-4 text-sm text-red-700 ring-1 ring-red-200">{error || actionError}</div>
       ) : null}
 
       {loading ? (
@@ -1076,6 +1113,11 @@ function DraftQueue() {
                 </div>
               </div>
               <div class="flex items-center gap-3">
+                {draft.imported_at ? (
+                  <span class="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200">
+                    uploaded
+                  </span>
+                ) : null}
                 <span class={`rounded-full px-3 py-1 text-xs font-medium ring-1 ${statusClasses(draft.status)}`}>
                   {draft.status}
                 </span>
@@ -1086,7 +1128,13 @@ function DraftQueue() {
                     e.preventDefault();
                     e.stopPropagation();
                     if (!window.confirm('Delete this draft permanently? This cannot be undone.')) return;
-                    await api.adminDeleteManifestDraft(draft.draft_id);
+                    setActionError('');
+                    try {
+                      await api.adminDeleteManifestDraft(draft.draft_id);
+                    } catch (err) {
+                      setActionError(errorMessage(err, `Failed to delete draft ${draft.dataset_id || draft.draft_id}`));
+                      return;
+                    }
                     load();
                   }}
                   class="rounded-lg px-2 py-1 text-xs font-medium text-red-500 hover:bg-red-50 hover:text-red-700"
@@ -1096,6 +1144,31 @@ function DraftQueue() {
               </div>
             </a>
           ))}
+          {total > DRAFTS_PAGE_SIZE ? (
+            <div class="flex items-center justify-between pt-2 text-sm text-slate-600">
+              <span>
+                Showing {page * DRAFTS_PAGE_SIZE + 1}–{Math.min((page + 1) * DRAFTS_PAGE_SIZE, total)} of {total}
+              </span>
+              <div class="flex gap-2">
+                <button
+                  type="button"
+                  disabled={page === 0}
+                  onClick={() => setPage(page - 1)}
+                  class="rounded-lg px-3 py-1.5 font-medium ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  disabled={(page + 1) * DRAFTS_PAGE_SIZE >= total}
+                  onClick={() => setPage(page + 1)}
+                  class="rounded-lg px-3 py-1.5 font-medium ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       )}
     </div>
@@ -1169,6 +1242,7 @@ function DraftDetail({ draftId }: { draftId: string }) {
   const [uploadBucketType, setUploadBucketType] = useState('STANDARDISED');
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  const [uploadErrorItems, setUploadErrorItems] = useState<string[]>([]);
   const [uploadResult, setUploadResult] = useState<{ dataset_id: string; uploaded_tables: string[] } | null>(null);
 
   const load = async () => {
@@ -1252,13 +1326,16 @@ function DraftDetail({ draftId }: { draftId: string }) {
   const uploadDatasetNow = async () => {
     setUploadBusy(true);
     setUploadError('');
+    setUploadErrorItems([]);
     setUploadResult(null);
     try {
       const result = await api.adminImportDatasetFromDraft(draftId, uploadAccessLevel, uploadBucketType);
       setUploadResult({ dataset_id: result.dataset_id, uploaded_tables: result.uploaded_tables });
-      await load(); // refreshes draft.dataset_exists now that it's live
+      await load(); // picks up the draft's upload record now that it's live
     } catch (err) {
       setUploadError(errorMessage(err, 'Failed to upload dataset'));
+      setUploadErrorItems(uploadErrorDetails(err));
+      await load(); // picks up the recorded failure and the released upload claim
     } finally {
       setUploadBusy(false);
     }
@@ -1274,6 +1351,17 @@ function DraftDetail({ draftId }: { draftId: string }) {
   // dataset_id is always set (a reserved ID) - dataset_exists is what
   // actually tells us whether that ID belongs to a real Dataset row yet.
   const isNewDataset = draft.dataset_exists === false;
+  // Mirrors the backend's REVIEWABLE_STATUSES: approved and rejected are final.
+  const isReviewable = draft.status === 'pending' || draft.status === 'flagged';
+  // "Upload dataset now" state comes from the draft's own upload record;
+  // dataset_exists alone can't tell this draft's upload from an ID that
+  // already belonged to a live dataset.
+  const isUploaded = !!draft.imported_at || !!uploadResult;
+  const datasetAlreadyExists = draft.dataset_exists === true && !isUploaded;
+  const lastFailedUpload =
+    !isUploaded && draft.import_result?.status === 'failed' ? draft.import_result : null;
+  const uploadDisabled =
+    uploadBusy || draft.status !== 'approved' || isUploaded || datasetAlreadyExists || draft.import_running;
 
   return (
     <div class="space-y-6">
@@ -1293,7 +1381,7 @@ function DraftDetail({ draftId }: { draftId: string }) {
           </span>
           <button
             type="button"
-            disabled={busy || draft.status === 'approved'}
+            disabled={busy || !isReviewable}
             onClick={() => runAction(() => api.adminApproveManifestDraft(draftId))}
             class="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
           >
@@ -1301,10 +1389,12 @@ function DraftDetail({ draftId }: { draftId: string }) {
           </button>
           <button
             type="button"
-            disabled={busy || draft.status === 'approved' || draft.status === 'rejected'}
+            disabled={busy || !isReviewable}
             onClick={() => {
-              const reason = window.prompt('Reason for rejecting this draft (optional):') ?? undefined;
-              runAction(() => api.adminRejectManifestDraft(draftId, reason || undefined));
+              const reason = window.prompt('Reason for rejecting this draft (optional):');
+              // Cancel returns null: abort rather than reject without a reason
+              if (reason === null) return;
+              runAction(() => api.adminRejectManifestDraft(draftId, reason.trim() || undefined));
             }}
             class="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-red-700 ring-1 ring-red-200 hover:bg-red-50 disabled:opacity-50"
           >
@@ -1312,7 +1402,7 @@ function DraftDetail({ draftId }: { draftId: string }) {
           </button>
           <button
             type="button"
-            disabled={busy || draft.status === 'approved'}
+            disabled={busy || !isReviewable}
             onClick={async () => {
               if (!window.confirm('Regenerate this draft from the same CSV(s)? The current draft will be marked rejected and superseded by a new one.')) return;
               setBusy(true);
@@ -1349,7 +1439,13 @@ function DraftDetail({ draftId }: { draftId: string }) {
             disabled={busy}
             onClick={async () => {
               if (!window.confirm('Delete this draft permanently? This cannot be undone.')) return;
-              await api.adminDeleteManifestDraft(draftId);
+              setActionError('');
+              try {
+                await api.adminDeleteManifestDraft(draftId);
+              } catch (err) {
+                setActionError(errorMessage(err, 'Failed to delete draft'));
+                return;
+              }
               window.location.href = '/admin/datasets/drafts';
             }}
             class="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-50"
@@ -1436,7 +1532,7 @@ function DraftDetail({ draftId }: { draftId: string }) {
           </label>
           <button
             type="submit"
-            disabled={busy || !flagFieldPath.trim() || !flagNote.trim()}
+            disabled={busy || !isReviewable || !flagFieldPath.trim() || !flagNote.trim()}
             class="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-600 disabled:opacity-50"
           >
             Flag field
@@ -1632,16 +1728,20 @@ function DraftDetail({ draftId }: { draftId: string }) {
             <p class="mt-1 text-xs text-slate-500">
               {draft.status !== 'approved'
                 ? 'Available once this draft is approved. Approve it above first.'
-                : draft.dataset_exists === true || uploadResult
-                  ? 'This draft has already been uploaded to the DataIO catalog. To make further changes to the live dataset, use the Import / Create Dataset tab.'
-                  : 'Publishes this approved draft straight to the DataIO catalog - the same process as the Import / Create Dataset tab, without the manual download-and-re-upload step. Use this right after generating a draft’s metadata. For uploads later on, or from outside this draft flow, use the Import / Create Dataset tab instead.'}
+                : isUploaded
+                  ? `Uploaded to the DataIO catalog${draft.imported_at ? ` on ${formatUtcTimestamp(draft.imported_at)}` : ''}${draft.imported_by ? ` by ${draft.imported_by}` : ''}. To change the live dataset, upload a new metadata.yaml through that dataset's manifest upload.`
+                  : draft.import_running && draft.import_started_at
+                    ? `An upload of this draft started ${formatUtcTimestamp(draft.import_started_at)} and is still running. Reload this page to see the result.`
+                    : datasetAlreadyExists
+                      ? `Dataset ${draft.dataset_id} already exists in the catalog, so this draft can't create it. Upload this draft's metadata.yaml through that dataset's manifest upload instead.`
+                      : 'Publishes this approved draft straight to the DataIO catalog - the same process as the Import / Create Dataset tab, without the manual download-and-re-upload step. If any step fails, everything the upload wrote is undone so it can be retried. For uploads later on, or from outside this draft flow, use the Import / Create Dataset tab instead.'}
             </p>
           </div>
           <div class="flex shrink-0 items-center gap-2">
             <select
               class="rounded-lg border border-slate-300 px-2 py-1 text-xs disabled:opacity-50"
               value={uploadAccessLevel}
-              disabled={uploadBusy || draft.status !== 'approved' || draft.dataset_exists === true || !!uploadResult}
+              disabled={uploadDisabled}
               onChange={(e) => setUploadAccessLevel((e.target as HTMLSelectElement).value as AccessLevel)}
             >
               <option value="NONE">NONE</option>
@@ -1651,7 +1751,7 @@ function DraftDetail({ draftId }: { draftId: string }) {
             <select
               class="rounded-lg border border-slate-300 px-2 py-1 text-xs disabled:opacity-50"
               value={uploadBucketType}
-              disabled={uploadBusy || draft.status !== 'approved' || draft.dataset_exists === true || !!uploadResult}
+              disabled={uploadDisabled}
               onChange={(e) => setUploadBucketType((e.target as HTMLSelectElement).value)}
             >
               <option value="STANDARDISED">STANDARDISED</option>
@@ -1659,15 +1759,21 @@ function DraftDetail({ draftId }: { draftId: string }) {
             </select>
             <button
               type="button"
-              disabled={uploadBusy || draft.status !== 'approved' || draft.dataset_exists === true || !!uploadResult}
+              disabled={uploadDisabled}
               onClick={uploadDatasetNow}
               class="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
             >
               {uploadBusy
                 ? 'Uploading…'
-                : draft.dataset_exists === true || uploadResult
-                  ? 'Already uploaded'
-                  : 'Upload dataset now'}
+                : isUploaded
+                  ? 'Uploaded'
+                  : draft.import_running
+                    ? 'Upload running'
+                    : datasetAlreadyExists
+                      ? 'Dataset exists'
+                      : lastFailedUpload
+                        ? 'Retry upload'
+                        : 'Upload dataset now'}
             </button>
           </div>
         </div>
@@ -1678,7 +1784,20 @@ function DraftDetail({ draftId }: { draftId: string }) {
           </div>
         ) : null}
         {uploadError ? (
-          <div class="rounded-lg bg-red-50 p-2 text-xs text-red-700 ring-1 ring-red-200">{uploadError}</div>
+          <div class="rounded-lg bg-red-50 p-2 text-xs text-red-700 ring-1 ring-red-200">
+            {uploadError}
+            {uploadErrorItems.length > 0 ? (
+              <ul class="mt-1 list-disc pl-4">
+                {uploadErrorItems.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : lastFailedUpload ? (
+          <div class="rounded-lg bg-amber-50 p-2 text-xs text-amber-800 ring-1 ring-amber-200">
+            Last upload attempt ({formatUtcTimestamp(lastFailedUpload.at)}, {lastFailedUpload.by}) failed: {lastFailedUpload.message}
+          </div>
         ) : null}
       </div>
     </div>

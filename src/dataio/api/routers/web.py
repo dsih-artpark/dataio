@@ -22,6 +22,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     Request,
     Response,
     UploadFile,
@@ -45,6 +46,7 @@ from dataio.api.models import (
     RawDatasetCreate,
     RawDatasetUpdate,
 )
+from dataio.api.services.draft_review_service import parse_curator_input_json
 from dataio.api.services.web_auth_service import WebAuthService
 from dataio.api.services.web_admin_service import WebAdminService
 from dataio.api.services.web_user_service import WebUserService
@@ -141,6 +143,8 @@ class DatasetDeleteVerifyRequest(BaseModel):
 
 
 class ReserveDatasetIdRequest(BaseModel):
+    # Format is checked by WebAdminService.reserve_dataset_id, which returns a
+    # readable 400 (a model pattern would return a 422 the UI can't show).
     ds_id: str
     collection_id: Optional[str] = None
     note: Optional[str] = None
@@ -1463,7 +1467,7 @@ async def admin_update_dataset_documentation(
 
 
 @web_router.post("/admin/datasets/import/preview", tags=["web-admin/datasets"])
-async def admin_preview_dataset_import(
+def admin_preview_dataset_import(
     info_file: UploadFile = File(...),
     metadata_file: UploadFile = File(...),
     csv_files: List[UploadFile] = File(default=[]),
@@ -1486,7 +1490,7 @@ async def admin_preview_dataset_import(
 
 
 @web_router.post("/admin/datasets/import/apply", tags=["web-admin/datasets"])
-async def admin_apply_dataset_import(
+def admin_apply_dataset_import(
     info_file: UploadFile = File(...),
     metadata_file: UploadFile = File(...),
     csv_files: List[UploadFile] = File(...),
@@ -1628,7 +1632,7 @@ async def admin_upsert_dataset_manifest(
 
 
 @web_router.post("/admin/manifest-drafts/generate", tags=["web-admin/manifest-drafts"])
-async def web_generate_manifest_draft(
+def web_generate_manifest_draft(
     csv_files: List[UploadFile] = File(...),
     category_id: str = Form(...),
     collection_id: str = Form(...),
@@ -1652,7 +1656,7 @@ async def web_generate_manifest_draft(
 @web_router.post(
     "/admin/manifest-drafts/generate-deterministic", tags=["web-admin/manifest-drafts"]
 )
-async def web_generate_deterministic_manifest_draft(
+def web_generate_deterministic_manifest_draft(
     csv_files: List[UploadFile] = File(...),
     category_id: str = Form(...),
     collection_id: str = Form(...),
@@ -1668,7 +1672,7 @@ async def web_generate_deterministic_manifest_draft(
         category_id,
         collection_id,
         data_owner_name,
-        json.loads(curator_input),
+        parse_curator_input_json(curator_input),
         dataset_id=dataset_id,
     )
 
@@ -1683,7 +1687,7 @@ async def web_classify_columns(
 
 
 @web_router.post("/admin/manifest-drafts/infer-coverage", tags=["web-admin/manifest-drafts"])
-async def web_infer_dataset_coverage(
+def web_infer_dataset_coverage(
     csv_files: List[UploadFile] = File(...),
     user: User = Depends(get_current_web_user),
     admin_service: WebAdminService = Depends(WebAdminService),
@@ -1727,7 +1731,7 @@ async def web_delete_manifest_draft(
 
 
 @web_router.post("/admin/manifest-drafts/{draft_id}/validate", tags=["web-admin/manifest-drafts"])
-async def web_revalidate_manifest_draft(
+def web_revalidate_manifest_draft(
     draft_id: str,
     user: User = Depends(get_current_web_user),
     admin_service: WebAdminService = Depends(WebAdminService),
@@ -1755,7 +1759,7 @@ async def web_reject_manifest_draft(
 
 
 @web_router.put("/admin/manifest-drafts/{draft_id}", tags=["web-admin/manifest-drafts"])
-async def web_update_manifest_draft(
+def web_update_manifest_draft(
     draft_id: str,
     body: ManifestDraftEdit,
     user: User = Depends(get_current_web_user),
@@ -1775,7 +1779,7 @@ async def web_flag_manifest_draft_field(
 
 
 @web_router.post("/admin/manifest-drafts/{draft_id}/regenerate", tags=["web-admin/manifest-drafts"])
-async def web_regenerate_manifest_draft(
+def web_regenerate_manifest_draft(
     draft_id: str,
     user: User = Depends(get_current_web_user),
     admin_service: WebAdminService = Depends(WebAdminService),
@@ -1798,7 +1802,7 @@ async def web_generate_manifest_draft_info_yaml(
 @web_router.post(
     "/admin/manifest-drafts/{draft_id}/import", tags=["web-admin/manifest-drafts"]
 )
-async def web_import_dataset_from_draft(
+def web_import_dataset_from_draft(
     draft_id: str,
     body: ManifestDraftImportRequest,
     user: User = Depends(get_current_web_user),
@@ -1812,7 +1816,7 @@ async def web_import_dataset_from_draft(
 
 
 @web_router.get("/admin/documentation-sync", tags=["web-admin/datasets"])
-async def admin_check_documentation_sync(
+def admin_check_documentation_sync(
     dataset_id: Optional[str] = None,
     check_all: bool = False,
     user: User = Depends(get_current_web_user),
@@ -1826,7 +1830,7 @@ async def admin_check_documentation_sync(
 
 
 @web_router.post("/admin/documentation-sync", tags=["web-admin/datasets"])
-async def admin_run_documentation_sync(
+def admin_run_documentation_sync(
     body: DocumentationSyncRequest,
     user: User = Depends(get_current_web_user),
     admin_service: WebAdminService = Depends(WebAdminService),
@@ -2070,8 +2074,9 @@ async def admin_get_download_metrics(
     dataset_id: Optional[str] = None,
     user_email: Optional[str] = None,
     channel: Optional[str] = None,
-    limit: int = 100,
-    offset: int = 0,
+    # The admin CSV export requests up to 100000 rows in one call
+    limit: int = Query(100, ge=1, le=100000),
+    offset: int = Query(0, ge=0),
     user: User = Depends(get_current_web_user),
     admin_service: WebAdminService = Depends(WebAdminService),
 ):

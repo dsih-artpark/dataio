@@ -1,3 +1,4 @@
+import contextlib
 import gzip
 
 import yaml
@@ -23,6 +24,7 @@ from dataio.api.services.dataset_documentation_sync_service import (
     sync_dataset_documentation,
 )
 from dataio.api.services.filestore_service import FilestoreService, ValidationError
+from dataio.api.services.yaml_utils import stringify_yaml_dates
 from dataio.api.services.platform_manifest_validation_service import (
     apply_platform_manifest_checks,
 )
@@ -220,6 +222,12 @@ class AdminDatasetService(BaseService):
             ) from e
 
     def suggest_next_dataset_id(self, collection_id: str):
+        # A dataset needs a real collection; raw-dataset suggestions below may
+        # be for a collection or category that has no rows yet.
+        if collection_id.strip() and database.get_collection_by_identifier(collection_id) is None:
+            raise HTTPException(
+                status_code=404, detail=f"Collection {collection_id} does not exist."
+            )
         try:
             if not collection_id.strip():
                 raise ValidationError("Collection ID is required")
@@ -230,6 +238,9 @@ class AdminDatasetService(BaseService):
         except ValidationError as e:
             self.logger.error(f"Failed to suggest dataset id: {e!s}")
             raise HTTPException(status_code=400, detail=str(e)) from e
+        except database.IdCounterExhausted as e:
+            self.logger.error(f"Failed to suggest dataset id: {e!s}")
+            raise HTTPException(status_code=409, detail=str(e)) from e
         except Exception as e:
             self.logger.error(f"Failed to suggest dataset id: {e!s}")
             raise HTTPException(
@@ -319,16 +330,41 @@ class AdminDatasetService(BaseService):
                 status_code=500, detail="Failed to get dataset detail. Contact support."
             ) from e
 
+    def _upload_guard(self, dataset_id: str, hold_upload_lock: bool):
+        """Shared per-dataset upload lock, so a manual upload never runs while a
+        package import (which holds it exclusively) could undo the dataset."""
+        if not hold_upload_lock:
+            return contextlib.nullcontext()
+        return database.dataset_upload_lock(dataset_id, exclusive=False)
+
     def create_dataset_table(
         self,
         dataset_id: str,
         bucket_type: VersionType,
         file: UploadFile,
         table_metadata_file: UploadFile,
+        *,
+        hold_upload_lock: bool = True,
     ):
         """
-        Create/upload a dataset table.
+        Create/upload a dataset table. hold_upload_lock=False only for a caller
+        that already holds the dataset's upload lock (a package import).
         """
+        try:
+            with self._upload_guard(dataset_id, hold_upload_lock):
+                return self._create_dataset_table(
+                    dataset_id, bucket_type, file, table_metadata_file
+                )
+        except database.DatasetBusy as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+
+    def _create_dataset_table(
+        self,
+        dataset_id: str,
+        bucket_type: VersionType,
+        file: UploadFile,
+        table_metadata_file: UploadFile,
+    ):
         # Table metadata should also be provided
         try:
             # Check if dataset exists
@@ -458,13 +494,32 @@ class AdminDatasetService(BaseService):
         bucket_type: VersionType,
         manifest_file: UploadFile,
         updated_by: str,
+        *,
+        hold_upload_lock: bool = True,
+    ):
+        """hold_upload_lock=False only for a caller that already holds the
+        dataset's upload lock (a package import)."""
+        try:
+            with self._upload_guard(dataset_id, hold_upload_lock):
+                return self._upsert_dataset_manifest(
+                    dataset_id, bucket_type, manifest_file, updated_by
+                )
+        except database.DatasetBusy as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+
+    def _upsert_dataset_manifest(
+        self,
+        dataset_id: str,
+        bucket_type: VersionType,
+        manifest_file: UploadFile,
+        updated_by: str,
     ):
         try:
             if not database.check_if_dataset_exists(dataset_id):
                 raise ValidationError("Dataset does not exist")
 
             manifest_text = manifest_file.file.read().decode("utf-8")
-            parsed_manifest = yaml.safe_load(manifest_text)
+            parsed_manifest = stringify_yaml_dates(yaml.safe_load(manifest_text))
             if not isinstance(parsed_manifest, dict):
                 raise ValidationError("Manifest must deserialize to an object")
 
@@ -535,12 +590,36 @@ class AdminDatasetService(BaseService):
 
             results = []
             outdated = 0
+            errors = 0
             for current_dataset_id in dataset_ids:
-                status = get_dataset_documentation_status(
-                    session,
-                    self.filestore_service.bucket,
-                    current_dataset_id,
-                )
+                try:
+                    status = get_dataset_documentation_status(
+                        session,
+                        self.filestore_service.bucket,
+                        current_dataset_id,
+                    )
+                except Exception as e:
+                    if not check_all:
+                        raise
+                    # One unreadable dataset (S3 AccessDenied, non-UTF-8 README)
+                    # must not fail the whole check-all sweep.
+                    session.rollback()
+                    errors += 1
+                    self.logger.warning(
+                        f"Documentation sync check failed for {current_dataset_id}: {e!s}"
+                    )
+                    results.append(
+                        {
+                            "ds_id": current_dataset_id,
+                            "needs_update": False,
+                            "changed_fields": [],
+                            "has_remote_documentation": False,
+                            "manifest_updated_at": None,
+                            "documentation_synced_at": None,
+                            "error": "Could not check this dataset",
+                        }
+                    )
+                    continue
                 results.append(
                     {
                         "ds_id": current_dataset_id,
@@ -558,6 +637,7 @@ class AdminDatasetService(BaseService):
                 "datasets": results,
                 "total": len(results),
                 "outdated": outdated,
+                "errors": errors,
             }
         except (ValueError, ValidationError) as e:
             session.rollback()

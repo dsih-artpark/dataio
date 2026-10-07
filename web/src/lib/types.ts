@@ -283,12 +283,14 @@ export interface DocumentationSyncDatasetStatus {
   documentation_synced_at?: string | null;
   updated?: boolean;
   skipped?: boolean;
+  error?: string;
 }
 
 export interface DocumentationSyncCheckResponse {
   datasets: DocumentationSyncDatasetStatus[];
   total: number;
   outdated: number;
+  errors?: number;
 }
 
 export interface DocumentationSyncRunResponse {
@@ -373,7 +375,19 @@ export interface ManifestDraftSummary {
   reviewed_by: string | null;
   reviewed_at: string | null;
   superseded_by_draft_id: string | null;
+  // "Upload dataset now" record. import_running is true while an upload holds
+  // the draft; imported_at/by are set once the dataset is fully published.
+  import_started_at: string | null;
+  import_running: boolean;
+  imported_at: string | null;
+  imported_by: string | null;
+  import_result: ManifestDraftImportResult | null;
 }
+
+// Outcome of the latest "Upload dataset now" attempt on a draft.
+export type ManifestDraftImportResult =
+  | { status: 'succeeded'; dataset_id: string; bucket_type: string; uploaded_tables: string[] }
+  | { status: 'failed'; at: string; by: string; message: string };
 
 // The manifest fields no deterministic rule can derive from the CSV alone -
 // supplied directly by the curator through the intake form. Mirrors

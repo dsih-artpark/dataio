@@ -11,6 +11,8 @@ os.environ.setdefault("DB_PASSWORD", "password")
 os.environ.setdefault("DB_NAME", "catalogue")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
+import pytest
+
 from dataio.api.services import draft_service
 from dataio.api.services.csv_profiler import ColumnProfile, CsvProfile
 from dataio.validate.reports.models import ValidationResult
@@ -61,10 +63,7 @@ def _patch_common(monkeypatch, missing_source_columns=None):
         draft_service, "_validate_manifest",
         lambda manifest_dict, csv_path: ValidationResult(dataset_kind="tabular"),
     )
-    monkeypatch.setattr(
-        "dataio.api.database.rds_id_helpers.suggest_next_raw_dataset_id_for_category",
-        lambda category_id: "CSRDS0099",
-    )
+    monkeypatch.setattr(draft_service, "reserve_next_raw_dataset_id", lambda *a, **kw: "CSRDS0099")
     monkeypatch.setattr(draft_service, "get_collection_by_identifier", lambda collection_id: FAKE_COLLECTION)
 
 
@@ -96,17 +95,15 @@ def test_complete_with_retry_raises_last_error_after_exhausting_attempts():
         def complete(self, *, system_prompt, user_prompt):
             return SimpleNamespace(text="not the expected format at all")
 
-    import pytest
-    with pytest.raises(ValueError):
+    with pytest.raises(draft_service.DraftOutputError):
         draft_service._complete_with_retry(AlwaysBrokenClient(), "system", "user")
 
 
 def test_generate_draft_happy_path(monkeypatch):
     recorded = {}
     _patch_common(monkeypatch)
-    monkeypatch.setattr(draft_service, "suggest_next_dataset_id", lambda collection_id: "CS0007DS0999")
-    monkeypatch.setattr(draft_service, "create_reserved_dataset_id", lambda *a, **kw: None)
-    monkeypatch.setattr(draft_service, "create_reserved_raw_dataset_id", lambda *a, **kw: None)
+    monkeypatch.setattr(draft_service, "reserve_next_dataset_id", lambda *a, **kw: "CS0007DS0999")
+    monkeypatch.setattr(draft_service, "reserve_next_raw_dataset_id", lambda *a, **kw: "CSRDS0099")
 
     def fake_create_manifest_draft(**kwargs):
         recorded["create_kwargs"] = kwargs
@@ -145,6 +142,67 @@ def test_generate_draft_happy_path(monkeypatch):
     assert recorded["create_kwargs"]["source_csv_path"] == '{"foo": "foo.csv"}'
 
 
+def _record_releases(monkeypatch) -> list:
+    released = []
+    monkeypatch.setattr(draft_service.database, "delete_reserved_dataset_id", released.append)
+    monkeypatch.setattr(draft_service.database, "delete_reserved_raw_dataset_id", released.append)
+    return released
+
+
+def _fail_create_manifest_draft(**kwargs):
+    raise RuntimeError("database unavailable")
+
+
+def test_generate_draft_releases_the_ids_it_reserved_when_it_fails(monkeypatch):
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(draft_service, "reserve_next_dataset_id", lambda *a, **kw: "CS0007DS0999")
+    monkeypatch.setattr(draft_service, "reserve_next_raw_dataset_id", lambda *a, **kw: "CSRDS0099")
+    monkeypatch.setattr(draft_service.database, "create_manifest_draft", _fail_create_manifest_draft)
+    released = _record_releases(monkeypatch)
+
+    with pytest.raises(RuntimeError):
+        draft_service.generate_draft(
+            csv_paths=["foo.csv"], category_id="CS", collection_id="CS0007", created_by="engineer@artpark.in",
+            data_owner_name="DAHD",
+        )
+
+    assert released == ["CS0007DS0999", "CSRDS0099"]
+
+
+def test_generate_draft_never_releases_ids_it_was_given(monkeypatch):
+    # regenerate_draft passes the original draft's IDs; those stay reserved
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(draft_service.database, "create_manifest_draft", _fail_create_manifest_draft)
+    released = _record_releases(monkeypatch)
+
+    with pytest.raises(RuntimeError):
+        draft_service.generate_draft(
+            csv_paths=["foo.csv"], category_id="CS", collection_id="CS0007", created_by="engineer@artpark.in",
+            data_owner_name="DAHD", dataset_id="CS0007DS0112", raw_dataset_id="CSRDS0016",
+        )
+
+    assert released == []
+
+
+def test_generate_draft_releases_the_raw_id_when_no_dataset_id_can_be_reserved(monkeypatch):
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(draft_service, "reserve_next_raw_dataset_id", lambda *a, **kw: "CSRDS0099")
+
+    def counter_used_up(*a, **kw):
+        raise ValueError("The dataset number counter is past 9999; dataset IDs only have four digits.")
+
+    monkeypatch.setattr(draft_service, "reserve_next_dataset_id", counter_used_up)
+    released = _record_releases(monkeypatch)
+
+    with pytest.raises(ValueError):
+        draft_service.generate_draft(
+            csv_paths=["foo.csv"], category_id="CS", collection_id="CS0007", created_by="engineer@artpark.in",
+            data_owner_name="DAHD",
+        )
+
+    assert released == ["CSRDS0099"]
+
+
 def test_generate_draft_with_multiple_csvs_builds_one_table_per_csv(monkeypatch):
     """Multiple CSVs uploaded for one draft each become their own table
     (named after that CSV's filename stem), matching the real multi-table
@@ -152,9 +210,8 @@ def test_generate_draft_with_multiple_csvs_builds_one_table_per_csv(monkeypatch)
     """
     recorded = {}
     _patch_common(monkeypatch)
-    monkeypatch.setattr(draft_service, "suggest_next_dataset_id", lambda collection_id: "CS0007DS0999")
-    monkeypatch.setattr(draft_service, "create_reserved_dataset_id", lambda *a, **kw: None)
-    monkeypatch.setattr(draft_service, "create_reserved_raw_dataset_id", lambda *a, **kw: None)
+    monkeypatch.setattr(draft_service, "reserve_next_dataset_id", lambda *a, **kw: "CS0007DS0999")
+    monkeypatch.setattr(draft_service, "reserve_next_raw_dataset_id", lambda *a, **kw: "CSRDS0099")
 
     def fake_create_manifest_draft(**kwargs):
         recorded["create_kwargs"] = kwargs
@@ -185,11 +242,10 @@ def test_generate_draft_reuses_existing_dataset_id_without_reserving(monkeypatch
     def fail_if_called(*a, **kw):
         raise AssertionError("should not mint/reserve a new ID when one was already supplied")
 
-    monkeypatch.setattr(draft_service, "suggest_next_dataset_id", fail_if_called)
-    monkeypatch.setattr(draft_service, "create_reserved_dataset_id", fail_if_called)
+    monkeypatch.setattr(draft_service, "reserve_next_dataset_id", fail_if_called)
     # dataset_id is reused below, but raw_dataset_id is not supplied, so rds_id
     # resolution/reservation still runs - a separate axis from dataset_id reuse.
-    monkeypatch.setattr(draft_service, "create_reserved_raw_dataset_id", lambda *a, **kw: None)
+    monkeypatch.setattr(draft_service, "reserve_next_raw_dataset_id", lambda *a, **kw: "CSRDS0099")
     monkeypatch.setattr(draft_service.database, "create_manifest_draft", lambda **kwargs: SimpleNamespace(
         draft_id="1", status=SimpleNamespace(value="pending"),
         draft_yaml=kwargs["draft_yaml"], draft_json=kwargs["draft_json"], flagged_fields=kwargs["flagged_fields"],
@@ -209,16 +265,12 @@ def test_generate_draft_reuses_existing_raw_dataset_id_without_reserving(monkeyp
     so a redraft of the same dataset doesn't reserve (and leak) a second one.
     """
     _patch_common(monkeypatch)
-    monkeypatch.setattr(draft_service, "suggest_next_dataset_id", lambda collection_id: "CS0007DS0999")
-    monkeypatch.setattr(draft_service, "create_reserved_dataset_id", lambda *a, **kw: None)
+    monkeypatch.setattr(draft_service, "reserve_next_dataset_id", lambda *a, **kw: "CS0007DS0999")
 
     def fail_if_called(*a, **kw):
         raise AssertionError("should not mint/reserve a new rds_id when one was already supplied")
 
-    monkeypatch.setattr(
-        "dataio.api.database.rds_id_helpers.suggest_next_raw_dataset_id_for_category", fail_if_called
-    )
-    monkeypatch.setattr(draft_service, "create_reserved_raw_dataset_id", fail_if_called)
+    monkeypatch.setattr(draft_service, "reserve_next_raw_dataset_id", fail_if_called)
     monkeypatch.setattr(draft_service.database, "create_manifest_draft", lambda **kwargs: SimpleNamespace(
         draft_id="1", status=SimpleNamespace(value="pending"),
         draft_yaml=kwargs["draft_yaml"], draft_json=kwargs["draft_json"], flagged_fields=kwargs["flagged_fields"],
@@ -232,9 +284,8 @@ def test_generate_draft_reuses_existing_raw_dataset_id_without_reserving(monkeyp
 
 def test_generate_draft_flags_missing_source_columns(monkeypatch):
     _patch_common(monkeypatch, missing_source_columns=["sourceTableID", "sourcePage"])
-    monkeypatch.setattr(draft_service, "suggest_next_dataset_id", lambda collection_id: "CS0007DS0999")
-    monkeypatch.setattr(draft_service, "create_reserved_dataset_id", lambda *a, **kw: None)
-    monkeypatch.setattr(draft_service, "create_reserved_raw_dataset_id", lambda *a, **kw: None)
+    monkeypatch.setattr(draft_service, "reserve_next_dataset_id", lambda *a, **kw: "CS0007DS0999")
+    monkeypatch.setattr(draft_service, "reserve_next_raw_dataset_id", lambda *a, **kw: "CSRDS0099")
 
     captured = {}
 
@@ -387,9 +438,8 @@ def test_generate_draft_splits_dataset_into_multiple_batches_when_over_char_budg
     batches' results must be merged into one manifest.
     """
     _patch_common(monkeypatch)
-    monkeypatch.setattr(draft_service, "suggest_next_dataset_id", lambda collection_id: "CS0007DS0999")
-    monkeypatch.setattr(draft_service, "create_reserved_dataset_id", lambda *a, **kw: None)
-    monkeypatch.setattr(draft_service, "create_reserved_raw_dataset_id", lambda *a, **kw: None)
+    monkeypatch.setattr(draft_service, "reserve_next_dataset_id", lambda *a, **kw: "CS0007DS0999")
+    monkeypatch.setattr(draft_service, "reserve_next_raw_dataset_id", lambda *a, **kw: "CSRDS0099")
     monkeypatch.setattr(draft_service, "BATCH_CHAR_BUDGET", 10)
     monkeypatch.setattr(draft_service, "estimate_table_context_size", lambda table_name, profile, table_base=None: 20)
 
@@ -550,6 +600,51 @@ def test_merge_narrative_into_base_falls_back_to_stub_when_llm_omits_a_descripti
     assert merged["tables"]["main"]["data_dictionary"]["count"]["description"] == "'count' column."
 
 
+@pytest.mark.parametrize(
+    "narrative",
+    [
+        {"tables": ["main"]},
+        {"tables": {"main": "a table"}},
+        {"tables": {"main": {"data_dictionary": ["count"]}}},
+        {"tables": {"main": {"data_dictionary": {"count": "Number of animals"}}}},
+        {"tables": {"main": {"data_dictionary": {"count": {"description": {"text": "x"}}}}}},
+        {"enumDefinitions": "none"},
+    ],
+)
+def test_merge_narrative_into_base_survives_wrongly_shaped_llm_output(narrative):
+    base = {
+        "tables": {"main": {"joinKeys": [], "data_dictionary": {"count": {"type": "int", "description": None}}}},
+        "enum_definitions": {"species": {"description": "Species", "values": {"cattle": {"description": "Cattle"}}}},
+        "canonical_enum_definitions": {},
+        "join_keys": [],
+        "region_gap_comments": [],
+    }
+
+    merged = draft_service._merge_narrative_into_base(base, narrative)
+
+    assert merged["tables"]["main"]["data_dictionary"]["count"]["description"] == "'count' column."
+    assert merged["enumDefinitions"]["species"]["values"]["cattle"]["description"] == "Cattle"
+
+
+def test_merge_narrative_into_base_keeps_a_single_string_comment_whole():
+    base = {"tables": {}, "enum_definitions": {}, "canonical_enum_definitions": {}, "join_keys": [], "region_gap_comments": []}
+
+    merged = draft_service._merge_narrative_into_base(base, {"comments": "units are counts"})
+
+    assert merged["comments"] == ["units are counts"]
+
+
+def test_merge_batch_manifests_survives_wrongly_shaped_batches():
+    merged, flags = draft_service._merge_batch_manifests([
+        ({"tables": {"a": {}}, "tags": ["x"], "comments": "one comment"}, []),
+        ({"tables": "b", "enumDefinitions": ["y"]}, [{"field": "f", "reason": "r"}]),
+    ])
+
+    assert merged["tables"] == {"a": {}}
+    assert merged["comments"] == ["one comment"]
+    assert flags == [{"field": "f", "reason": "r"}]
+
+
 def test_merge_narrative_into_base_overlays_enum_definitions_preserving_canonical_matches():
     base = {
         "tables": {"main": {"joinKeys": [], "data_dictionary": {}}},
@@ -599,14 +694,9 @@ def test_generate_draft_prompt_size_does_not_scale_with_row_count(monkeypatch):
         draft_service, "_validate_manifest",
         lambda manifest_dict, csv_path: ValidationResult(dataset_kind="tabular"),
     )
-    monkeypatch.setattr(
-        "dataio.api.database.rds_id_helpers.suggest_next_raw_dataset_id_for_category",
-        lambda category_id: "CSRDS0099",
-    )
     monkeypatch.setattr(draft_service, "get_collection_by_identifier", lambda collection_id: FAKE_COLLECTION)
-    monkeypatch.setattr(draft_service, "suggest_next_dataset_id", lambda collection_id: "CS0007DS0999")
-    monkeypatch.setattr(draft_service, "create_reserved_dataset_id", lambda *a, **kw: None)
-    monkeypatch.setattr(draft_service, "create_reserved_raw_dataset_id", lambda *a, **kw: None)
+    monkeypatch.setattr(draft_service, "reserve_next_dataset_id", lambda *a, **kw: "CS0007DS0999")
+    monkeypatch.setattr(draft_service, "reserve_next_raw_dataset_id", lambda *a, **kw: "CSRDS0099")
 
     captured_prompts = []
 
@@ -648,9 +738,8 @@ def test_generate_draft_raises_when_collection_does_not_exist(monkeypatch):
 
     _patch_common(monkeypatch)
     monkeypatch.setattr(draft_service, "get_collection_by_identifier", lambda collection_id: None)
-    monkeypatch.setattr(draft_service, "suggest_next_dataset_id", lambda collection_id: "CS0007DS0999")
-    monkeypatch.setattr(draft_service, "create_reserved_dataset_id", lambda *a, **kw: None)
-    monkeypatch.setattr(draft_service, "create_reserved_raw_dataset_id", lambda *a, **kw: None)
+    monkeypatch.setattr(draft_service, "reserve_next_dataset_id", lambda *a, **kw: "CS0007DS0999")
+    monkeypatch.setattr(draft_service, "reserve_next_raw_dataset_id", lambda *a, **kw: "CSRDS0099")
 
     with pytest.raises(HTTPException) as exc_info:
         draft_service.generate_draft(

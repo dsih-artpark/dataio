@@ -10,6 +10,7 @@ from fastapi import UploadFile
 
 from dataio.api.models import TableMetadata, VersionType
 from dataio.api.services.base_service import BaseService, get_aws_access_key_id
+from dataio.api.services.draft_upload_storage import skip_utf8_bom
 
 dotenv.load_dotenv()
 
@@ -142,6 +143,9 @@ class FilestoreService(BaseService):
             metadata_object["tables"][table_metadata.table_name] = (
                 table_metadata.model_dump()
             )
+            # Store Excel "CSV UTF-8" files without their byte-order mark, so
+            # every later reader sees the real first column name.
+            skip_utf8_bom(file.file)
             self.bucket.upload_fileobj(file.file, remote_filepath)
             self.bucket.put_object(
                 Body=json.dumps(metadata_object).encode("UTF-8"),
@@ -161,13 +165,17 @@ class FilestoreService(BaseService):
         manifest_yaml: str,
         manifest_json: dict,
     ) -> None:
+        # Serialise first so an unserialisable manifest fails before either
+        # object is written, rather than leaving manifest.yaml without its
+        # manifest.json.
+        manifest_json_body = json.dumps(manifest_json).encode("utf-8")
         self.bucket.put_object(
             Body=manifest_yaml.encode("utf-8"),
             Key=self._manifest_yaml_key(dataset_id, version_type),
             ContentType="application/x-yaml",
         )
         self.bucket.put_object(
-            Body=json.dumps(manifest_json).encode("utf-8"),
+            Body=manifest_json_body,
             Key=self._manifest_json_key(dataset_id, version_type),
             ContentType="application/json",
         )
@@ -249,8 +257,9 @@ class FilestoreService(BaseService):
             if Path(file_name).suffix.lower() != ".csv":
                 continue
 
+            # utf-8-sig: tables uploaded before BOMs were stripped may still have one
             table_sources[Path(file_name).stem] = (
-                self.bucket.Object(key).get()["Body"].read().decode("utf-8")
+                self.bucket.Object(key).get()["Body"].read().decode("utf-8-sig")
             )
         return table_sources
 
@@ -351,6 +360,13 @@ class FilestoreService(BaseService):
         except Exception as e:
             self.logger.error(f"Failed to delete file: {e!s}")
             raise e
+
+    def dataset_has_objects(self, dataset_id: str) -> bool:
+        """True if any file exists under the dataset's S3 folders."""
+        return any(
+            self._list_dataset_objects(dataset_id, version_type)
+            for version_type in (VersionType.STANDARDISED, VersionType.PREPROCESSED)
+        )
 
     def rename_dataset(self, old_dataset_id: str, new_dataset_id: str) -> None:
         for version_type in (VersionType.STANDARDISED, VersionType.PREPROCESSED):

@@ -2,13 +2,12 @@
 -- PostgreSQL database dump
 --
 
--- Dumped from database version 17.5 (Homebrew)
--- Dumped by pg_dump version 17.5 (Homebrew)
+-- Dumped from database version 16.14
+-- Dumped by pg_dump version 16.14
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
-SET transaction_timeout = 0;
 SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
 SELECT pg_catalog.set_config('search_path', '', false);
@@ -29,13 +28,26 @@ CREATE TYPE public.access_level AS ENUM (
 
 
 --
+-- Name: dataset_manifest_draft_status; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.dataset_manifest_draft_status AS ENUM (
+    'pending',
+    'approved',
+    'rejected',
+    'flagged'
+);
+
+
+--
 -- Name: resource_type; Type: TYPE; Schema: public; Owner: -
 --
 
 CREATE TYPE public.resource_type AS ENUM (
     'DATASET',
     'GROUP',
-    'BUCKET'
+    'BUCKET',
+    'WEATHER_DATA_API'
 );
 
 
@@ -54,7 +66,7 @@ CREATE TYPE public.spatial_resolution AS ENUM (
     'WARD',
     'PRABHAG',
     'ULB',
-    'LAT/LONG',
+    'LAT_LONG',
     'OTHER'
 );
 
@@ -260,6 +272,82 @@ $$;
 
 
 --
+-- Name: add_tag_to_dataset(character varying, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.add_tag_to_dataset(p_ds_id character varying, p_tag_str text) RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    v_dataset_id INTEGER;
+    v_tag_id INTEGER;
+BEGIN
+    -- Get dataset ID from ds_id
+    SELECT id INTO v_dataset_id
+    FROM datasets
+    WHERE ds_id = p_ds_id;
+
+    IF v_dataset_id IS NULL THEN
+        RAISE EXCEPTION 'Dataset with ds_id % not found', p_ds_id;
+    END IF;
+
+    -- Get or create tag ID
+    SELECT id INTO v_tag_id
+    FROM tags
+    WHERE tag_name = p_tag_str;
+
+    -- If tag doesn't exist, create it
+    IF v_tag_id IS NULL THEN
+        INSERT INTO tags (tag_name) VALUES (p_tag_str)
+        RETURNING id INTO v_tag_id;
+    END IF;
+
+    -- Insert into dataset_tags if not already exists
+    INSERT INTO dataset_tags (dataset_id, tag_id)
+    VALUES (v_dataset_id, v_tag_id)
+    ON CONFLICT (dataset_id, tag_id) DO NOTHING;
+
+END;
+$$;
+
+
+--
+-- Name: cleanup_expired_auth_data(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.cleanup_expired_auth_data() RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    -- Delete expired OTP tokens
+    DELETE FROM otp_tokens WHERE expires_at < NOW();
+
+    -- Delete expired WebAuthn challenges
+    DELETE FROM webauthn_challenges WHERE expires_at < NOW();
+
+    -- Delete expired sessions and revoked sessions older than 30 days
+    DELETE FROM sessions
+    WHERE expires_at < NOW()
+       OR (revoked_at IS NOT NULL AND revoked_at < NOW() - INTERVAL '30 days');
+END;
+$$;
+
+
+--
+-- Name: cleanup_expired_magic_links(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.cleanup_expired_magic_links() RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    DELETE FROM magic_link_tokens
+    WHERE expires_at < NOW() - INTERVAL '1 day';
+END;
+$$;
+
+
+--
 -- Name: tr_insert_dataset(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -270,6 +358,20 @@ BEGIN
     IF length(NEW.ds_id) != 12 THEN
         RAISE EXCEPTION 'ds_id must be 12 characters long';
     END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: update_chat_session_updated_at(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.update_chat_session_updated_at() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    UPDATE chat_sessions SET updated_at = NOW() WHERE id = NEW.session_id;
     RETURN NEW;
 END;
 $$;
@@ -309,6 +411,68 @@ $$;
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
+
+--
+-- Name: auth_audit_logs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.auth_audit_logs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    event_type text NOT NULL,
+    outcome text NOT NULL,
+    actor_email text,
+    target_email text,
+    ip_address text,
+    user_agent text,
+    details jsonb,
+    created_at timestamp without time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: auth_rate_limits; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.auth_rate_limits (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    action text NOT NULL,
+    subject text NOT NULL,
+    attempt_count integer DEFAULT 0 NOT NULL,
+    window_started_at timestamp without time zone DEFAULT now() NOT NULL,
+    blocked_until timestamp without time zone,
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    updated_at timestamp without time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: chat_messages; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.chat_messages (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    session_id uuid NOT NULL,
+    role text NOT NULL,
+    content text NOT NULL,
+    tool_calls jsonb,
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    CONSTRAINT chat_messages_role_check CHECK ((role = ANY (ARRAY['user'::text, 'assistant'::text, 'system'::text])))
+);
+
+
+--
+-- Name: chat_sessions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.chat_sessions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_email text NOT NULL,
+    title text,
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    updated_at timestamp without time zone DEFAULT now() NOT NULL,
+    deleted_at timestamp without time zone
+);
+
 
 --
 -- Name: collections; Type: TABLE; Schema: public; Owner: -
@@ -364,6 +528,54 @@ ALTER TABLE public.data_owners ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY 
 
 
 --
+-- Name: dataset_downloads; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.dataset_downloads (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_email text NOT NULL,
+    dataset_id text NOT NULL,
+    access_channel text DEFAULT 'WEB'::text NOT NULL,
+    ip_address text,
+    user_agent text,
+    downloaded_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: dataset_manifest_drafts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.dataset_manifest_drafts (
+    draft_id uuid DEFAULT gen_random_uuid() NOT NULL,
+    dataset_id text,
+    collection_id text NOT NULL,
+    category_id text NOT NULL,
+    source_csv_path text NOT NULL,
+    digitization_log_path text,
+    status public.dataset_manifest_draft_status DEFAULT 'pending'::public.dataset_manifest_draft_status NOT NULL,
+    draft_yaml text NOT NULL,
+    draft_json jsonb NOT NULL,
+    flagged_fields jsonb DEFAULT '[]'::jsonb NOT NULL,
+    reviewer_notes jsonb DEFAULT '[]'::jsonb NOT NULL,
+    validation_result jsonb,
+    llm_model_id text,
+    llm_prompt_tokens integer,
+    llm_completion_tokens integer,
+    created_by text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    reviewed_by text,
+    reviewed_at timestamp without time zone,
+    superseded_by_draft_id uuid,
+    raw_dataset_id text,
+    import_started_at timestamp without time zone,
+    imported_at timestamp without time zone,
+    imported_by text,
+    import_result jsonb
+);
+
+
+--
 -- Name: dataset_raw_datasets; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -403,12 +615,61 @@ CREATE TABLE public.datasets (
     additional_metadata jsonb,
     readme_md text,
     data_dictionary_json text,
+    documentation_synced_at timestamp with time zone,
     manifest_yaml text,
     manifest_json jsonb,
     manifest_updated_at timestamp with time zone,
-    manifest_updated_by text,
-    documentation_synced_at timestamp with time zone
+    manifest_updated_by text
 );
+
+
+--
+-- Name: COLUMN datasets.readme_md; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.datasets.readme_md IS 'Cached README.md content from file server';
+
+
+--
+-- Name: COLUMN datasets.data_dictionary_json; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.datasets.data_dictionary_json IS 'Cached metadata.json (data dictionary) content from file server';
+
+
+--
+-- Name: COLUMN datasets.documentation_synced_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.datasets.documentation_synced_at IS 'Timestamp of last documentation sync from file server';
+
+
+--
+-- Name: COLUMN datasets.manifest_yaml; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.datasets.manifest_yaml IS 'Cached canonical manifest.yaml content from filestore';
+
+
+--
+-- Name: COLUMN datasets.manifest_json; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.datasets.manifest_json IS 'Cached normalized manifest JSON derived from manifest.yaml';
+
+
+--
+-- Name: COLUMN datasets.manifest_updated_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.datasets.manifest_updated_at IS 'Timestamp of last direct manifest update';
+
+
+--
+-- Name: COLUMN datasets.manifest_updated_by; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.datasets.manifest_updated_by IS 'Actor email that last updated the manifest cache';
 
 
 --
@@ -451,7 +712,7 @@ CREATE TABLE public.tags (
 
 CREATE VIEW public.datasets_full_view AS
  SELECT d.id,
-    array_agg(rd.rds_id) AS rds_ids,
+    array_agg(DISTINCT rd.rds_id) AS rds_ids,
     d.ds_id,
     d.title,
     c.collection_id,
@@ -462,7 +723,7 @@ CREATE VIEW public.datasets_full_view AS
     do2.contact_person AS data_owner_contact_person,
     do2.contact_person_email AS data_owner_contact_person_email,
     d.description,
-    array_agg(t.tag_name) AS tags,
+    array_agg(DISTINCT t.tag_name) AS tags,
     r.region_name AS spatial_coverage,
     d.spatial_resolution,
     d.temporal_coverage_start_date,
@@ -528,6 +789,62 @@ ALTER TABLE public.db_migration_history ALTER COLUMN id ADD GENERATED ALWAYS AS 
 
 
 --
+-- Name: magic_link_tokens; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.magic_link_tokens (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    email text NOT NULL,
+    token text NOT NULL,
+    purpose text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    used_at timestamp with time zone,
+    invited_by text
+);
+
+
+--
+-- Name: COLUMN magic_link_tokens.invited_by; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.magic_link_tokens.invited_by IS 'Email of admin who sent the invitation (for purpose=invitation)';
+
+
+--
+-- Name: oauth_identities; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.oauth_identities (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    provider text NOT NULL,
+    provider_user_id text NOT NULL,
+    user_email text NOT NULL,
+    provider_email text,
+    provider_email_verified boolean DEFAULT false NOT NULL,
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    last_login_at timestamp without time zone
+);
+
+
+--
+-- Name: otp_tokens; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.otp_tokens (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    email text NOT NULL,
+    code text NOT NULL,
+    purpose text NOT NULL,
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    expires_at timestamp without time zone NOT NULL,
+    used_at timestamp without time zone,
+    attempts integer DEFAULT 0 NOT NULL,
+    CONSTRAINT otp_tokens_purpose_check CHECK ((purpose = ANY (ARRAY['login'::text, 'verify_email'::text, 'invite'::text, 'registration'::text, 'account_deletion'::text])))
+);
+
+
+--
 -- Name: rate_limit; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -566,6 +883,74 @@ ALTER TABLE public.regions ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     NO MAXVALUE
     CACHE 1
 );
+
+
+--
+-- Name: reserved_dataset_ids; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.reserved_dataset_ids (
+    id integer NOT NULL,
+    ds_id text NOT NULL,
+    collection_id text,
+    note text,
+    reserved_by text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: reserved_dataset_ids_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.reserved_dataset_ids_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: reserved_dataset_ids_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.reserved_dataset_ids_id_seq OWNED BY public.reserved_dataset_ids.id;
+
+
+--
+-- Name: reserved_raw_dataset_ids; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.reserved_raw_dataset_ids (
+    id integer NOT NULL,
+    rds_id text NOT NULL,
+    category_id text,
+    note text,
+    reserved_by text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: reserved_raw_dataset_ids_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.reserved_raw_dataset_ids_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: reserved_raw_dataset_ids_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.reserved_raw_dataset_ids_id_seq OWNED BY public.reserved_raw_dataset_ids.id;
 
 
 --
@@ -612,6 +997,24 @@ ALTER SEQUENCE public.resource_groups_id_seq OWNED BY public.resource_groups.id;
 
 
 --
+-- Name: sessions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sessions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_email text NOT NULL,
+    refresh_token text,
+    user_agent text,
+    ip_address text,
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    expires_at timestamp without time zone NOT NULL,
+    revoked_at timestamp without time zone,
+    refresh_token_jti_hash text,
+    last_seen_at timestamp without time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: tags_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
@@ -622,6 +1025,23 @@ ALTER TABLE public.tags ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
     NO MINVALUE
     NO MAXVALUE
     CACHE 1
+);
+
+
+--
+-- Name: user_api_keys; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.user_api_keys (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_email text NOT NULL,
+    key_hash text NOT NULL,
+    key_prefix text NOT NULL,
+    name text NOT NULL,
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    last_used_at timestamp without time zone,
+    expires_at timestamp without time zone,
+    revoked_at timestamp without time zone
 );
 
 
@@ -656,8 +1076,64 @@ CREATE TABLE public.users (
     key text,
     is_group boolean DEFAULT false NOT NULL,
     is_admin boolean DEFAULT false NOT NULL,
-    CONSTRAINT valid_user_group CHECK ((((is_group = true) AND (key IS NULL)) OR ((is_group = false) AND (key IS NOT NULL))))
+    email_verified boolean DEFAULT false NOT NULL,
+    last_login timestamp without time zone,
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    display_name text,
+    suspended_at timestamp without time zone,
+    suspended_by text,
+    verification_status text DEFAULT 'verified'::text,
+    registered_at timestamp with time zone,
+    verified_at timestamp with time zone,
+    verified_by text,
+    CONSTRAINT valid_user_group CHECK ((((is_group = true) AND (key IS NULL)) OR (is_group = false)))
 );
+
+
+--
+-- Name: webauthn_challenges; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.webauthn_challenges (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_email text NOT NULL,
+    challenge text NOT NULL,
+    purpose text NOT NULL,
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    expires_at timestamp without time zone NOT NULL,
+    CONSTRAINT webauthn_challenges_purpose_check CHECK ((purpose = ANY (ARRAY['registration'::text, 'authentication'::text])))
+);
+
+
+--
+-- Name: webauthn_credentials; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.webauthn_credentials (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_email text NOT NULL,
+    credential_id text NOT NULL,
+    public_key bytea NOT NULL,
+    sign_count integer DEFAULT 0 NOT NULL,
+    device_name text,
+    transports text[],
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    last_used_at timestamp without time zone
+);
+
+
+--
+-- Name: reserved_dataset_ids id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reserved_dataset_ids ALTER COLUMN id SET DEFAULT nextval('public.reserved_dataset_ids_id_seq'::regclass);
+
+
+--
+-- Name: reserved_raw_dataset_ids id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reserved_raw_dataset_ids ALTER COLUMN id SET DEFAULT nextval('public.reserved_raw_dataset_ids_id_seq'::regclass);
 
 
 --
@@ -665,6 +1141,38 @@ CREATE TABLE public.users (
 --
 
 ALTER TABLE ONLY public.resource_groups ALTER COLUMN id SET DEFAULT nextval('public.resource_groups_id_seq'::regclass);
+
+
+--
+-- Name: auth_audit_logs auth_audit_logs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.auth_audit_logs
+    ADD CONSTRAINT auth_audit_logs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: auth_rate_limits auth_rate_limits_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.auth_rate_limits
+    ADD CONSTRAINT auth_rate_limits_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: chat_messages chat_messages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.chat_messages
+    ADD CONSTRAINT chat_messages_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: chat_sessions chat_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.chat_sessions
+    ADD CONSTRAINT chat_sessions_pkey PRIMARY KEY (id);
 
 
 --
@@ -697,6 +1205,22 @@ ALTER TABLE ONLY public.data_owners
 
 ALTER TABLE ONLY public.data_owners
     ADD CONSTRAINT data_owners_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: dataset_downloads dataset_downloads_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.dataset_downloads
+    ADD CONSTRAINT dataset_downloads_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: dataset_manifest_drafts dataset_manifest_drafts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.dataset_manifest_drafts
+    ADD CONSTRAINT dataset_manifest_drafts_pkey PRIMARY KEY (draft_id);
 
 
 --
@@ -748,6 +1272,46 @@ ALTER TABLE ONLY public.db_migration_history
 
 
 --
+-- Name: magic_link_tokens magic_link_tokens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.magic_link_tokens
+    ADD CONSTRAINT magic_link_tokens_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: magic_link_tokens magic_link_tokens_token_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.magic_link_tokens
+    ADD CONSTRAINT magic_link_tokens_token_key UNIQUE (token);
+
+
+--
+-- Name: oauth_identities oauth_identities_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oauth_identities
+    ADD CONSTRAINT oauth_identities_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: otp_tokens otp_tokens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.otp_tokens
+    ADD CONSTRAINT otp_tokens_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: rate_limit rate_limit_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.rate_limit
+    ADD CONSTRAINT rate_limit_pkey PRIMARY KEY (user_email, access_point);
+
+
+--
 -- Name: raw_datasets raw_datasets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -777,6 +1341,38 @@ ALTER TABLE ONLY public.regions
 
 ALTER TABLE ONLY public.regions
     ADD CONSTRAINT regions_region_id_key UNIQUE (region_id);
+
+
+--
+-- Name: reserved_dataset_ids reserved_dataset_ids_ds_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reserved_dataset_ids
+    ADD CONSTRAINT reserved_dataset_ids_ds_id_key UNIQUE (ds_id);
+
+
+--
+-- Name: reserved_dataset_ids reserved_dataset_ids_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reserved_dataset_ids
+    ADD CONSTRAINT reserved_dataset_ids_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: reserved_raw_dataset_ids reserved_raw_dataset_ids_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reserved_raw_dataset_ids
+    ADD CONSTRAINT reserved_raw_dataset_ids_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: reserved_raw_dataset_ids reserved_raw_dataset_ids_rds_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reserved_raw_dataset_ids
+    ADD CONSTRAINT reserved_raw_dataset_ids_rds_id_key UNIQUE (rds_id);
 
 
 --
@@ -812,6 +1408,22 @@ ALTER TABLE ONLY public.resource_groups
 
 
 --
+-- Name: sessions sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sessions
+    ADD CONSTRAINT sessions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: sessions sessions_refresh_token_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sessions
+    ADD CONSTRAINT sessions_refresh_token_key UNIQUE (refresh_token);
+
+
+--
 -- Name: tags tags_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -825,6 +1437,14 @@ ALTER TABLE ONLY public.tags
 
 ALTER TABLE ONLY public.tags
     ADD CONSTRAINT tags_tag_name_key UNIQUE (tag_name);
+
+
+--
+-- Name: user_api_keys user_api_keys_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_api_keys
+    ADD CONSTRAINT user_api_keys_pkey PRIMARY KEY (id);
 
 
 --
@@ -852,6 +1472,289 @@ ALTER TABLE ONLY public.users
 
 
 --
+-- Name: webauthn_challenges webauthn_challenges_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.webauthn_challenges
+    ADD CONSTRAINT webauthn_challenges_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: webauthn_credentials webauthn_credentials_credential_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.webauthn_credentials
+    ADD CONSTRAINT webauthn_credentials_credential_id_key UNIQUE (credential_id);
+
+
+--
+-- Name: webauthn_credentials webauthn_credentials_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.webauthn_credentials
+    ADD CONSTRAINT webauthn_credentials_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: idx_auth_audit_logs_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_auth_audit_logs_created_at ON public.auth_audit_logs USING btree (created_at DESC);
+
+
+--
+-- Name: idx_auth_audit_logs_event_type; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_auth_audit_logs_event_type ON public.auth_audit_logs USING btree (event_type);
+
+
+--
+-- Name: idx_auth_audit_logs_target_email; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_auth_audit_logs_target_email ON public.auth_audit_logs USING btree (target_email);
+
+
+--
+-- Name: idx_auth_rate_limits_action_subject; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_auth_rate_limits_action_subject ON public.auth_rate_limits USING btree (action, subject);
+
+
+--
+-- Name: idx_auth_rate_limits_blocked_until; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_auth_rate_limits_blocked_until ON public.auth_rate_limits USING btree (blocked_until);
+
+
+--
+-- Name: idx_chat_messages_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_chat_messages_created_at ON public.chat_messages USING btree (created_at);
+
+
+--
+-- Name: idx_chat_messages_session_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_chat_messages_session_id ON public.chat_messages USING btree (session_id);
+
+
+--
+-- Name: idx_chat_sessions_updated_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_chat_sessions_updated_at ON public.chat_sessions USING btree (updated_at DESC);
+
+
+--
+-- Name: idx_chat_sessions_user_email; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_chat_sessions_user_email ON public.chat_sessions USING btree (user_email);
+
+
+--
+-- Name: idx_dataset_downloads_dataset_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_dataset_downloads_dataset_id ON public.dataset_downloads USING btree (dataset_id);
+
+
+--
+-- Name: idx_dataset_downloads_downloaded_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_dataset_downloads_downloaded_at ON public.dataset_downloads USING btree (downloaded_at);
+
+
+--
+-- Name: idx_dataset_downloads_user_email; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_dataset_downloads_user_email ON public.dataset_downloads USING btree (user_email);
+
+
+--
+-- Name: idx_dataset_manifest_drafts_dataset_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_dataset_manifest_drafts_dataset_id ON public.dataset_manifest_drafts USING btree (dataset_id);
+
+
+--
+-- Name: idx_dataset_manifest_drafts_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_dataset_manifest_drafts_status ON public.dataset_manifest_drafts USING btree (status);
+
+
+--
+-- Name: idx_magic_link_tokens_email; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_magic_link_tokens_email ON public.magic_link_tokens USING btree (email);
+
+
+--
+-- Name: idx_magic_link_tokens_expires; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_magic_link_tokens_expires ON public.magic_link_tokens USING btree (expires_at);
+
+
+--
+-- Name: idx_magic_link_tokens_invited_by; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_magic_link_tokens_invited_by ON public.magic_link_tokens USING btree (invited_by) WHERE (invited_by IS NOT NULL);
+
+
+--
+-- Name: idx_magic_link_tokens_token; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_magic_link_tokens_token ON public.magic_link_tokens USING btree (token);
+
+
+--
+-- Name: idx_oauth_identities_provider_user; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_oauth_identities_provider_user ON public.oauth_identities USING btree (provider, provider_user_id);
+
+
+--
+-- Name: idx_oauth_identities_user_email; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_oauth_identities_user_email ON public.oauth_identities USING btree (user_email);
+
+
+--
+-- Name: idx_otp_tokens_email; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_otp_tokens_email ON public.otp_tokens USING btree (email);
+
+
+--
+-- Name: idx_otp_tokens_expires_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_otp_tokens_expires_at ON public.otp_tokens USING btree (expires_at);
+
+
+--
+-- Name: idx_reserved_dataset_ids_collection_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_reserved_dataset_ids_collection_id ON public.reserved_dataset_ids USING btree (collection_id);
+
+
+--
+-- Name: idx_reserved_raw_dataset_ids_category_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_reserved_raw_dataset_ids_category_id ON public.reserved_raw_dataset_ids USING btree (category_id);
+
+
+--
+-- Name: idx_sessions_expires_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_sessions_expires_at ON public.sessions USING btree (expires_at);
+
+
+--
+-- Name: idx_sessions_refresh_token; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_sessions_refresh_token ON public.sessions USING btree (refresh_token);
+
+
+--
+-- Name: idx_sessions_refresh_token_jti_hash; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_sessions_refresh_token_jti_hash ON public.sessions USING btree (refresh_token_jti_hash) WHERE (refresh_token_jti_hash IS NOT NULL);
+
+
+--
+-- Name: idx_sessions_user_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_sessions_user_active ON public.sessions USING btree (user_email, revoked_at, expires_at);
+
+
+--
+-- Name: idx_sessions_user_email; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_sessions_user_email ON public.sessions USING btree (user_email);
+
+
+--
+-- Name: idx_user_api_keys_key_hash; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_user_api_keys_key_hash ON public.user_api_keys USING btree (key_hash);
+
+
+--
+-- Name: idx_user_api_keys_user_email; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_user_api_keys_user_email ON public.user_api_keys USING btree (user_email);
+
+
+--
+-- Name: idx_users_suspended_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_users_suspended_at ON public.users USING btree (suspended_at) WHERE (suspended_at IS NOT NULL);
+
+
+--
+-- Name: idx_users_verification_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_users_verification_status ON public.users USING btree (verification_status);
+
+
+--
+-- Name: idx_webauthn_challenges_expires_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_webauthn_challenges_expires_at ON public.webauthn_challenges USING btree (expires_at);
+
+
+--
+-- Name: idx_webauthn_challenges_user_email; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_webauthn_challenges_user_email ON public.webauthn_challenges USING btree (user_email);
+
+
+--
+-- Name: idx_webauthn_credentials_credential_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_webauthn_credentials_credential_id ON public.webauthn_credentials USING btree (credential_id);
+
+
+--
+-- Name: idx_webauthn_credentials_user_email; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_webauthn_credentials_user_email ON public.webauthn_credentials USING btree (user_email);
+
+
+--
 -- Name: datasets insert_dataset; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -859,10 +1762,73 @@ CREATE TRIGGER insert_dataset BEFORE INSERT OR UPDATE ON public.datasets FOR EAC
 
 
 --
+-- Name: chat_messages trigger_update_chat_session_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trigger_update_chat_session_updated_at AFTER INSERT ON public.chat_messages FOR EACH ROW EXECUTE FUNCTION public.update_chat_session_updated_at();
+
+
+--
 -- Name: user_groups validate_group_membership_trigger; Type: TRIGGER; Schema: public; Owner: -
 --
 
 CREATE TRIGGER validate_group_membership_trigger BEFORE INSERT OR UPDATE ON public.user_groups FOR EACH ROW EXECUTE FUNCTION public.validate_group_membership();
+
+
+--
+-- Name: chat_messages chat_messages_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.chat_messages
+    ADD CONSTRAINT chat_messages_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.chat_sessions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: chat_sessions chat_sessions_user_email_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.chat_sessions
+    ADD CONSTRAINT chat_sessions_user_email_fkey FOREIGN KEY (user_email) REFERENCES public.users(email) ON DELETE CASCADE;
+
+
+--
+-- Name: dataset_downloads dataset_downloads_user_email_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.dataset_downloads
+    ADD CONSTRAINT dataset_downloads_user_email_fkey FOREIGN KEY (user_email) REFERENCES public.users(email) ON DELETE CASCADE;
+
+
+--
+-- Name: dataset_manifest_drafts dataset_manifest_drafts_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.dataset_manifest_drafts
+    ADD CONSTRAINT dataset_manifest_drafts_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(email) ON DELETE SET NULL;
+
+
+--
+-- Name: dataset_manifest_drafts dataset_manifest_drafts_imported_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.dataset_manifest_drafts
+    ADD CONSTRAINT dataset_manifest_drafts_imported_by_fkey FOREIGN KEY (imported_by) REFERENCES public.users(email) ON DELETE SET NULL;
+
+
+--
+-- Name: dataset_manifest_drafts dataset_manifest_drafts_reviewed_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.dataset_manifest_drafts
+    ADD CONSTRAINT dataset_manifest_drafts_reviewed_by_fkey FOREIGN KEY (reviewed_by) REFERENCES public.users(email) ON DELETE SET NULL;
+
+
+--
+-- Name: dataset_manifest_drafts dataset_manifest_drafts_superseded_by_draft_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.dataset_manifest_drafts
+    ADD CONSTRAINT dataset_manifest_drafts_superseded_by_draft_id_fkey FOREIGN KEY (superseded_by_draft_id) REFERENCES public.dataset_manifest_drafts(draft_id);
 
 
 --
@@ -922,11 +1888,51 @@ ALTER TABLE ONLY public.datasets
 
 
 --
+-- Name: oauth_identities oauth_identities_user_email_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.oauth_identities
+    ADD CONSTRAINT oauth_identities_user_email_fkey FOREIGN KEY (user_email) REFERENCES public.users(email) ON DELETE CASCADE;
+
+
+--
+-- Name: reserved_dataset_ids reserved_dataset_ids_reserved_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reserved_dataset_ids
+    ADD CONSTRAINT reserved_dataset_ids_reserved_by_fkey FOREIGN KEY (reserved_by) REFERENCES public.users(email) ON DELETE SET NULL;
+
+
+--
+-- Name: reserved_raw_dataset_ids reserved_raw_dataset_ids_reserved_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reserved_raw_dataset_ids
+    ADD CONSTRAINT reserved_raw_dataset_ids_reserved_by_fkey FOREIGN KEY (reserved_by) REFERENCES public.users(email) ON DELETE SET NULL;
+
+
+--
 -- Name: resource_group_members resource_group_members_resource_group_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.resource_group_members
     ADD CONSTRAINT resource_group_members_resource_group_id_fkey FOREIGN KEY (resource_group_id) REFERENCES public.resource_groups(resource_group_id);
+
+
+--
+-- Name: sessions sessions_user_email_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sessions
+    ADD CONSTRAINT sessions_user_email_fkey FOREIGN KEY (user_email) REFERENCES public.users(email) ON DELETE CASCADE;
+
+
+--
+-- Name: user_api_keys user_api_keys_user_email_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_api_keys
+    ADD CONSTRAINT user_api_keys_user_email_fkey FOREIGN KEY (user_email) REFERENCES public.users(email) ON DELETE CASCADE;
 
 
 --
@@ -954,5 +1960,14 @@ ALTER TABLE ONLY public.user_permissions
 
 
 --
+-- Name: webauthn_credentials webauthn_credentials_user_email_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.webauthn_credentials
+    ADD CONSTRAINT webauthn_credentials_user_email_fkey FOREIGN KEY (user_email) REFERENCES public.users(email) ON DELETE CASCADE;
+
+
+--
 -- PostgreSQL database dump complete
 --
+

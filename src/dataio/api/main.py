@@ -1,5 +1,5 @@
-import os
 import logging
+import os
 
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse, JSONResponse
@@ -9,6 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from dataio.api.routers.admin import admin_router
 from dataio.api.routers.user import user_router
+from dataio.api.routers.validate import validate_router
 from dataio.api.routers.web import web_router
 from dataio.api.auth.providers import API_KEY_PREFIX
 
@@ -39,9 +40,8 @@ class LegacyAPIKeyDeprecationMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
 
-        # Check if a legacy API key was used (key without dio_ prefix)
-        api_key = request.headers.get("X-API-Key", "")
-        if api_key and not api_key.startswith(API_KEY_PREFIX):
+        # Add deprecation headers only when a legacy key authenticated successfully.
+        if getattr(request.state, "legacy_api_key_authenticated", False):
             # Add deprecation headers per RFC 8594
             response.headers["Deprecation"] = "true"
             response.headers["Sunset"] = "2025-12-31T23:59:59Z"
@@ -76,6 +76,7 @@ app.add_middleware(
 app.include_router(user_router)
 app.include_router(admin_router)
 app.include_router(web_router)
+app.include_router(validate_router)
 
 
 # Global exception handler to ensure all errors return JSON
@@ -87,7 +88,8 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"detail": "An unexpected error occurred. Please try again."},
     )
 
-app.mount("/docs", StaticFiles(directory="docs/build/", html=True), name="docs")
+if os.path.isdir("docs/build/"):
+    app.mount("/docs", StaticFiles(directory="docs/build/", html=True), name="docs")
 
 
 @app.get("/api")

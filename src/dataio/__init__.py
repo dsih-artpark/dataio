@@ -1,8 +1,9 @@
 from importlib.metadata import PackageNotFoundError, version
 
 from dataio.sdk import DataIOAPI
+from dataio.validate import DataIOValidator
 
-__all__ = ["DataIOAPI"]
+__all__ = ["DataIOAPI", "DataIOValidator"]
 
 try:
     __version__ = version(__name__)

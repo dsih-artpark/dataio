@@ -37,9 +37,8 @@ export async function registerPasskey(deviceName?: string): Promise<{
 /**
  * Authenticate with a passkey.
  */
-export async function authenticateWithPasskey(email: string): Promise<{
+export async function authenticateWithPasskey(email?: string): Promise<{
   access_token: string;
-  refresh_token: string;
   user: object;
 }> {
   // Get authentication options from server

@@ -19,7 +19,7 @@ export default function ChatMessage({ role, content, toolCalls, isStreaming }: C
     // Simple markdown-like formatting
     return content
       .split('\n')
-      .map((line, i) => {
+      .map((line) => {
         // Bold
         line = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
         // Inline code

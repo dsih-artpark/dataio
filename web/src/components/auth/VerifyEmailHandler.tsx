@@ -24,7 +24,7 @@ export default function VerifyEmailHandler() {
 
       try {
         const response = await api.verifyRegistration(email, undefined, token);
-        currentUser.value = response.user;
+        currentUser.value = response.access_token ? response.user : null;
 
         if (response.verification_status === 'pending') {
           setPendingMessage(response.verification_message || 'Your account is pending admin approval.');
@@ -128,11 +128,11 @@ export default function VerifyEmailHandler() {
       </div>
 
       <div class="space-y-3">
-        <a href="/register" class="btn-primary w-full block text-center">
-          Try Again
-        </a>
-        <a href="/login" class="btn-secondary w-full block text-center">
+        <a href="/login" class="btn-primary w-full block text-center">
           Sign In
+        </a>
+        <a href="/" class="btn-secondary w-full block text-center">
+          Return Home
         </a>
       </div>
     </div>

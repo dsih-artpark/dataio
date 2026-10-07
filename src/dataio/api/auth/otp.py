@@ -8,6 +8,8 @@ for passwordless authentication via email.
 import os
 import secrets
 import logging
+import hmac
+import hashlib
 from math import ceil
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -22,6 +24,8 @@ OTP_LENGTH = int(os.getenv("OTP_LENGTH", "6"))
 OTP_EXPIRY_MINUTES = int(os.getenv("OTP_EXPIRY_MINUTES", "10"))
 OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "5"))
 OTP_RATE_LIMIT_MINUTES = int(os.getenv("OTP_RATE_LIMIT_MINUTES", "1"))
+OTP_SECRET_KEY = os.getenv("OTP_SECRET_KEY") or os.getenv("JWT_SECRET_KEY", "dev-otp-secret")
+OTP_HASH_PREFIX = "sha256$"
 
 
 def generate_otp_code(length: int = OTP_LENGTH) -> str:
@@ -38,6 +42,13 @@ def generate_otp_code(length: int = OTP_LENGTH) -> str:
     return "".join(str(secrets.randbelow(10)) for _ in range(length))
 
 
+def hash_otp_code(email: str, purpose: str, code: str) -> str:
+    """Hash an OTP code for storage."""
+    message = f"{email.lower().strip()}:{purpose}:{code}".encode("utf-8")
+    digest = hmac.new(OTP_SECRET_KEY.encode("utf-8"), message, hashlib.sha256).hexdigest()
+    return f"{OTP_HASH_PREFIX}{digest}"
+
+
 def create_otp(
     email: str,
     purpose: str = "login",
@@ -48,7 +59,11 @@ def create_otp(
 
     Args:
         email: The email address to associate with the OTP
-        purpose: The purpose of the OTP ('login', 'verify_email', 'invite')
+        purpose: The purpose of the OTP: 'login', 'registration',
+            'account_deletion', 'verify_email', 'invite', or
+            'dataset_deletion:<dataset id>'. The database only accepts
+            these (otp_tokens_purpose_check, migrations 010 and 025); a new
+            purpose needs a migration, or the insert fails.
         expires_minutes: How long the OTP is valid
 
     Returns:
@@ -98,7 +113,7 @@ def create_otp(
 
         otp_token = OTPToken(
             email=email,
-            code=code,
+            code=hash_otp_code(email, purpose, code),
             purpose=purpose,
             expires_at=expires_at,
         )
@@ -166,7 +181,14 @@ def verify_otp(
             return False
 
         # Verify the code (constant-time comparison)
-        if not secrets.compare_digest(otp_token.code, code):
+        stored_code = otp_token.code or ""
+        expected_hash = hash_otp_code(email, purpose, code)
+        is_valid = (
+            secrets.compare_digest(stored_code, expected_hash)
+            if stored_code.startswith(OTP_HASH_PREFIX)
+            else secrets.compare_digest(stored_code, code)
+        )
+        if not is_valid:
             session.commit()
             logger.warning(
                 f"Invalid OTP attempt for email: {email}, "

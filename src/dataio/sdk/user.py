@@ -188,6 +188,16 @@ class DataIOAPI:
         dataset_details = dataset_details[0]
         return dataset_details
 
+    def get_dataset_manifest(self, dataset_id: str):
+        """Get the canonical standardised manifest for a dataset.
+
+        :param dataset_id: The dataset ID.
+        :type dataset_id: str
+        :returns: Manifest payload with YAML/JSON forms.
+        :rtype: dict
+        """
+        return self._request("GET", f"/datasets/{dataset_id}/manifest")
+
     def _get_download_links(self, dataset_id, bucket_type="STANDARDISED"):
         """Get download links for a dataset.
 

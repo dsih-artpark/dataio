@@ -3,47 +3,103 @@
  */
 
 import type {
+  AccessLevel,
+  AdminDatasetDetail,
+  AdminDatasetPackagePreview,
+  AdminDatasetSummary,
+  AdminDatasetTablesResponse,
+  AdminManifestRecord,
+  AdminRawDatasetsResponse,
+  ReservedDatasetId,
   DatasetDetail,
-  DatasetsResponse,
-  CollectionsResponse,
+  DatasetManifestRecord,
   DataOwnersResponse,
+  DatasetIdSuggestion,
+  NextDatasetIdNumber,
+  RawDatasetIdSuggestion,
+  RawDatasetIdSuggestionByCategory,
+  DatasetsResponse,
+  DocumentationSyncCheckResponse,
+  DocumentationSyncRunResponse,
+  CollectionsResponse,
   DatasetDownloadUrls,
+  ValidationResult,
+  CuratorMetadataInput,
+  ManifestDraftDetail,
+  ManifestDraftSummary,
 } from './types';
 
 const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
 interface ApiError {
-  detail: string;
+  detail: string | { message?: string };
+}
+
+export class ApiRequestError extends Error {
+  detailData?: unknown;
+  statusCode?: number;
+
+  constructor(message: string, detailData?: unknown, statusCode?: number) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.detailData = detailData;
+    this.statusCode = statusCode;
+  }
+}
+
+interface AuthProviders {
+  google: boolean;
+  github: boolean;
+  passkey: boolean;
+}
+
+interface AuthSession {
+  id: string;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+  ip_address: string | null;
+  user_agent: string | null;
+  current: boolean;
 }
 
 class ApiClient {
   private accessToken: string | null = null;
-  private refreshToken: string | null = null;
   private refreshPromise: Promise<boolean> | null = null;
 
+  private redirectToLogin(): void {
+    if (typeof window === 'undefined') return;
+    const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (window.location.pathname === '/login') {
+      return;
+    }
+    try {
+      sessionStorage.setItem('post_login_redirect', currentPath);
+    } catch {
+      // Ignore storage failures and fall back to plain login redirect.
+    }
+    const params = new URLSearchParams({ next: currentPath });
+    window.location.replace(`/login?${params.toString()}`);
+  }
+
   constructor() {
-    // Load tokens from localStorage on init
+    // Load tokens from sessionStorage on init
     if (typeof window !== 'undefined') {
-      this.accessToken = localStorage.getItem('access_token');
-      this.refreshToken = localStorage.getItem('refresh_token');
+      this.accessToken = sessionStorage.getItem('access_token');
     }
   }
 
-  setTokens(accessToken: string, refreshToken: string) {
+  setTokens(accessToken: string) {
     this.accessToken = accessToken;
-    this.refreshToken = refreshToken;
     if (typeof window !== 'undefined') {
-      localStorage.setItem('access_token', accessToken);
-      localStorage.setItem('refresh_token', refreshToken);
+      sessionStorage.setItem('access_token', accessToken);
     }
   }
 
   clearTokens() {
     this.accessToken = null;
-    this.refreshToken = null;
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
+      sessionStorage.removeItem('access_token');
     }
   }
 
@@ -52,7 +108,7 @@ class ApiClient {
   }
 
   getRefreshToken(): string | null {
-    return this.refreshToken;
+    return null;
   }
 
   isAuthenticated(): boolean {
@@ -64,10 +120,13 @@ class ApiClient {
     options: RequestInit = {},
     requireAuth = true
   ): Promise<T> {
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    };
+    const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+    const headers: HeadersInit = isFormData
+      ? { ...options.headers }
+      : {
+          'Content-Type': 'application/json',
+          ...options.headers,
+        };
 
     if (requireAuth && this.accessToken) {
       (headers as Record<string, string>)['Authorization'] = `Bearer ${this.accessToken}`;
@@ -76,10 +135,11 @@ class ApiClient {
     const response = await fetch(`${API_URL}/web${endpoint}`, {
       ...options,
       headers,
+      credentials: 'include',
     });
 
     // Handle 401 - try to refresh token
-    if (response.status === 401 && requireAuth && this.refreshToken) {
+    if (response.status === 401 && requireAuth) {
       const refreshed = await this.refreshAccessToken();
       if (refreshed) {
         // Retry request with new token
@@ -87,25 +147,32 @@ class ApiClient {
         const retryResponse = await fetch(`${API_URL}/web${endpoint}`, {
           ...options,
           headers,
+          credentials: 'include',
         });
         if (!retryResponse.ok) {
           const error = await retryResponse.json() as ApiError;
-          throw new Error(error.detail || 'Request failed');
+          const message =
+            typeof error.detail === 'string'
+              ? error.detail
+              : error.detail?.message || 'Request failed';
+          throw new ApiRequestError(message, error.detail, retryResponse.status);
         }
         return retryResponse.json();
       } else {
         // Refresh failed, clear tokens and redirect to login
         this.clearTokens();
-        if (typeof window !== 'undefined') {
-          window.location.replace('/login');
-        }
+        this.redirectToLogin();
         throw new Error('Session expired');
       }
     }
 
     if (!response.ok) {
       const error = await response.json() as ApiError;
-      throw new Error(error.detail || 'Request failed');
+      const message =
+        typeof error.detail === 'string'
+          ? error.detail
+          : error.detail?.message || 'Request failed';
+      throw new ApiRequestError(message, error.detail, response.status);
     }
 
     return response.json();
@@ -125,20 +192,26 @@ class ApiClient {
     }
   }
 
-  private async _doRefreshToken(): Promise<boolean> {
-    if (!this.refreshToken) return false;
+  async restoreSession(): Promise<boolean> {
+    if (this.accessToken) {
+      return true;
+    }
+    return this.refreshAccessToken();
+  }
 
+  private async _doRefreshToken(): Promise<boolean> {
     try {
       const response = await fetch(`${API_URL}/web/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: this.refreshToken }),
+        credentials: 'include',
+        body: JSON.stringify({}),
       });
 
       if (!response.ok) return false;
 
       const data = await response.json();
-      this.setTokens(data.access_token, data.refresh_token);
+      this.setTokens(data.access_token);
       return true;
     } catch {
       return false;
@@ -157,7 +230,6 @@ class ApiClient {
   async verifyLogin(email: string, code: string) {
     const data = await this.request<{
       access_token: string;
-      refresh_token: string;
       user: {
         email: string;
         display_name: string | null;
@@ -165,13 +237,23 @@ class ApiClient {
         email_verified: boolean;
       };
       needs_passkey: boolean;
+      verification_status?: string;
+      verification_message?: string | null;
     }>(
       '/auth/login/verify',
       { method: 'POST', body: JSON.stringify({ email, code }) },
       false
     );
-    this.setTokens(data.access_token, data.refresh_token);
+    if (data.access_token) {
+      this.setTokens(data.access_token);
+    } else {
+      this.clearTokens();
+    }
     return data;
+  }
+
+  async getAuthProviders() {
+    return this.request<AuthProviders>('/auth/providers', {}, false);
   }
 
   // Registration endpoints
@@ -185,8 +267,8 @@ class ApiClient {
 
   async verifyRegistration(email: string, code?: string, magicToken?: string) {
     const data = await this.request<{
-      access_token: string;
-      refresh_token: string;
+      access_token?: string;
+      refresh_token?: string;
       user: {
         email: string;
         display_name: string | null;
@@ -201,14 +283,17 @@ class ApiClient {
       { method: 'POST', body: JSON.stringify({ email, code, magic_token: magicToken }) },
       false
     );
-    this.setTokens(data.access_token, data.refresh_token);
+    if (data.access_token) {
+      this.setTokens(data.access_token);
+    } else {
+      this.clearTokens();
+    }
     return data;
   }
 
   async acceptInvitation(token: string) {
     const data = await this.request<{
       access_token: string;
-      refresh_token: string;
       user: {
         email: string;
         display_name: string | null;
@@ -221,23 +306,31 @@ class ApiClient {
       { method: 'POST', body: JSON.stringify({ token }) },
       false
     );
-    this.setTokens(data.access_token, data.refresh_token);
+    this.setTokens(data.access_token);
     return data;
   }
 
   async logout() {
-    if (this.refreshToken) {
-      try {
-        await this.request(
-          '/auth/logout',
-          { method: 'POST', body: JSON.stringify({ refresh_token: this.refreshToken }) },
-          false
-        );
-      } catch {
-        // Ignore logout errors
-      }
+    try {
+      await this.request(
+        '/auth/logout',
+        { method: 'POST', body: JSON.stringify({}) },
+        false
+      );
+    } catch {
+      // Ignore logout errors
     }
     this.clearTokens();
+  }
+
+  async listSessions() {
+    return this.request<{ sessions: AuthSession[] }>('/auth/sessions');
+  }
+
+  async revokeSession(sessionId: string) {
+    return this.request<{ revoked: boolean; session_id: string }>(`/auth/sessions/${sessionId}`, {
+      method: 'DELETE',
+    });
   }
 
   // Passkey endpoints
@@ -257,7 +350,7 @@ class ApiClient {
     );
   }
 
-  async getPasskeyLoginOptions(email: string) {
+  async getPasskeyLoginOptions(email?: string) {
     return this.request<{ options: string }>(
       '/auth/passkey/login/options',
       { method: 'POST', body: JSON.stringify({ email }) },
@@ -265,18 +358,36 @@ class ApiClient {
     );
   }
 
-  async verifyPasskeyLogin(email: string, credential: object) {
+  async verifyPasskeyLogin(email: string | undefined, credential: object) {
     const data = await this.request<{
       access_token: string;
-      refresh_token: string;
       user: object;
     }>(
       '/auth/passkey/login/verify',
       { method: 'POST', body: JSON.stringify({ email, credential }) },
       false
     );
-    this.setTokens(data.access_token, data.refresh_token);
+    this.setTokens(data.access_token);
     return data;
+  }
+
+  startOAuth(provider: 'google' | 'github', nextPath?: string) {
+    const currentPath =
+      nextPath ||
+      (typeof window !== 'undefined'
+        ? `${window.location.pathname}${window.location.search}${window.location.hash}`
+        : '/datasets');
+
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem('post_login_redirect', currentPath);
+      } catch {
+        // Ignore storage failures.
+      }
+    }
+
+    const params = new URLSearchParams({ next: currentPath });
+    window.location.href = `${API_URL}/web/auth/oauth/${provider}/start?${params.toString()}`;
   }
 
   async listPasskeys() {
@@ -377,6 +488,10 @@ class ApiClient {
 
   async getDataset(datasetId: string): Promise<DatasetDetail> {
     return this.request<DatasetDetail>(`/datasets/${datasetId}`);
+  }
+
+  async getDatasetManifest(datasetId: string): Promise<DatasetManifestRecord> {
+    return this.request<DatasetManifestRecord>(`/datasets/${datasetId}/manifest`);
   }
 
   async getDatasetDownloadUrls(datasetId: string): Promise<DatasetDownloadUrls> {
@@ -609,6 +724,46 @@ class ApiClient {
     );
   }
 
+  async adminGetDownloadMetrics(params?: {
+    search?: string;
+    dataset_id?: string;
+    user_email?: string;
+    channel?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const searchParams = new URLSearchParams();
+    if (params?.search) searchParams.set('search', params.search);
+    if (params?.dataset_id) searchParams.set('dataset_id', params.dataset_id);
+    if (params?.user_email) searchParams.set('user_email', params.user_email);
+    if (params?.channel) searchParams.set('channel', params.channel);
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    if (params?.offset) searchParams.set('offset', String(params.offset));
+
+    const query = searchParams.toString();
+    return this.request<{
+      summary: {
+        total_downloads: number;
+        unique_users: number;
+        unique_datasets: number;
+      };
+      downloads: {
+        id: string;
+        user_email: string;
+        dataset_id: string;
+        dataset_title: string;
+        access_channel: string;
+        device_info?: string;
+        ip_address: string | null;
+        user_agent: string | null;
+        downloaded_at: string | null;
+      }[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(`/admin/metrics/downloads${query ? `?${query}` : ''}`);
+  }
+
   // Chat endpoints
   async chat(message: string, history?: { role: string; content: { text: string }[] }[]) {
     return this.request<{ response: string; tool_calls: { tool: string; input: Record<string, unknown> }[] }>(
@@ -658,11 +813,509 @@ class ApiClient {
 
     const query = searchParams.toString();
     return this.request<{
-      datasets: { ds_id: string; title: string; access_level: string | null }[];
+      datasets: AdminDatasetSummary[];
       total: number;
       limit: number;
       offset: number;
     }>(`/admin/datasets${query ? `?${query}` : ''}`);
+  }
+
+  async adminSuggestDatasetId(collectionId: string) {
+    return this.request<DatasetIdSuggestion>(
+      `/admin/datasets/suggest-id?collection_id=${encodeURIComponent(collectionId)}`
+    );
+  }
+
+  async adminGetNextDatasetIdNumber() {
+    return this.request<NextDatasetIdNumber>('/admin/datasets/next-id-number');
+  }
+
+  async adminListReservedDatasetIds(params?: { search?: string; limit?: number; offset?: number }) {
+    const searchParams = new URLSearchParams();
+    if (params?.search) searchParams.set('search', params.search);
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    if (params?.offset) searchParams.set('offset', String(params.offset));
+    const query = searchParams.toString();
+    return this.request<{
+      reservations: ReservedDatasetId[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(`/admin/dataset-id-reservations${query ? `?${query}` : ''}`);
+  }
+
+  async adminReserveDatasetId(payload: { ds_id: string; collection_id?: string | null; note?: string | null }) {
+    return this.request<ReservedDatasetId>('/admin/dataset-id-reservations', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async adminDeleteReservedDatasetId(datasetId: string) {
+    return this.request<{ deleted: boolean; ds_id: string }>(
+      `/admin/dataset-id-reservations/${encodeURIComponent(datasetId)}`,
+      { method: 'DELETE' }
+    );
+  }
+
+  async adminGetDatasetDetail(datasetId: string) {
+    return this.request<AdminDatasetDetail>(`/admin/datasets/${encodeURIComponent(datasetId)}`);
+  }
+
+  async adminCreateDataset(payload: {
+    ds_id: string;
+    title: string;
+    collection_id: string;
+    data_owner_name: string;
+    description?: string | null;
+    spatial_coverage_region_id?: string | null;
+    spatial_resolution?: string | null;
+    temporal_coverage_start_date?: string | null;
+    temporal_coverage_end_date?: string | null;
+    temporal_resolution?: string | null;
+    access_level?: string;
+    additional_metadata?: Record<string, unknown> | null;
+    tags?: string[];
+    raw_dataset_ids: string[];
+  }) {
+    return this.request('/admin/datasets', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async adminUpdateDataset(
+    datasetId: string,
+    payload: {
+      ds_id?: string | null;
+      title?: string | null;
+      collection_id?: string | null;
+      data_owner_name?: string | null;
+      description?: string | null;
+      spatial_coverage_region_id?: string | null;
+      spatial_resolution?: string | null;
+      temporal_coverage_start_date?: string | null;
+      temporal_coverage_end_date?: string | null;
+      temporal_resolution?: string | null;
+      access_level?: string | null;
+      additional_metadata?: Record<string, unknown> | null;
+      tags?: string[] | null;
+      raw_dataset_ids?: string[] | null;
+    }
+  ) {
+    return this.request(`/admin/datasets/${encodeURIComponent(datasetId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async adminUpdateDatasetDocumentation(
+    datasetId: string,
+    payload: {
+      readme_md?: string | null;
+      data_dictionary_json?: unknown;
+    }
+  ) {
+    return this.request<AdminDatasetDetail>(
+      `/admin/datasets/${encodeURIComponent(datasetId)}/documentation`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }
+    );
+  }
+
+  async adminPreviewDatasetImport(params: {
+    infoFile: File;
+    metadataFile: File;
+    csvFiles?: File[];
+    datasetOverride?: Record<string, unknown>;
+    rawDatasetOverride?: Record<string, unknown>;
+  }) {
+    const formData = new FormData();
+    formData.append('info_file', params.infoFile);
+    formData.append('metadata_file', params.metadataFile);
+    for (const file of params.csvFiles ?? []) {
+      formData.append('csv_files', file);
+    }
+    if (params.datasetOverride) {
+      formData.append('dataset_override_json', JSON.stringify(params.datasetOverride));
+    }
+    if (params.rawDatasetOverride) {
+      formData.append('raw_dataset_override_json', JSON.stringify(params.rawDatasetOverride));
+    }
+    return this.request<AdminDatasetPackagePreview>('/admin/datasets/import/preview', {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  async adminApplyDatasetImport(params: {
+    infoFile: File;
+    metadataFile: File;
+    csvFiles: File[];
+    datasetOverride?: Record<string, unknown>;
+    rawDatasetOverride?: Record<string, unknown>;
+    bucketType?: string;
+  }) {
+    const formData = new FormData();
+    formData.append('info_file', params.infoFile);
+    formData.append('metadata_file', params.metadataFile);
+    for (const file of params.csvFiles) {
+      formData.append('csv_files', file);
+    }
+    if (params.datasetOverride) {
+      formData.append('dataset_override_json', JSON.stringify(params.datasetOverride));
+    }
+    if (params.rawDatasetOverride) {
+      formData.append('raw_dataset_override_json', JSON.stringify(params.rawDatasetOverride));
+    }
+    formData.append('bucket_type', params.bucketType ?? 'STANDARDISED');
+    return this.request<{
+      dataset_id: string;
+      bucket_type: string;
+      uploaded_tables: string[];
+      manifest_uploaded: boolean;
+    }>('/admin/datasets/import/apply', {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  async adminListRawDatasets(params?: { search?: string; limit?: number; offset?: number }) {
+    const searchParams = new URLSearchParams();
+    if (params?.search) searchParams.set('search', params.search);
+    if (params?.limit) searchParams.set('limit', String(params.limit));
+    if (params?.offset) searchParams.set('offset', String(params.offset));
+
+    const query = searchParams.toString();
+    return this.request<AdminRawDatasetsResponse>(`/admin/raw-datasets${query ? `?${query}` : ''}`);
+  }
+
+  async adminCreateRawDataset(payload: { rds_id: string; title: string; source: string }) {
+    return this.request('/admin/raw-datasets', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async adminSuggestRawDatasetId(collectionId: string) {
+    return this.request<RawDatasetIdSuggestion>(
+      `/admin/raw-datasets/suggest-id?collection_id=${encodeURIComponent(collectionId)}`
+    );
+  }
+
+  async adminSuggestRawDatasetIdByCategory(categoryId: string) {
+    return this.request<RawDatasetIdSuggestionByCategory>(
+      `/admin/raw-datasets/suggest-id-by-category?category_id=${encodeURIComponent(categoryId)}`
+    );
+  }
+
+  async adminUpdateRawDataset(
+    rawDatasetId: string,
+    payload: { title?: string; source?: string }
+  ) {
+    return this.request(`/admin/raw-datasets/${encodeURIComponent(rawDatasetId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async adminListDatasetTables(datasetId: string, bucketType: string) {
+    return this.request<AdminDatasetTablesResponse>(
+      `/admin/datasets/${encodeURIComponent(datasetId)}/${encodeURIComponent(bucketType)}/tables`
+    );
+  }
+
+  async adminUploadDatasetTable(
+    datasetId: string,
+    bucketType: string,
+    file: File,
+    tableMetadata: string
+  ) {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append(
+      'table_metadata_file',
+      new File([tableMetadata], 'table-metadata.json', { type: 'application/json' })
+    );
+
+    return this.request<{ message: string }>(
+      `/admin/datasets/${encodeURIComponent(datasetId)}/${encodeURIComponent(bucketType)}/tables`,
+      {
+        method: 'POST',
+        body: formData,
+      }
+    );
+  }
+
+  async adminGetManifest(datasetId: string, bucketType: string) {
+    return this.request<AdminManifestRecord>(
+      `/admin/datasets/${encodeURIComponent(datasetId)}/${encodeURIComponent(bucketType)}/manifest`
+    );
+  }
+
+  async adminUploadManifest(datasetId: string, bucketType: string, manifestFile: File) {
+    const formData = new FormData();
+    formData.append('manifest_file', manifestFile);
+
+    return this.request<{
+      message: string;
+      dataset_id: string;
+      bucket_type: string;
+      manifest_json: Record<string, unknown>;
+    }>(
+      `/admin/datasets/${encodeURIComponent(datasetId)}/${encodeURIComponent(bucketType)}/manifest`,
+      {
+        method: 'PUT',
+        body: formData,
+      }
+    );
+  }
+
+  async adminValidateTabular(params: {
+    manifestFile: File;
+    tableFile?: File | null;
+    tableName?: string;
+    deepCheck?: boolean;
+    extraColumnPolicy?: 'warn' | 'error' | 'ignore';
+  }) {
+    const formData = new FormData();
+    formData.append('manifest_file', params.manifestFile);
+    if (params.tableFile) {
+      formData.append('table_file', params.tableFile);
+    }
+    if (params.tableName) {
+      formData.append('table_name', params.tableName);
+    }
+    if (params.deepCheck) {
+      formData.append('deep_check', 'true');
+    }
+    if (params.extraColumnPolicy) {
+      formData.append('extra_column_policy', params.extraColumnPolicy);
+    }
+
+    return this.request<ValidationResult>('/admin/validate/tabular', {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  async adminValidateGeojson(params: {
+    manifestFile: File;
+    geojsonFile?: File | null;
+    deepCheck?: boolean;
+  }) {
+    const formData = new FormData();
+    formData.append('manifest_file', params.manifestFile);
+    if (params.geojsonFile) {
+      formData.append('geojson_file', params.geojsonFile);
+    }
+    if (params.deepCheck) {
+      formData.append('deep_check', 'true');
+    }
+
+    return this.request<ValidationResult>('/admin/validate/geojson', {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  async adminCheckDocumentationSync(datasetId?: string, checkAll?: boolean) {
+    const query = new URLSearchParams();
+    if (datasetId) query.set('dataset_id', datasetId);
+    if (checkAll) query.set('check_all', 'true');
+    const qs = query.toString();
+    return this.request<DocumentationSyncCheckResponse>(`/admin/documentation-sync${qs ? `?${qs}` : ''}`);
+  }
+
+  async adminRunDocumentationSync(payload?: {
+    dataset_id?: string;
+    only_outdated?: boolean;
+    force?: boolean;
+  }) {
+    return this.request<DocumentationSyncRunResponse>('/admin/documentation-sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        dataset_id: payload?.dataset_id,
+        only_outdated: payload?.only_outdated ?? true,
+        force: payload?.force ?? false,
+      }),
+    });
+  }
+
+  async adminInitiateDatasetDeletion(datasetId: string) {
+    return this.request<{ sent: boolean; message: string }>(
+      `/admin/datasets/${encodeURIComponent(datasetId)}/delete/initiate`,
+      { method: 'POST' }
+    );
+  }
+
+  async adminVerifyDatasetDeletion(
+    datasetId: string,
+    payload: { code: string; confirmation_dataset_id: string }
+  ) {
+    return this.request<{ deleted: boolean; dataset_id: string }>(
+      `/admin/datasets/${encodeURIComponent(datasetId)}/delete/verify`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    );
+  }
+
+  async adminGenerateManifestDraft(params: {
+    csvFiles: File[];
+    categoryId: string;
+    collectionId: string;
+    dataOwnerName: string;
+    datasetId?: string;
+    digitizationLogFile?: File | null;
+  }) {
+    const formData = new FormData();
+    for (const file of params.csvFiles) {
+      formData.append('csv_files', file);
+    }
+    formData.append('category_id', params.categoryId);
+    formData.append('collection_id', params.collectionId);
+    formData.append('data_owner_name', params.dataOwnerName);
+    if (params.datasetId) formData.append('dataset_id', params.datasetId);
+    if (params.digitizationLogFile) formData.append('digitization_log_file', params.digitizationLogFile);
+
+    return this.request<ManifestDraftDetail>('/admin/manifest-drafts/generate', {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  async adminGenerateDeterministicManifestDraft(params: {
+    csvFiles: File[];
+    categoryId: string;
+    collectionId: string;
+    dataOwnerName: string;
+    curatorInput: CuratorMetadataInput;
+    datasetId?: string;
+  }) {
+    const formData = new FormData();
+    for (const file of params.csvFiles) {
+      formData.append('csv_files', file);
+    }
+    formData.append('category_id', params.categoryId);
+    formData.append('collection_id', params.collectionId);
+    formData.append('data_owner_name', params.dataOwnerName);
+    formData.append('curator_input', JSON.stringify(params.curatorInput));
+    if (params.datasetId) formData.append('dataset_id', params.datasetId);
+
+    return this.request<ManifestDraftDetail>('/admin/manifest-drafts/generate-deterministic', {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  async adminClassifyColumns(params: { tableName: string; columnNames: string[] }) {
+    return this.request<{ fixed: string[]; needsDescription: string[] }>(
+      '/admin/manifest-drafts/classify-columns',
+      {
+        method: 'POST',
+        body: JSON.stringify({ table_name: params.tableName, column_names: params.columnNames }),
+      }
+    );
+  }
+
+  async adminInferDatasetCoverage(csvFiles: File[]) {
+    const formData = new FormData();
+    for (const file of csvFiles) {
+      formData.append('csv_files', file);
+    }
+    return this.request<{
+      spatialCoverage: string | null;
+      spatialResolution: string | null;
+      temporalCoverage: string | null;
+    }>('/admin/manifest-drafts/infer-coverage', { method: 'POST', body: formData });
+  }
+
+  async adminListManifestDrafts(params?: { status?: string; datasetId?: string; limit?: number; offset?: number }) {
+    const query = new URLSearchParams();
+    if (params?.status) query.set('status', params.status);
+    if (params?.datasetId) query.set('dataset_id', params.datasetId);
+    if (params?.limit) query.set('limit', String(params.limit));
+    if (params?.offset) query.set('offset', String(params.offset));
+    const qs = query.toString();
+    return this.request<{ drafts: ManifestDraftSummary[]; total: number }>(
+      `/admin/manifest-drafts${qs ? `?${qs}` : ''}`
+    );
+  }
+
+  async adminGetManifestDraft(draftId: string) {
+    return this.request<ManifestDraftDetail>(`/admin/manifest-drafts/${encodeURIComponent(draftId)}`);
+  }
+
+  async adminValidateManifestDraft(draftId: string) {
+    return this.request<ManifestDraftDetail>(`/admin/manifest-drafts/${encodeURIComponent(draftId)}/validate`, {
+      method: 'POST',
+    });
+  }
+
+  async adminApproveManifestDraft(draftId: string) {
+    // Lightweight accept only - this tool generates/validates/downloads,
+    // it doesn't upload anything to S3/Postgres. The draft's dataset_id
+    // was already reserved at generation time and just stays reserved.
+    return this.request<ManifestDraftDetail>(`/admin/manifest-drafts/${encodeURIComponent(draftId)}/approve`, {
+      method: 'POST',
+    });
+  }
+
+  async adminRejectManifestDraft(draftId: string, reason?: string) {
+    return this.request<ManifestDraftDetail>(`/admin/manifest-drafts/${encodeURIComponent(draftId)}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  async adminFlagManifestDraftField(draftId: string, fieldPath: string, note: string) {
+    return this.request<ManifestDraftDetail>(`/admin/manifest-drafts/${encodeURIComponent(draftId)}/flag-field`, {
+      method: 'POST',
+      body: JSON.stringify({ field_path: fieldPath, note }),
+    });
+  }
+
+  async adminUpdateManifestDraftContent(draftId: string, draftYaml: string) {
+    return this.request<ManifestDraftDetail>(`/admin/manifest-drafts/${encodeURIComponent(draftId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ draft_yaml: draftYaml }),
+    });
+  }
+
+  async adminRegenerateManifestDraft(draftId: string) {
+    return this.request<ManifestDraftDetail>(`/admin/manifest-drafts/${encodeURIComponent(draftId)}/regenerate`, {
+      method: 'POST',
+    });
+  }
+
+  async adminDeleteManifestDraft(draftId: string) {
+    return this.request<{ message: string; draft_id: string }>(
+      `/admin/manifest-drafts/${encodeURIComponent(draftId)}`,
+      { method: 'DELETE' }
+    );
+  }
+
+  async adminGenerateManifestDraftInfoYaml(draftId: string, accessLevel: AccessLevel) {
+    return this.request<{ info_yaml: string }>(
+      `/admin/manifest-drafts/${encodeURIComponent(draftId)}/info-yaml`,
+      { method: 'POST', body: JSON.stringify({ access_level: accessLevel }) }
+    );
+  }
+
+  async adminImportDatasetFromDraft(draftId: string, accessLevel: AccessLevel, bucketType: string) {
+    return this.request<{
+      dataset_id: string;
+      bucket_type: string;
+      uploaded_tables: string[];
+      manifest_uploaded: boolean;
+    }>(`/admin/manifest-drafts/${encodeURIComponent(draftId)}/import`, {
+      method: 'POST',
+      body: JSON.stringify({ access_level: accessLevel, bucket_type: bucketType }),
+    });
   }
 }
 

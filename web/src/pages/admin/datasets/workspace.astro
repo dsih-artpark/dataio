@@ -1,0 +1,25 @@
+---
+import AdminDatasetsSubnav from '../../../components/admin/AdminDatasetsSubnav.astro';
+import AdminDatasetWorkspace from '../../../components/admin/AdminDatasetWorkspace';
+import DashboardLayout from '../../../layouts/DashboardLayout.astro';
+---
+
+<DashboardLayout title="Dataset Workspace" fullWidth={true}>
+  <div class="space-y-6">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">Dataset Workspace</h1>
+      <p class="mt-1 text-gray-600">
+        Review metadata, tables, manifest, sharing, documentation sync, and deletion controls for a single dataset.
+      </p>
+    </div>
+
+    <AdminDatasetsSubnav />
+    <AdminDatasetWorkspace client:load />
+  </div>
+</DashboardLayout>
+
+<script>
+  import { requireAuthenticatedPage } from '../../../lib/auth';
+
+  requireAuthenticatedPage({ adminOnly: true });
+</script>

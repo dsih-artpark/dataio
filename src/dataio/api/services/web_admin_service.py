@@ -1,23 +1,130 @@
 """
-Web admin service for user and group management.
+Web admin service for user, group, and dataset administration.
 
 Provides functionality for admin users to manage users, groups,
-and permissions through the web interface.
+permissions, manifests, and validation through the web interface.
 """
 
 import logging
-from typing import Optional, List
+import json
+import os
+import re
+import tempfile
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from io import BytesIO
+from pathlib import Path
+from typing import List, Optional
 
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
+import yaml
 
+from dataio.api.database import functions as database
 from dataio.api.database.config import Session as DBSession
-from dataio.api.database.models import User, UserGroup, UserPermission
+from dataio.api.database.enums import SpatialResolution, TemporalResolution, VersionType
+from dataio.api.models import (
+    DatasetCreate,
+    DatasetDocumentationUpdate,
+    DatasetUpdate,
+    RawDatasetCreate,
+    RawDatasetUpdate,
+    TableMetadata,
+)
+from dataio.api.database.models import Collection, DataOwner, Dataset, User, UserGroup, UserPermission, DatasetDownload
+from dataio.api.auth.otp import create_otp, verify_otp
+from dataio.api.auth.security import enforce_rate_limit
+from dataio.api.services.yaml_utils import stringify_yaml_dates
 from dataio.api.services.base_service import BaseService
+from dataio.api.services.admin_dataset_service import AdminDatasetService
+from dataio.api.services.draft_review_service import DraftReviewService
 from dataio.api.services.email_service import EmailService
 from dataio.api.auth.permissions import is_admin
+from dataio.api.auth.security import record_auth_event
+from dataio.api.services.platform_manifest_validation_service import (
+    apply_platform_manifest_checks,
+)
+from dataio.validate import DataIOValidationService, DatasetKind, ValidationRequest
 
 logger = logging.getLogger(__name__)
 
+# <collection ID><DS><4-digit catalogue-wide number>, e.g. CS0007DS0113
+DATASET_ID_RE = re.compile(r"[A-Z]{2}\d{4}DS\d{4}")
+
+
+def _draft_info_problems(info: dict) -> list[str]:
+    """Values in a draft-derived info.yml that create_dataset would reject."""
+    problems = []
+    spatial_resolution = info.get("spatial_resolution")
+    if spatial_resolution not in {member.value for member in SpatialResolution}:
+        problems.append(
+            f"spatial_resolution {spatial_resolution!r} is not one of "
+            f"{', '.join(member.value for member in SpatialResolution)}"
+        )
+    temporal_resolution = info.get("temporal_resolution")
+    if temporal_resolution not in {member.value for member in TemporalResolution}:
+        problems.append(
+            f"temporal_resolution {temporal_resolution!r} is not one of "
+            f"{', '.join(member.value for member in TemporalResolution)} "
+            "(no year column with values was found)"
+        )
+    for key in ("temporal_coverage_start_date", "temporal_coverage_end_date"):
+        value = info.get(key)
+        if value is None:
+            continue
+        try:
+            database.parse_date(str(value))
+        except (ValueError, OverflowError):
+            problems.append(f"{key} {value!r} is not a valid date")
+    return problems
+
+
+@dataclass
+class _ImportUndo:
+    """What import_dataset_package has written so far, so a failure can undo it."""
+
+    ds_id: str
+    rds_id: str
+    # Fields to recreate the ID reservations that creating the rows consumes.
+    ds_reservation: Optional[dict]
+    rds_reservation: Optional[dict]
+    raw_created: bool = False
+    # Title/source of a raw dataset that existed before and was updated.
+    raw_previous: Optional[dict] = None
+    dataset_created: bool = False
+
+
+def _reservation_fields(reservation, scope_field: str) -> Optional[dict]:
+    if reservation is None:
+        return None
+    return {
+        scope_field: getattr(reservation, scope_field),
+        "note": reservation.note,
+        "reserved_by": reservation.reserved_by,
+    }
+
+
+def _import_failed_error(exc: Exception, ds_id: str, leftovers: list[str]) -> HTTPException:
+    """The error for an import that failed part-way and was undone."""
+    detail = exc.detail if isinstance(exc, HTTPException) else None
+    status_code = exc.status_code if isinstance(exc, HTTPException) else 500
+    if isinstance(detail, dict):
+        reason = detail.get("message") or "see details"
+    else:
+        reason = detail or "unexpected error, see the server log"
+    if leftovers:
+        message = (
+            f"Import of {ds_id} failed ({reason}) and could not be fully undone. "
+            f"Still to clean up by hand: {'; '.join(leftovers)}."
+        )
+    else:
+        message = (
+            f"Import of {ds_id} failed ({reason}). Everything it wrote was undone, "
+            "so you can fix the problem and retry."
+        )
+    body = {"message": message, "undone": not leftovers, "leftovers": leftovers}
+    if isinstance(detail, dict) and "findings" in detail:
+        body["findings"] = detail["findings"]
+    return HTTPException(status_code=status_code, detail=body)
 
 class WebAdminService(BaseService):
     """Service for web admin operations."""
@@ -25,6 +132,11 @@ class WebAdminService(BaseService):
     def __init__(self):
         super().__init__()
         self.email_service = EmailService()
+        self.admin_dataset_service = AdminDatasetService()
+        self.draft_review_service = DraftReviewService()
+        self.validation_service = DataIOValidationService(
+            platform_manifest_checker=apply_platform_manifest_checks
+        )
 
     def _require_admin(self, user: User) -> None:
         """Verify user has admin privileges."""
@@ -34,6 +146,309 @@ class WebAdminService(BaseService):
         if not is_admin_result:
             logger.warning(f"_require_admin - denying access for user: {getattr(user, 'email', 'N/A')}")
             raise HTTPException(status_code=403, detail="Admin privileges required")
+
+    def _slugify(self, value: str) -> str:
+        slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+        return slug or "dataset"
+
+    def _build_manifest_field(self, field_name: str, field_spec: dict, enum_scope: Optional[dict] = None) -> dict:
+        field_type = field_spec.get("type")
+        manifest_field = {
+            "description": field_spec.get("description"),
+            "comments": field_spec.get("comments"),
+            "nullable": field_spec.get("nullable", True),
+        }
+        if field_type == "year":
+            manifest_field["type"] = "date"
+            manifest_field["format"] = "%Y"
+        elif field_type == "enum":
+            manifest_field["type"] = "enum"
+            allowed_values = field_spec.get("enum") or field_spec.get("allowedValues")
+            if not allowed_values and field_spec.get("enumRef") and enum_scope:
+                enum_ref = field_spec["enumRef"]
+                # Enum blocks may be authored as flat top-level keys, or nested
+                # under a top-level "enumDefinitions" container. Support both.
+                nested_definitions = enum_scope.get("enumDefinitions")
+                enum_def = enum_scope.get(enum_ref)
+                if not isinstance(enum_def, dict) and isinstance(nested_definitions, dict):
+                    enum_def = nested_definitions.get(enum_ref)
+                if isinstance(enum_def, dict):
+                    allowed_values = list((enum_def.get("values") or {}).keys())
+            manifest_field["allowedValues"] = allowed_values or []
+        elif field_type in {"string", "boolean", "int", "float", "regionID", "regionName", "date", "dateTime"}:
+            manifest_field["type"] = field_type
+            if field_spec.get("format"):
+                manifest_field["format"] = field_spec["format"]
+        else:
+            if field_name == "year":
+                manifest_field["type"] = "date"
+                manifest_field["format"] = "%Y"
+            elif field_name.endswith(".ID"):
+                manifest_field["type"] = "regionID"
+            elif field_name.endswith(".name"):
+                manifest_field["type"] = "regionName"
+            else:
+                manifest_field["type"] = "string"
+        if field_spec.get("range") is not None:
+            manifest_field["range"] = field_spec["range"]
+        if field_spec.get("min") is not None:
+            manifest_field["min"] = field_spec["min"]
+        if field_spec.get("max") is not None:
+            manifest_field["max"] = field_spec["max"]
+        # Carry through any remaining authored keys verbatim (e.g. isJoinKey,
+        # joinKeyType, unit) so documentation-only annotations survive into
+        # the downloadable manifest instead of being silently dropped.
+        # ManifestField allows extra fields, so this is safe. Excludes keys
+        # already deliberately resolved above (e.g. "type" here is the raw
+        # authored value like "year", which must not clobber the resolved
+        # "date" set on manifest_field).
+        # "format" is intentionally NOT in this set: it's only explicitly set
+        # above for a subset of branches (year/date/scalar types), so leaving
+        # it out lets the passthrough below carry an authored format through
+        # for enum/regionID/regionName/string-fallback fields too, without
+        # ever clobbering a value a branch above already set.
+        handled_keys = {
+            "type", "description", "comments", "nullable",
+            "enum", "allowedValues", "enumRef", "range", "min", "max",
+        }
+        for key, value in field_spec.items():
+            if key not in handled_keys and key not in manifest_field:
+                manifest_field[key] = value
+        return manifest_field
+
+    def _parse_dataset_package(
+        self,
+        info_text: str,
+        metadata_text: str,
+        *,
+        csv_files: Optional[List] = None,
+        dataset_override: Optional[dict] = None,
+        raw_dataset_override: Optional[dict] = None,
+    ) -> dict:
+        try:
+            info = yaml.safe_load(info_text) or {}
+        except yaml.YAMLError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid info.yml: {exc}") from exc
+        try:
+            metadata = stringify_yaml_dates(yaml.safe_load(metadata_text) or {})
+        except yaml.YAMLError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid metadata.yml: {exc}") from exc
+
+        dataset_override = dataset_override or {}
+        raw_dataset_override = raw_dataset_override or {}
+        csv_files = csv_files or []
+
+        session = DBSession()
+        try:
+            collection_id = dataset_override.get("collection_id") or info.get("collection_id") or ""
+            collection = None
+            if collection_id:
+                collection = (
+                    session.query(Collection)
+                    .filter(Collection.collection_id == collection_id)
+                    .first()
+                )
+            suggested_dataset_id = (
+                database.suggest_next_dataset_id(collection_id) if collection_id and collection else ""
+            )
+            dataset_payload = {
+                "ds_id": dataset_override.get("ds_id") or info.get("ds_id") or suggested_dataset_id,
+                "title": dataset_override.get("title") or info.get("title") or "",
+                "collection_id": collection_id,
+                "data_owner_name": dataset_override.get("data_owner_name") or info.get("data_owner_name") or "",
+                "description": dataset_override.get("description") if "description" in dataset_override else info.get("description"),
+                "spatial_coverage_region_id": dataset_override.get("spatial_coverage_region_id") if "spatial_coverage_region_id" in dataset_override else info.get("spatial_coverage_region_id"),
+                "spatial_resolution": dataset_override.get("spatial_resolution") or info.get("spatial_resolution"),
+                "temporal_coverage_start_date": dataset_override.get("temporal_coverage_start_date") if "temporal_coverage_start_date" in dataset_override else info.get("temporal_coverage_start_date"),
+                "temporal_coverage_end_date": dataset_override.get("temporal_coverage_end_date") if "temporal_coverage_end_date" in dataset_override else info.get("temporal_coverage_end_date"),
+                "temporal_resolution": dataset_override.get("temporal_resolution") or info.get("temporal_resolution"),
+                "access_level": dataset_override.get("access_level") or info.get("access_level") or "NONE",
+                "additional_metadata": dataset_override.get("additional_metadata") if "additional_metadata" in dataset_override else info.get("additional_metadata"),
+                "tags": dataset_override.get("tags") if "tags" in dataset_override else info.get("tags", []),
+            }
+
+            raw_info = info.get("raw_dataset", {}) or {}
+            raw_payload = {
+                "rds_id": raw_dataset_override.get("rds_id") or raw_info.get("rds_id") or (
+                    f"{dataset_payload['ds_id']}-raw-001" if dataset_payload["ds_id"] else ""
+                ),
+                "title": raw_dataset_override.get("title") or raw_info.get("title") or (
+                    f"Raw data for {dataset_payload['title']}" if dataset_payload["title"] else "Raw dataset"
+                ),
+                "source": raw_dataset_override.get("source") or raw_info.get("source") or "Manual upload",
+            }
+
+            tables = metadata.get("tables", {}) or {}
+            table_uploads = []
+            manifest_tables = {}
+            custom_findings = []
+            csv_by_stem = {Path(file.filename or "").stem: file for file in csv_files if file.filename}
+            matched_csv_stems = set()
+            inline_data_files = {}
+
+            for table_key, table_definition in tables.items():
+                info_block = table_definition.get("info", {}) or {}
+                table_name = info_block.get("table_name") or table_key
+                data_dictionary = table_definition.get("data_dictionary", {}) or {}
+                table_metadata = {
+                    "table_name": table_name,
+                    "description": info_block.get("about") or table_definition.get("description"),
+                    "source": info_block.get("source") or table_definition.get("source"),
+                    "data_dictionary": {
+                        field_name: {
+                            "description": field_spec.get("description"),
+                            "comments": field_spec.get("comments"),
+                            "access": field_spec.get("access", True),
+                        }
+                        for field_name, field_spec in data_dictionary.items()
+                        if isinstance(field_spec, dict)
+                    },
+                }
+                table_uploads.append(
+                    {
+                        "table_name": table_name,
+                        "description": table_metadata["description"],
+                        "source": table_metadata["source"],
+                        "table_metadata": table_metadata,
+                    }
+                )
+                manifest_tables[table_name] = {
+                    "description": table_metadata["description"],
+                    "source": table_metadata["source"],
+                    "path": f"{table_name}.csv",
+                    "dataDictionary": {
+                        field_name: self._build_manifest_field(field_name, field_spec, metadata)
+                        for field_name, field_spec in data_dictionary.items()
+                        if isinstance(field_spec, dict)
+                    },
+                }
+                # Carry through any remaining authored table-level keys
+                # verbatim (e.g. source, joinKeys, comments) so they survive
+                # into the downloadable manifest instead of being silently
+                # dropped. ManifestTable allows extra fields, so this is safe.
+                for key, value in table_definition.items():
+                    if key not in {"info", "data_dictionary"} and key not in manifest_tables[table_name]:
+                        manifest_tables[table_name][key] = value
+                matched_file = csv_by_stem.get(table_name)
+                if matched_file is None:
+                    custom_findings.append(
+                        {
+                            "severity": "warning",
+                            "code": "missing_csv_upload",
+                            "message": f"No CSV uploaded yet for table '{table_name}'.",
+                            "table": table_name,
+                            "path": f"tables.{table_name}",
+                        }
+                    )
+                    continue
+                matched_csv_stems.add(table_name)
+                matched_file.file.seek(0)
+                # utf-8-sig drops the byte-order mark Excel's "CSV UTF-8" adds,
+                # which would otherwise be read as part of the first column name.
+                inline_data_files[table_name] = matched_file.file.read().decode("utf-8-sig")
+                matched_file.file.seek(0)
+
+            for stem in sorted(set(csv_by_stem.keys()) - matched_csv_stems):
+                custom_findings.append(
+                    {
+                        "severity": "warning",
+                        "code": "unmatched_csv_upload",
+                        "message": f"Uploaded CSV '{stem}' is not declared in metadata.yml.",
+                        "table": stem,
+                        "path": f"tables.{stem}",
+                    }
+                )
+
+            if not dataset_payload["title"]:
+                custom_findings.append({"severity": "error", "code": "missing_title", "message": "Dataset title is required.", "path": "info.title"})
+            if not dataset_payload["data_owner_name"]:
+                custom_findings.append({"severity": "error", "code": "missing_data_owner", "message": "Data owner name is required.", "path": "info.data_owner_name"})
+            elif session.query(DataOwner).filter(DataOwner.name == dataset_payload["data_owner_name"]).first() is None:
+                custom_findings.append({"severity": "error", "code": "unknown_data_owner", "message": f"Data owner '{dataset_payload['data_owner_name']}' does not exist.", "path": "info.data_owner_name"})
+            if not dataset_payload["collection_id"]:
+                custom_findings.append({"severity": "error", "code": "missing_collection", "message": "Collection ID is required.", "path": "info.collection_id"})
+            elif collection is None:
+                custom_findings.append({"severity": "error", "code": "unknown_collection", "message": f"Collection '{dataset_payload['collection_id']}' does not exist.", "path": "info.collection_id"})
+            if not dataset_payload["ds_id"]:
+                custom_findings.append({"severity": "error", "code": "missing_dataset_id", "message": "Dataset ID is required.", "path": "info.ds_id"})
+            elif (
+                session.query(Dataset).filter(Dataset.ds_id == dataset_payload["ds_id"]).first() is not None
+                and dataset_override.get("existing_dataset_id") != dataset_payload["ds_id"]
+            ):
+                custom_findings.append({"severity": "error", "code": "duplicate_dataset_id", "message": f"Dataset ID '{dataset_payload['ds_id']}' already exists.", "path": "info.ds_id"})
+            if not raw_payload["rds_id"]:
+                custom_findings.append({"severity": "error", "code": "missing_raw_dataset_id", "message": "Raw dataset ID is required.", "path": "info.raw_dataset.rds_id"})
+
+            # "enumDefinitions" needs special handling: some authors set it to
+            # null and define enum vocab as flat top-level blocks instead (a
+            # bare null would collide with the manifest's formal dict-typed
+            # field), while others nest real enum vocab under this key
+            # directly. Drop it when it's not a populated dict, but pass it
+            # through verbatim when it is - otherwise the enum value
+            # descriptions authors wrote are silently dropped from every
+            # downloaded package for datasets using the nested convention.
+            raw_enum_definitions = metadata.get("enumDefinitions")
+            enum_definitions_passthrough = (
+                {"enumDefinitions": raw_enum_definitions}
+                if isinstance(raw_enum_definitions, dict) and raw_enum_definitions
+                else {}
+            )
+
+            manifest_payload = {
+                # Carry through every top-level key authored in metadata.yaml
+                # (tags, spatial/temporal coverage, comments, references, custom
+                # enum-definition blocks, etc.) verbatim. "tables" is excluded
+                # since the processed/enumRef-resolved version is rebuilt below
+                # as "datasetTables". "enumDefinitions" is excluded here and
+                # conditionally re-added above (see comment).
+                **{
+                    key: value
+                    for key, value in metadata.items()
+                    if key not in {"tables", "enumDefinitions"}
+                },
+                **enum_definitions_passthrough,
+                "metadataSpecVersion": "v2",
+                "datasetTitle": dataset_payload["title"] or "Untitled dataset",
+                "datasetSlug": self._slugify(f"{dataset_payload['ds_id']} {dataset_payload['title']}"),
+                "datasetDescription": dataset_payload["description"] or dataset_payload["title"] or "Dataset import",
+                "source": raw_payload["source"],
+                "category": {
+                    "ID": collection.category_id if collection else "UNKNOWN",
+                    "name": collection.category_name if collection else "Unknown category",
+                },
+                "collection": {
+                    "ID": dataset_payload["collection_id"] or "UNKNOWN",
+                    "name": collection.collection_name if collection else (dataset_payload["collection_id"] or "Unknown collection"),
+                },
+                "datasetID": dataset_payload["ds_id"] or None,
+                "datasetKind": "tabular",
+                "datasetTables": manifest_tables,
+            }
+            manifest_text = yaml.safe_dump(manifest_payload, sort_keys=False)
+
+            validation_request = ValidationRequest(
+                dataset_kind=DatasetKind.TABULAR,
+                manifest_source=manifest_text,
+                data_files=inline_data_files,
+                validate_data=bool(inline_data_files),
+            )
+            validation_result = self.validation_service.validate(validation_request).model_dump()
+            findings = custom_findings + validation_result["findings"]
+            can_import = bool(inline_data_files) and not any(
+                finding.get("severity") == "error" for finding in findings
+            )
+
+            return {
+                "dataset": {**dataset_payload, "raw_dataset_ids": [raw_payload["rds_id"]] if raw_payload["rds_id"] else []},
+                "raw_dataset": raw_payload,
+                "tables": table_uploads,
+                "manifest_yaml": manifest_text,
+                "findings": findings,
+                "suggested_dataset_id": suggested_dataset_id or None,
+                "can_import": can_import,
+            }
+        finally:
+            session.close()
 
     # User Management
 
@@ -234,6 +649,12 @@ class WebAdminService(BaseService):
                 )
 
             self.logger.info(f"User invited: {email} by {admin_user.email}")
+            record_auth_event(
+                event_type="invitation.send",
+                outcome="success",
+                actor_email=admin_user.email,
+                target_email=email,
+            )
             return {"invited": True, "email": email}
 
         except HTTPException:
@@ -299,6 +720,12 @@ class WebAdminService(BaseService):
                 )
 
             self.logger.info(f"Invitation resent: {email} by {admin_user.email}")
+            record_auth_event(
+                event_type="invitation.resend",
+                outcome="success",
+                actor_email=admin_user.email,
+                target_email=email,
+            )
             return {"resent": True, "email": email}
 
         except HTTPException:
@@ -397,6 +824,12 @@ class WebAdminService(BaseService):
             session.commit()
 
             self.logger.info(f"User suspended: {email} by {admin_user.email}")
+            record_auth_event(
+                event_type="admin.user_suspend",
+                outcome="success",
+                actor_email=admin_user.email,
+                target_email=email,
+            )
             return {"suspended": True, "email": email}
         except HTTPException:
             raise
@@ -438,6 +871,12 @@ class WebAdminService(BaseService):
             session.commit()
 
             self.logger.info(f"User unsuspended: {email} by {admin_user.email}")
+            record_auth_event(
+                event_type="admin.user_unsuspend",
+                outcome="success",
+                actor_email=admin_user.email,
+                target_email=email,
+            )
             return {"unsuspended": True, "email": email}
         except HTTPException:
             raise
@@ -835,6 +1274,818 @@ class WebAdminService(BaseService):
         finally:
             session.close()
 
+    def get_dataset_detail(self, admin_user: User, dataset_id: str) -> dict:
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.get_dataset_admin_detail(dataset_id)
+
+    def create_raw_dataset(self, admin_user: User, raw_dataset: RawDatasetCreate):
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.create_raw_dataset(raw_dataset)
+
+    def update_raw_dataset(
+        self,
+        admin_user: User,
+        raw_dataset_id: str,
+        raw_dataset: RawDatasetUpdate,
+    ):
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.update_raw_dataset(raw_dataset_id, raw_dataset)
+
+    def list_raw_datasets(
+        self,
+        admin_user: User,
+        search: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.list_raw_datasets(search=search, limit=limit, offset=offset)
+
+    def create_dataset(self, admin_user: User, dataset: DatasetCreate):
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.create_dataset(dataset)
+
+    def update_dataset(self, admin_user: User, dataset_id: str, dataset: DatasetUpdate):
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.update_dataset(dataset_id, dataset)
+
+    def update_dataset_documentation(
+        self,
+        admin_user: User,
+        dataset_id: str,
+        documentation: DatasetDocumentationUpdate,
+    ):
+        self._require_admin(admin_user)
+
+        try:
+            session = DBSession()
+            dataset = session.query(Dataset).filter(Dataset.ds_id == dataset_id).first()
+            if not dataset:
+                raise HTTPException(status_code=404, detail="Dataset not found")
+            session.close()
+
+            if "readme_md" in documentation.model_fields_set:
+                self.admin_dataset_service.filestore_service.upsert_dataset_readme(
+                    dataset_id, documentation.readme_md
+                )
+
+            if "data_dictionary_json" in documentation.model_fields_set:
+                self.admin_dataset_service.filestore_service.upsert_dataset_metadata_json(
+                    dataset_id, documentation.data_dictionary_json
+                )
+
+            self.admin_dataset_service.refresh_dataset_documentation_cache(dataset_id)
+            return self.admin_dataset_service.get_dataset_admin_detail(dataset_id)
+        except HTTPException:
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to update dataset documentation: {e!s}")
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to update dataset documentation. Contact support.",
+            ) from e
+
+    def suggest_next_dataset_id(self, admin_user: User, collection_id: str) -> dict:
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.suggest_next_dataset_id(collection_id)
+
+    def get_next_dataset_id_number(self, admin_user: User) -> dict:
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.get_next_dataset_id_number()
+
+    def suggest_next_raw_dataset_id(self, admin_user: User, collection_id: str) -> dict:
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.suggest_next_raw_dataset_id(collection_id)
+
+    def suggest_next_raw_dataset_id_for_category(self, admin_user: User, category_id: str) -> dict:
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.suggest_next_raw_dataset_id_for_category(category_id)
+
+    def list_reserved_dataset_ids(
+        self,
+        admin_user: User,
+        search: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict:
+        self._require_admin(admin_user)
+        rows, total = database.list_reserved_dataset_ids(search=search, limit=limit, offset=offset)
+        return {
+            "reservations": [
+                {
+                    "ds_id": row.ds_id,
+                    "collection_id": row.collection_id,
+                    "note": row.note,
+                    "reserved_by": row.reserved_by,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                }
+                for row in rows
+            ],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
+    def reserve_dataset_id(
+        self,
+        admin_user: User,
+        ds_id: str,
+        collection_id: Optional[str] = None,
+        note: Optional[str] = None,
+    ) -> dict:
+        self._require_admin(admin_user)
+        if not DATASET_ID_RE.fullmatch(ds_id):
+            raise HTTPException(
+                status_code=400, detail=f"{ds_id} is not a dataset ID like CS0007DS0113."
+            )
+        id_collection = ds_id[:6]
+        if collection_id and collection_id != id_collection:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Dataset ID {ds_id} belongs to collection {id_collection}, "
+                    f"not {collection_id}."
+                ),
+            )
+        if database.get_collection_by_identifier(id_collection) is None:
+            raise HTTPException(
+                status_code=404, detail=f"Collection {id_collection} does not exist."
+            )
+        try:
+            reservation = database.create_reserved_dataset_id(
+                ds_id, collection_id, note, admin_user.email
+            )
+        except database.ReservedIdConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {
+            "ds_id": reservation.ds_id,
+            "collection_id": reservation.collection_id,
+            "note": reservation.note,
+            "reserved_by": reservation.reserved_by,
+            "created_at": reservation.created_at.isoformat() if reservation.created_at else None,
+        }
+
+    def delete_reserved_dataset_id(self, admin_user: User, ds_id: str) -> dict:
+        self._require_admin(admin_user)
+        database.delete_reserved_dataset_id(ds_id)
+        return {"deleted": True, "ds_id": ds_id}
+
+    def preview_dataset_package_import(
+        self,
+        admin_user: User,
+        info_file,
+        metadata_file,
+        csv_files: Optional[List] = None,
+        dataset_override: Optional[dict] = None,
+        raw_dataset_override: Optional[dict] = None,
+    ) -> dict:
+        self._require_admin(admin_user)
+        info_text = info_file.file.read().decode("utf-8")
+        metadata_text = metadata_file.file.read().decode("utf-8")
+        info_file.file.seek(0)
+        metadata_file.file.seek(0)
+        return self._parse_dataset_package(
+            info_text,
+            metadata_text,
+            csv_files=csv_files,
+            dataset_override=dataset_override,
+            raw_dataset_override=raw_dataset_override,
+        )
+
+    def import_dataset_package(
+        self,
+        admin_user: User,
+        info_file,
+        metadata_file,
+        csv_files: List,
+        dataset_override: Optional[dict] = None,
+        raw_dataset_override: Optional[dict] = None,
+        bucket_type: VersionType = VersionType.STANDARDISED,
+    ) -> dict:
+        self._require_admin(admin_user)
+        preview = self.preview_dataset_package_import(
+            admin_user,
+            info_file,
+            metadata_file,
+            csv_files=csv_files,
+            dataset_override=dataset_override,
+            raw_dataset_override=raw_dataset_override,
+        )
+        if not preview["can_import"]:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Package validation failed",
+                    "findings": preview["findings"],
+                },
+            )
+
+        ds_id = preview["dataset"]["ds_id"]
+        # Held from the S3 pre-check until the import has finished or been
+        # undone. Manual table and manifest uploads take it shared, so none can
+        # write into the dataset's S3 folder that a failed import's undo deletes.
+        try:
+            with database.dataset_upload_lock(ds_id, exclusive=True):
+                return self._import_dataset_package_locked(
+                    admin_user, preview, csv_files, bucket_type
+                )
+        except database.DatasetBusy as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    def _import_dataset_package_locked(
+        self, admin_user: User, preview: dict, csv_files: List, bucket_type: VersionType
+    ) -> dict:
+        raw_dataset_payload = preview["raw_dataset"]
+        rds_id = raw_dataset_payload["rds_id"]
+        dataset_payload = dict(preview["dataset"])
+        dataset_payload["raw_dataset_ids"] = [rds_id]
+        ds_id = dataset_payload["ds_id"]
+
+        # A failed import is undone by deleting everything under the
+        # dataset's S3 folders, so they must start empty.
+        if self.admin_dataset_service.filestore_service.dataset_has_objects(ds_id):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"S3 already has files for dataset {ds_id} (for example left over from an "
+                    "earlier failed upload). Remove them before importing."
+                ),
+            )
+
+        existing_raw = database.get_raw_dataset_by_identifier(rds_id)
+        undo = _ImportUndo(
+            ds_id=ds_id,
+            rds_id=rds_id,
+            ds_reservation=_reservation_fields(
+                database.get_reserved_dataset_id(ds_id), "collection_id"
+            ),
+            rds_reservation=(
+                None
+                if existing_raw
+                else _reservation_fields(
+                    database.get_reserved_raw_dataset_id(rds_id), "category_id"
+                )
+            ),
+        )
+        try:
+            if existing_raw:
+                undo.raw_previous = {"title": existing_raw.title, "source": existing_raw.source}
+                self.admin_dataset_service.update_raw_dataset(
+                    rds_id,
+                    RawDatasetUpdate(
+                        title=raw_dataset_payload["title"],
+                        source=raw_dataset_payload["source"],
+                    ),
+                )
+            else:
+                self.admin_dataset_service.create_raw_dataset(
+                    RawDatasetCreate(**raw_dataset_payload)
+                )
+                undo.raw_created = True
+
+            self.admin_dataset_service.create_dataset(DatasetCreate(**dataset_payload))
+            undo.dataset_created = True
+
+            table_files = {
+                Path(file.filename or "").stem: file for file in csv_files if file.filename
+            }
+            uploaded_tables = []
+            for table in preview["tables"]:
+                table_file = table_files.get(table["table_name"])
+                if table_file is None:
+                    continue
+                table_file.file.seek(0)
+                metadata_upload = UploadFile(
+                    filename="table-metadata.json",
+                    file=BytesIO(json.dumps(table["table_metadata"]).encode("utf-8")),
+                )
+                self.admin_dataset_service.create_dataset_table(
+                    ds_id,
+                    bucket_type,
+                    table_file,
+                    metadata_upload,
+                    hold_upload_lock=False,  # this import already holds it
+                )
+                uploaded_tables.append(table["table_name"])
+
+            manifest_upload = UploadFile(
+                filename="manifest.yaml",
+                file=BytesIO(preview["manifest_yaml"].encode("utf-8")),
+            )
+            self.admin_dataset_service.upsert_dataset_manifest(
+                ds_id,
+                bucket_type,
+                manifest_upload,
+                admin_user.email,
+                hold_upload_lock=False,  # this import already holds it
+            )
+        except Exception as exc:
+            logger.exception("Import of dataset %s failed; undoing it", ds_id)
+            leftovers = self._undo_dataset_import(undo)
+            raise _import_failed_error(exc, ds_id, leftovers) from exc
+
+        return {
+            "dataset_id": ds_id,
+            "bucket_type": bucket_type.value,
+            "uploaded_tables": uploaded_tables,
+            "manifest_uploaded": True,
+        }
+
+    def _undo_dataset_import(self, undo: "_ImportUndo") -> list[str]:
+        """Removes what a failed import_dataset_package wrote, newest first,
+        and restores the ID reservations it consumed. Only touches what this
+        import created: the dataset row is unique, so S3 files under a dataset
+        this import created (in folders checked empty first) are its own.
+        Returns the steps that could not be undone, for manual cleanup."""
+        leftovers: list[str] = []
+
+        def attempt(description: str, action) -> None:
+            try:
+                action()
+            except Exception:
+                logger.exception("Could not undo failed import step: %s", description)
+                leftovers.append(description)
+
+        if undo.dataset_created:
+            # S3 first: while the dataset row exists, no other import can
+            # claim this ID and write files that this delete would remove.
+            attempt(
+                f"delete S3 files of dataset {undo.ds_id}",
+                lambda: self.admin_dataset_service.filestore_service.delete_dataset(undo.ds_id),
+            )
+            attempt(f"delete dataset {undo.ds_id}", lambda: database.delete_dataset(undo.ds_id))
+            if undo.ds_reservation is not None:
+                attempt(
+                    f"re-reserve dataset ID {undo.ds_id}",
+                    lambda: database.create_reserved_dataset_id(undo.ds_id, **undo.ds_reservation),
+                )
+        if undo.raw_created:
+            attempt(
+                f"delete raw dataset {undo.rds_id}",
+                lambda: database.delete_raw_dataset(undo.rds_id),
+            )
+            if undo.rds_reservation is not None:
+                attempt(
+                    f"re-reserve raw dataset ID {undo.rds_id}",
+                    lambda: database.create_reserved_raw_dataset_id(
+                        undo.rds_id, **undo.rds_reservation
+                    ),
+                )
+        elif undo.raw_previous is not None:
+            attempt(
+                f"restore title and source of raw dataset {undo.rds_id}",
+                lambda: database.update_raw_dataset(
+                    undo.rds_id, RawDatasetUpdate(**undo.raw_previous)
+                ),
+            )
+        return leftovers
+
+    def import_dataset_from_draft(
+        self,
+        admin_user: User,
+        draft_id: str,
+        access_level: str,
+        bucket_type: VersionType = VersionType.STANDARDISED,
+    ) -> dict:
+        """Skips the manual "download draft_yaml + info.yml, re-upload
+        through the Import Dataset Package tool" handoff (see
+        DatasetManifestDraft's docstring) by driving import_dataset_package
+        directly from an approved draft's own already-stored fields - same
+        validation, same S3/Postgres writes as the Import tab, just without
+        a curator round-tripping files through their own machine first.
+        """
+        self._require_admin(admin_user)
+        draft = self.draft_review_service._get_draft_or_404(draft_id)
+        if draft.status.value != "approved":
+            raise HTTPException(status_code=400, detail="Approve this draft before uploading it.")
+        if draft.imported_at is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"This draft was already uploaded as dataset {draft.dataset_id} "
+                    f"on {draft.imported_at.isoformat()} UTC by "
+                    f"{draft.imported_by or 'a deleted user'}."
+                ),
+            )
+
+        if database.check_if_dataset_exists(draft.dataset_id):
+            # import_dataset_package always creates the dataset; for an
+            # existing one it would commit a new raw dataset and then fail.
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Dataset {draft.dataset_id} already exists. Upload this draft's "
+                    "metadata.yaml through that dataset's manifest upload instead."
+                ),
+            )
+
+        info_yaml = self.draft_review_service.generate_info_yaml(draft_id, access_level)["info_yaml"]
+        problems = _draft_info_problems(yaml.safe_load(info_yaml) or {})
+        if problems:
+            # Checked before anything is written: these values otherwise fail
+            # inside create_dataset after the raw dataset is already committed.
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": (
+                        "This draft can't be uploaded with these values, and an approved draft "
+                        "can't be edited. Delete it and generate a new draft with corrected values."
+                    ),
+                    "problems": problems,
+                },
+            )
+
+        # Local import matches regenerate_draft's own convention
+        # (draft_review_service.py) for reaching into draft_service.py.
+        from dataio.api.services.draft_service import decode_csv_paths
+
+        table_names = list((draft.draft_json or {}).get("tables", {}).keys())
+        csv_paths_by_table = decode_csv_paths(draft.source_csv_path, table_names)
+
+        csv_files = []
+        for table_name, path in csv_paths_by_table.items():
+            try:
+                with open(path, "rb") as f:
+                    csv_files.append(UploadFile(filename=f"{table_name}.csv", file=BytesIO(f.read())))
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not read stored CSV for table '{table_name}': {exc}",
+                ) from exc
+
+        info_file = UploadFile(filename="info.yml", file=BytesIO(info_yaml.encode("utf-8")))
+        metadata_file = UploadFile(filename="metadata.yaml", file=BytesIO(draft.draft_yaml.encode("utf-8")))
+
+        try:
+            database.claim_manifest_draft_import(draft_id)
+        except (database.DraftImportConflict, database.DraftStatusConflict) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        try:
+            result = self.import_dataset_package(
+                admin_user,
+                info_file,
+                metadata_file,
+                csv_files,
+                dataset_override={"existing_dataset_id": draft.dataset_id},
+                bucket_type=bucket_type,
+            )
+        except Exception as exc:
+            detail = exc.detail if isinstance(exc, HTTPException) else None
+            message = detail.get("message") if isinstance(detail, dict) else detail
+            self._record_draft_import(
+                draft_id,
+                succeeded=False,
+                result={
+                    "status": "failed",
+                    "at": datetime.now(timezone.utc).isoformat(),
+                    "by": admin_user.email,
+                    "message": message or "Unexpected error, see the server log.",
+                },
+            )
+            raise
+
+        self._record_draft_import(
+            draft_id,
+            succeeded=True,
+            imported_by=admin_user.email,
+            result={"status": "succeeded", **result},
+        )
+        return result
+
+    def _record_draft_import(self, draft_id: str, **outcome) -> None:
+        # The import itself already succeeded or failed; failing to record it
+        # must not change that outcome. A failure stays visible because the
+        # claim then expires instead of being cleared.
+        try:
+            database.finish_manifest_draft_import(draft_id, **outcome)
+        except Exception:
+            logger.exception("Could not record the import outcome of manifest draft %s", draft_id)
+
+    def initiate_dataset_deletion(self, admin_user: User, dataset_id: str) -> dict:
+        self._require_admin(admin_user)
+        if not database.check_if_dataset_exists(dataset_id):
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        enforce_rate_limit("dataset_delete_initiate", f"{admin_user.email}:{dataset_id}", limit=3)
+        try:
+            otp_code, _ = create_otp(admin_user.email, purpose=f"dataset_deletion:{dataset_id}")
+        except ValueError as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
+
+        subject = f"Confirm deletion of dataset {dataset_id}"
+        text_body = (
+            f"You requested deletion of dataset {dataset_id}.\n\n"
+            f"Enter this verification code to confirm deletion:\n\n{otp_code}\n\n"
+            "If you did not request this action, ignore this email."
+        )
+        html_body = (
+            f"<p>You requested deletion of dataset <strong>{dataset_id}</strong>.</p>"
+            f"<p>Enter this verification code to confirm deletion:</p>"
+            f"<p style='font-size: 32px; font-weight: bold; letter-spacing: 8px;'>{otp_code}</p>"
+            "<p>If you did not request this action, ignore this email.</p>"
+        )
+        if not self.email_service.send_email(admin_user.email, subject, html_body, text_body):
+            raise HTTPException(status_code=500, detail="Failed to send verification email. Please try again.")
+        record_auth_event(
+            event_type="dataset.delete_initiate",
+            outcome="success",
+            actor_email=admin_user.email,
+            target_email=admin_user.email,
+            details={"dataset_id": dataset_id},
+        )
+        return {"sent": True, "message": "Verification code sent. Check your email to confirm dataset deletion."}
+
+    def verify_dataset_deletion(
+        self,
+        admin_user: User,
+        dataset_id: str,
+        code: str,
+        confirmation_dataset_id: str,
+    ) -> dict:
+        self._require_admin(admin_user)
+        if confirmation_dataset_id != dataset_id:
+            raise HTTPException(status_code=400, detail="Confirmation dataset ID does not match the selected dataset")
+        enforce_rate_limit("dataset_delete_verify", f"{admin_user.email}:{dataset_id}", limit=5)
+        if not verify_otp(admin_user.email, code, purpose=f"dataset_deletion:{dataset_id}"):
+            record_auth_event(
+                event_type="dataset.delete_verify",
+                outcome="failed",
+                actor_email=admin_user.email,
+                target_email=admin_user.email,
+                details={"dataset_id": dataset_id, "reason": "invalid_otp"},
+            )
+            raise HTTPException(status_code=401, detail="Invalid or expired verification code")
+        result = self.admin_dataset_service.delete_dataset(dataset_id)
+        record_auth_event(
+            event_type="dataset.delete_verify",
+            outcome="success",
+            actor_email=admin_user.email,
+            target_email=admin_user.email,
+            details={"dataset_id": dataset_id},
+        )
+        return result
+
+    def list_dataset_tables(
+        self,
+        admin_user: User,
+        dataset_id: str,
+        bucket_type: VersionType,
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.list_dataset_tables(dataset_id, bucket_type)
+
+    def create_dataset_table(
+        self,
+        admin_user: User,
+        dataset_id: str,
+        bucket_type: VersionType,
+        file,
+        table_metadata_file,
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.create_dataset_table(
+            dataset_id,
+            bucket_type,
+            file,
+            table_metadata_file,
+        )
+
+    def check_dataset_documentation_sync(
+        self,
+        admin_user: User,
+        dataset_id: str | None = None,
+        *,
+        check_all: bool = False,
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.check_dataset_documentation_sync(dataset_id, check_all=check_all)
+
+    def sync_dataset_documentation(
+        self,
+        admin_user: User,
+        dataset_id: str | None = None,
+        *,
+        only_outdated: bool = True,
+        force: bool = False,
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.sync_dataset_documentation(
+            dataset_id,
+            only_outdated=only_outdated,
+            force=force,
+        )
+
+    def get_dataset_manifest(
+        self,
+        admin_user: User,
+        dataset_id: str,
+        bucket_type: VersionType,
+    ) -> dict:
+        """Get the canonical manifest for a dataset/version."""
+        self._require_admin(admin_user)
+
+        manifest = self.admin_dataset_service.get_dataset_manifest(dataset_id, bucket_type)
+
+        session = DBSession()
+        try:
+            dataset = session.query(Dataset).filter(Dataset.ds_id == dataset_id).first()
+            if dataset is None:
+                raise HTTPException(status_code=404, detail="Dataset not found")
+
+            return {
+                **manifest,
+                "dataset_id": dataset_id,
+                "bucket_type": bucket_type.value,
+                "manifest_updated_at": (
+                    dataset.manifest_updated_at.isoformat()
+                    if dataset.manifest_updated_at
+                    else None
+                ),
+                "manifest_updated_by": dataset.manifest_updated_by,
+            }
+        finally:
+            session.close()
+
+    def upsert_dataset_manifest(
+        self,
+        admin_user: User,
+        dataset_id: str,
+        bucket_type: VersionType,
+        manifest_file,
+    ) -> dict:
+        """Validate and persist the canonical manifest for a dataset/version."""
+        self._require_admin(admin_user)
+        return self.admin_dataset_service.upsert_dataset_manifest(
+            dataset_id,
+            bucket_type,
+            manifest_file,
+            admin_user.email,
+        )
+
+    def generate_manifest_draft(
+        self,
+        admin_user: User,
+        csv_files,
+        category_id: str,
+        collection_id: str,
+        data_owner_name: str,
+        dataset_id: Optional[str] = None,
+        digitization_log_file=None,
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.generate_draft_from_upload(
+            csv_files=csv_files,
+            category_id=category_id,
+            collection_id=collection_id,
+            data_owner_name=data_owner_name,
+            created_by=admin_user.email,
+            dataset_id=dataset_id,
+            digitization_log_file=digitization_log_file,
+        )
+
+    def generate_deterministic_manifest_draft(
+        self,
+        admin_user: User,
+        csv_files,
+        category_id: str,
+        collection_id: str,
+        data_owner_name: str,
+        curator_input: dict,
+        dataset_id: Optional[str] = None,
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.generate_deterministic_draft_from_upload(
+            csv_files=csv_files,
+            category_id=category_id,
+            collection_id=collection_id,
+            data_owner_name=data_owner_name,
+            created_by=admin_user.email,
+            curator_input=curator_input,
+            dataset_id=dataset_id,
+        )
+
+    def classify_columns(self, admin_user: User, column_names: list) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.classify_columns(column_names=column_names)
+
+    def infer_dataset_coverage(self, admin_user: User, csv_files: List) -> dict:
+        """Writes each uploaded CSV to a throwaway temp file (this runs
+        before any draft exists - there's nothing to persist to, unlike
+        draft_upload_storage.save_upload) just long enough to profile it,
+        then cleans up regardless of outcome.
+        """
+        self._require_admin(admin_user)
+        temp_paths: List[str] = []
+        try:
+            for file in csv_files:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
+                    file.file.seek(0)
+                    tmp.write(file.file.read())
+                    temp_paths.append(tmp.name)
+            return self.draft_review_service.infer_dataset_coverage(temp_paths)
+        finally:
+            for path in temp_paths:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+    def list_manifest_drafts(
+        self,
+        admin_user: User,
+        status: Optional[str] = None,
+        dataset_id: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.list_drafts(status=status, dataset_id=dataset_id, limit=limit, offset=offset)
+
+    def get_manifest_draft(self, admin_user: User, draft_id: str) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.get_draft(draft_id)
+
+    def delete_manifest_draft(self, admin_user: User, draft_id: str) -> None:
+        self._require_admin(admin_user)
+        self.draft_review_service.delete_draft(draft_id)
+
+    def revalidate_manifest_draft(self, admin_user: User, draft_id: str) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.revalidate_draft(draft_id)
+
+    def approve_manifest_draft(self, admin_user: User, draft_id: str) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.approve_draft(draft_id, admin_user.email)
+
+    def reject_manifest_draft(self, admin_user: User, draft_id: str, reason: Optional[str] = None) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.reject_draft(draft_id, admin_user.email, reason=reason)
+
+    def flag_manifest_draft_field(self, admin_user: User, draft_id: str, field_path: str, note: str) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.flag_field(draft_id, field_path, note, admin_user.email)
+
+    def update_manifest_draft_content(
+        self, admin_user: User, draft_id: str, draft_yaml: str
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.update_draft_content(draft_id, draft_yaml)
+
+    def regenerate_manifest_draft(self, admin_user: User, draft_id: str) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.regenerate_draft(draft_id, admin_user.email)
+
+    def generate_manifest_draft_info_yaml(
+        self, admin_user: User, draft_id: str, access_level: str
+    ) -> dict:
+        self._require_admin(admin_user)
+        return self.draft_review_service.generate_info_yaml(draft_id, access_level)
+
+    def validate_dataset(
+        self,
+        admin_user: User,
+        dataset_kind: DatasetKind,
+        manifest_file,
+        data_file=None,
+        table_name: str | None = None,
+        deep_check: bool = False,
+        extra_column_policy: str = "warn",
+    ) -> dict:
+        """Run admin validation for a candidate manifest and optional data file."""
+        self._require_admin(admin_user)
+
+        manifest_text = manifest_file.file.read().decode("utf-8")
+        if dataset_kind == DatasetKind.TABULAR:
+            try:
+                parsed_manifest = yaml.safe_load(manifest_text) or {}
+            except yaml.YAMLError:
+                parsed_manifest = {}
+
+            if data_file is not None and table_name is None and isinstance(parsed_manifest, dict):
+                dataset_tables = parsed_manifest.get("datasetTables", {})
+                if len(dataset_tables) == 1:
+                    table_name = next(iter(dataset_tables))
+
+        request = ValidationRequest(
+            dataset_kind=dataset_kind,
+            manifest_source=manifest_text,
+            data=None,
+            deep_check=deep_check,
+            validate_data=data_file is not None,
+            extra_column_policy=extra_column_policy,
+        )
+
+        if data_file is not None:
+            # utf-8-sig drops the byte-order mark Excel's "CSV UTF-8" adds
+            data_text = data_file.file.read().decode("utf-8-sig")
+            if dataset_kind == DatasetKind.TABULAR:
+                resolved_table_name = table_name or Path(data_file.filename or "table.csv").stem
+                request.data_files = {resolved_table_name: data_text}
+            else:
+                request.data = data_text
+
+        return self.validation_service.validate(request).model_dump()
+
     # Group Management
 
     def list_groups(
@@ -1128,3 +2379,166 @@ class WebAdminService(BaseService):
             )
         finally:
             session.close()
+
+    def get_download_metrics(
+        self,
+        admin_user: User,
+        search: Optional[str] = None,
+        dataset_id: Optional[str] = None,
+        user_email: Optional[str] = None,
+        channel: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict:
+        """
+        Get dataset download audit logs and analytics summary.
+
+        Args:
+            admin_user: The authenticated admin user
+            search: Optional search filter (for email or dataset_id)
+            dataset_id: Optional filter by dataset ID
+            user_email: Optional filter by user email
+            channel: Optional filter by channel ('WEB', 'SDK', 'MCP')
+            limit: Maximum number of results
+            offset: Pagination offset
+
+        Returns:
+            dict: Summary metrics and download history items
+        """
+        self._require_admin(admin_user)
+
+        session = DBSession()
+        try:
+            from sqlalchemy import func
+
+            query = session.query(DatasetDownload)
+
+            if dataset_id:
+                query = query.filter(DatasetDownload.dataset_id == dataset_id)
+
+            if user_email:
+                query = query.filter(DatasetDownload.user_email == user_email)
+
+            if channel:
+                query = query.filter(DatasetDownload.access_channel == channel)
+
+            if search:
+                pattern = f"%{search}%"
+                query = query.filter(
+                    (DatasetDownload.user_email.ilike(pattern))
+                    | (DatasetDownload.dataset_id.ilike(pattern))
+                )
+
+            total = query.count()
+
+            # Unique users and unique datasets count - derived from the same
+            # filtered `query`, not a fresh session.query(DatasetDownload),
+            # so these respect search/dataset_id/user_email/channel just
+            # like `total` and `downloads` do below. A separate unfiltered
+            # query here would show e.g. "12 unique users" next to a
+            # search-filtered download list that only touches 1 of them.
+            unique_users = query.with_entities(func.count(func.distinct(DatasetDownload.user_email))).scalar() or 0
+            unique_datasets = query.with_entities(func.count(func.distinct(DatasetDownload.dataset_id))).scalar() or 0
+
+            # Paginated log entries
+            downloads = (
+                query.order_by(DatasetDownload.downloaded_at.desc())
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+
+            # Fetch dataset titles map for rich display
+            dataset_ids = list({d.dataset_id for d in downloads})
+            titles_map = {}
+            if dataset_ids:
+                ds_records = (
+                    session.query(Dataset.ds_id, Dataset.title)
+                    .filter(Dataset.ds_id.in_(dataset_ids))
+                    .all()
+                )
+                titles_map = {ds.ds_id: ds.title for ds in ds_records}
+
+            def _parse_device(ua_str: Optional[str]) -> str:
+                if not ua_str:
+                    return "Unknown Device"
+                ua = ua_str.lower()
+                if "dataio" in ua or "python-requests" in ua or "httpx" in ua or "urllib" in ua or "aiohttp" in ua:
+                    return "Python SDK / Script"
+                if "postman" in ua:
+                    return "Postman Client"
+                if "curl" in ua:
+                    return "cURL CLI"
+                
+                os_name = "Desktop"
+                if "windows" in ua:
+                    os_name = "Windows"
+                elif "macintosh" in ua or "mac os" in ua:
+                    os_name = "macOS"
+                elif "iphone" in ua:
+                    os_name = "iPhone"
+                elif "ipad" in ua:
+                    os_name = "iPad"
+                elif "android" in ua:
+                    os_name = "Android"
+                elif "linux" in ua:
+                    os_name = "Linux"
+
+                browser_name = "Browser"
+                if "edg" in ua:
+                    browser_name = "Edge"
+                elif "chrome" in ua and "chromium" not in ua:
+                    browser_name = "Chrome"
+                elif "firefox" in ua:
+                    browser_name = "Firefox"
+                elif "safari" in ua and "chrome" not in ua:
+                    browser_name = "Safari"
+
+                return f"{os_name} ({browser_name})"
+
+            return {
+                "summary": {
+                    "total_downloads": total,
+                    "unique_users": unique_users,
+                    "unique_datasets": unique_datasets,
+                },
+                "downloads": [
+                    {
+                        "id": str(d.id),
+                        "user_email": d.user_email,
+                        "dataset_id": d.dataset_id,
+                        "dataset_title": titles_map.get(d.dataset_id, d.dataset_id),
+                        "access_channel": d.access_channel,
+                        "device_info": _parse_device(d.user_agent),
+                        "ip_address": d.ip_address,
+                        "user_agent": d.user_agent,
+                        "downloaded_at": d.downloaded_at.isoformat() if d.downloaded_at else None,
+                    }
+                    for d in downloads
+                ],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            session.rollback()
+            self.logger.error(f"Failed to get download metrics: {str(e)}")
+            if "dataset_downloads" in str(e).lower() or "undefinedtable" in str(e).lower():
+                return {
+                    "summary": {
+                        "total_downloads": 0,
+                        "unique_users": 0,
+                        "unique_datasets": 0,
+                    },
+                    "downloads": [],
+                    "total": 0,
+                    "limit": limit,
+                    "offset": offset,
+                    "warning": "The dataset_downloads table has not been created yet in the database. Please run: uv run all-migrations",
+                }
+            raise HTTPException(status_code=500, detail="Failed to get download metrics")
+        finally:
+            session.close()
+

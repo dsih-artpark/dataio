@@ -12,14 +12,15 @@ from sqlalchemy import (
     ARRAY,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import relationship, declarative_base
-from datetime import datetime
+from sqlalchemy.orm import backref, relationship, declarative_base
+from datetime import datetime, timezone
 import uuid
 from dataio.api.database.enums import (
     AccessLevel,
     SpatialResolution,
     TemporalResolution,
     ResourceType,
+    DatasetManifestDraftStatus,
 )
 
 Base = declarative_base()
@@ -89,6 +90,10 @@ class Dataset(Base):
     # Documentation caching fields (synced from file server)
     readme_md = Column(Text, nullable=True)
     data_dictionary_json = Column(Text, nullable=True)
+    manifest_yaml = Column(Text, nullable=True)
+    manifest_json = Column(JSONB, nullable=True)
+    manifest_updated_at = Column(DateTime, nullable=True)
+    manifest_updated_by = Column(Text, nullable=True)
     documentation_synced_at = Column(DateTime, nullable=True)
 
     # Relationships
@@ -97,6 +102,28 @@ class Dataset(Base):
     spatial_coverage_region = relationship("Region")
     raw_datasets = relationship("RawDataset", secondary="dataset_raw_datasets")
     tags = relationship("Tag", secondary="dataset_tags")
+
+
+class ReservedDatasetID(Base):
+    __tablename__ = "reserved_dataset_ids"
+
+    id = Column(Integer, primary_key=True)
+    ds_id = Column(Text, nullable=False, unique=True)
+    collection_id = Column(Text, nullable=True)
+    note = Column(Text, nullable=True)
+    reserved_by = Column(Text, nullable=True)  # SET NULL when the user is deleted (migration 023)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class ReservedRawDatasetID(Base):
+    __tablename__ = "reserved_raw_dataset_ids"
+
+    id = Column(Integer, primary_key=True)
+    rds_id = Column(Text, nullable=False, unique=True)
+    category_id = Column(Text, nullable=True)
+    note = Column(Text, nullable=True)
+    reserved_by = Column(Text, nullable=True)  # SET NULL when the user is deleted (migration 023)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 
 class DatasetRawDataset(Base):
@@ -190,15 +217,65 @@ class Session(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_email = Column(Text, ForeignKey("users.email", ondelete="CASCADE"), nullable=False)
-    refresh_token = Column(Text, nullable=False, unique=True)
+    refresh_token = Column(Text, nullable=True, unique=True)
+    refresh_token_jti_hash = Column(Text, nullable=True, unique=True)
     user_agent = Column(Text, nullable=True)
     ip_address = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_seen_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     expires_at = Column(DateTime, nullable=False)
     revoked_at = Column(DateTime, nullable=True)
 
     # Relationship
-    user = relationship("User", backref="sessions")
+    user = relationship("User", backref=backref("sessions", passive_deletes=True))
+
+
+class AuthRateLimit(Base):
+    """Rate-limit counters for authentication and security-sensitive actions."""
+
+    __tablename__ = "auth_rate_limits"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    action = Column(Text, nullable=False)
+    subject = Column(Text, nullable=False)
+    attempt_count = Column(Integer, nullable=False, default=0)
+    window_started_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    blocked_until = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class AuthAuditLog(Base):
+    """Append-only audit log for authentication and authorization events."""
+
+    __tablename__ = "auth_audit_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_type = Column(Text, nullable=False)
+    outcome = Column(Text, nullable=False)
+    actor_email = Column(Text, nullable=True)
+    target_email = Column(Text, nullable=True)
+    ip_address = Column(Text, nullable=True)
+    user_agent = Column(Text, nullable=True)
+    details = Column(JSONB, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class OAuthIdentity(Base):
+    """OAuth identities linked to DataIO users."""
+
+    __tablename__ = "oauth_identities"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    provider = Column(Text, nullable=False)
+    provider_user_id = Column(Text, nullable=False)
+    user_email = Column(Text, ForeignKey("users.email", ondelete="CASCADE"), nullable=False)
+    provider_email = Column(Text, nullable=True)
+    provider_email_verified = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_login_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", backref=backref("oauth_identities", passive_deletes=True))
 
 
 class OTPToken(Base):
@@ -209,7 +286,9 @@ class OTPToken(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(Text, nullable=False)
     code = Column(Text, nullable=False)
-    purpose = Column(Text, nullable=False)  # 'login', 'verify_email', 'invite'
+    # 'login', 'registration', 'account_deletion', 'dataset_deletion:<ds_id>', ...
+    # (allowed values: otp_tokens_purpose_check, migrations 010 and 025)
+    purpose = Column(Text, nullable=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     expires_at = Column(DateTime, nullable=False)
     used_at = Column(DateTime, nullable=True)
@@ -232,7 +311,7 @@ class WebAuthnCredential(Base):
     last_used_at = Column(DateTime, nullable=True)
 
     # Relationship
-    user = relationship("User", backref="webauthn_credentials")
+    user = relationship("User", backref=backref("webauthn_credentials", passive_deletes=True))
 
 
 class WebAuthnChallenge(Base):
@@ -264,7 +343,7 @@ class UserAPIKey(Base):
     revoked_at = Column(DateTime, nullable=True)
 
     # Relationship
-    user = relationship("User", backref="api_keys")
+    user = relationship("User", backref=backref("api_keys", passive_deletes=True))
 
 
 class MagicLinkToken(Base):
@@ -300,7 +379,7 @@ class ChatSession(Base):
     deleted_at = Column(DateTime, nullable=True)
 
     # Relationships
-    user = relationship("User", backref="chat_sessions")
+    user = relationship("User", backref=backref("chat_sessions", passive_deletes=True))
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
 
 
@@ -318,3 +397,81 @@ class ChatMessage(Base):
 
     # Relationship
     session = relationship("ChatSession", back_populates="messages")
+
+
+class DatasetManifestDraft(Base):
+    """LLM-drafted metadata.yaml, pending curator review/approval.
+
+    Staging area only. As of now, approving a draft (DraftReviewService.
+    approve_draft) only flips its status - it does not write anything to
+    filestore/Postgres itself. A curator downloads the approved draft_yaml
+    and re-imports it through the existing manifest-upload path (see
+    AdminDatasetService._validate_and_persist_manifest), which is what
+    actually validates and persists it. This table never becomes a second
+    source of truth for the live manifest, but "approve" alone is not
+    sufficient to make a draft live.
+    """
+
+    __tablename__ = "dataset_manifest_drafts"
+
+    draft_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    dataset_id = Column(Text, nullable=True)
+    collection_id = Column(Text, nullable=False)
+    category_id = Column(Text, nullable=False)
+    source_csv_path = Column(Text, nullable=False)
+    digitization_log_path = Column(Text, nullable=True)
+    # The resolved raw_dataset rds_id, tracked here rather than inside
+    # draft_json/draft_yaml - real metadata.yaml files never contain a
+    # raw_dataset/rds_id field, that belongs only in info.yml.
+    raw_dataset_id = Column(Text, nullable=True)
+    # values_callable is required here (unlike the other SQLEnum columns in
+    # this file): DatasetManifestDraftStatus's member names are uppercase
+    # but its values are lowercase to match the Postgres enum type
+    # (dataset_manifest_draft_status), and SQLAlchemy's Enum binds by
+    # .name, not .value, unless told otherwise.
+    status = Column(
+        SQLEnum(DatasetManifestDraftStatus, values_callable=lambda enum_cls: [e.value for e in enum_cls]),
+        nullable=False,
+        default=DatasetManifestDraftStatus.PENDING,
+    )
+    draft_yaml = Column(Text, nullable=False)
+    draft_json = Column(JSONB, nullable=False)
+    flagged_fields = Column(JSONB, nullable=False, default=list)
+    reviewer_notes = Column(JSONB, nullable=False, default=list)
+    validation_result = Column(JSONB, nullable=True)
+    # NULL for a deterministic (rule-based) draft; migration 021 dropped NOT NULL.
+    llm_model_id = Column(Text, nullable=True)
+    llm_prompt_tokens = Column(Integer, nullable=True)
+    llm_completion_tokens = Column(Integer, nullable=True)
+    created_by = Column(Text, ForeignKey("users.email", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    reviewed_by = Column(Text, ForeignKey("users.email", ondelete="SET NULL"), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    superseded_by_draft_id = Column(UUID(as_uuid=True), ForeignKey("dataset_manifest_drafts.draft_id"), nullable=True)
+    # "Upload dataset now" tracking (migration 024). import_started_at is set
+    # while an upload holds the draft and cleared if it fails; imported_at/by
+    # are set once the dataset is fully published.
+    import_started_at = Column(DateTime, nullable=True)
+    imported_at = Column(DateTime, nullable=True)
+    imported_by = Column(Text, ForeignKey("users.email", ondelete="SET NULL"), nullable=True)
+    import_result = Column(JSONB, nullable=True)
+
+
+class DatasetDownload(Base):
+    """Audit and analytics log for dataset downloads."""
+
+    __tablename__ = "dataset_downloads"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_email = Column(Text, ForeignKey("users.email", ondelete="CASCADE"), nullable=False)
+    dataset_id = Column(Text, nullable=False)
+    access_channel = Column(Text, nullable=False, default="WEB")  # 'WEB', 'SDK', 'MCP'
+    ip_address = Column(Text, nullable=True)
+    user_agent = Column(Text, nullable=True)
+    # TIMESTAMPTZ in migration 022: write an aware UTC value so the stored
+    # instant doesn't depend on the database session's TimeZone
+    downloaded_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    # Relationship
+    user = relationship("User", backref=backref("downloads", passive_deletes=True))
+

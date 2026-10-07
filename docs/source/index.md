@@ -85,6 +85,7 @@ The API endpoints are documented in the {{ '[Endpoints](url)'.replace('url', api
 :maxdepth: 2
 Introduction <self>
 installation
+manifests/index
 sdk/index
 cli/index
 developer-guide

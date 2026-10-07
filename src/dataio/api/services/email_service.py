@@ -460,6 +460,66 @@ If you did not create this API key, please revoke it immediately from your accou
 
         return self.send_email(to_email, subject, html_body, text_body)
 
+    def send_sign_in_alert_email(
+        self,
+        to_email: str,
+        method: str,
+        timestamp: str,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> bool:
+        """Send a sign-in notification email for a successful interactive login."""
+        subject = "New sign-in to your DataIO account"
+        ip_text = ip_address or "Unavailable"
+        user_agent_text = user_agent or "Unavailable"
+
+        html_body = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); padding: 30px; border-radius: 10px 10px 0 0;">
+        <h1 style="color: white; margin: 0; font-size: 24px;">DataIO</h1>
+    </div>
+    <div style="background: #ffffff; padding: 30px; border: 1px solid #e0e0e0; border-top: none; border-radius: 0 0 10px 10px;">
+        <h2 style="color: #333; margin-top: 0;">New sign-in detected</h2>
+        <p>Your DataIO account was just accessed successfully.</p>
+        <div style="background: #f5f5f5; padding: 15px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 0 0 8px 0;"><strong>Method:</strong> {method}</p>
+            <p style="margin: 0 0 8px 0;"><strong>Time:</strong> {timestamp}</p>
+            <p style="margin: 0 0 8px 0;"><strong>IP address:</strong> {ip_text}</p>
+            <p style="margin: 0;"><strong>Browser/device:</strong> {user_agent_text}</p>
+        </div>
+        <p style="color: #666; font-size: 14px;">
+            If this was not you, sign out of all sessions and rotate your API keys immediately.
+        </p>
+        <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
+        <p style="color: #999; font-size: 12px; margin-bottom: 0;">
+            This email was sent by DataIO. Please do not reply to this email.
+        </p>
+    </div>
+</body>
+</html>
+"""
+
+        text_body = f"""
+New sign-in to your DataIO account
+
+Your DataIO account was accessed successfully.
+
+Method: {method}
+Time: {timestamp}
+IP address: {ip_text}
+Browser/device: {user_agent_text}
+
+If this was not you, sign out of all sessions and rotate your API keys immediately.
+"""
+
+        return self.send_email(to_email, subject, html_body, text_body)
+
     def send_registration_email(
         self,
         to_email: str,

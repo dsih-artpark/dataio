@@ -12,13 +12,15 @@ from datetime import datetime, timezone
 from typing import Optional, List
 
 import bcrypt
+import yaml
 from fastapi import HTTPException
 
 from dataio.api.database.config import Session as DBSession
-from dataio.api.database.models import User, UserAPIKey, Dataset, Collection, DataOwner
+from dataio.api.database.models import User, UserAPIKey, Dataset, Collection, DataOwner, DatasetDownload
 from dataio.api.services.base_service import BaseService
 from dataio.api.services.email_service import EmailService
 from dataio.api.auth.permissions import determine_user_permissions
+from dataio.api.auth.security import record_auth_event
 from dataio.api.database import functions as database
 
 logger = logging.getLogger(__name__)
@@ -34,6 +36,20 @@ class WebUserService(BaseService):
     def __init__(self):
         super().__init__()
         self.email_service = EmailService()
+
+    def _get_accessible_dataset(self, user: User, dataset_id: str) -> Dataset:
+        dataset = database.get_dataset(dataset_id)
+        if not dataset:
+            raise HTTPException(status_code=404, detail="Dataset not found")
+
+        user_permissions = determine_user_permissions(user)
+        if not user.is_admin:
+            accessible = database.get_datasets(limit=10000, user_permissions=user_permissions)
+            accessible_ids = {item.ds_id for item in accessible}
+            if dataset_id not in accessible_ids:
+                raise HTTPException(status_code=403, detail="Access denied to this dataset")
+
+        return dataset
 
     def get_current_user_profile(self, user: User) -> dict:
         """
@@ -189,6 +205,13 @@ class WebUserService(BaseService):
             except Exception as email_error:
                 self.logger.warning(f"Failed to send API key notification email: {str(email_error)}")
 
+            record_auth_event(
+                event_type="api_key.create",
+                outcome="success",
+                actor_email=user.email,
+                target_email=user.email,
+                details={"name": name},
+            )
             return {
                 "id": str(api_key.id),
                 "name": api_key.name,
@@ -235,6 +258,13 @@ class WebUserService(BaseService):
             session.commit()
 
             self.logger.info(f"Revoked API key '{api_key.name}' for user: {user.email}")
+            record_auth_event(
+                event_type="api_key.revoke",
+                outcome="success",
+                actor_email=user.email,
+                target_email=user.email,
+                details={"key_id": key_id, "name": api_key.name},
+            )
             return {"revoked": True}
         except HTTPException:
             raise
@@ -347,20 +377,10 @@ class WebUserService(BaseService):
         """
         session = DBSession()
         try:
-            dataset = database.get_dataset(dataset_id)
-            if not dataset:
-                raise HTTPException(status_code=404, detail="Dataset not found")
-
-            # Check permissions - verify user can access this dataset
-            user_permissions = determine_user_permissions(user)
-            if not user.is_admin:
-                # Get accessible datasets for this user and check if requested dataset is included
-                accessible = database.get_datasets(limit=10000, user_permissions=user_permissions)
-                accessible_ids = {d.ds_id for d in accessible}
-                if dataset_id not in accessible_ids:
-                    raise HTTPException(status_code=403, detail="Access denied to this dataset")
+            dataset = self._get_accessible_dataset(user, dataset_id)
 
             # Determine user's access level for this dataset
+            user_permissions = determine_user_permissions(user)
             can_download = dataset.access_level and dataset.access_level.value == "DOWNLOAD"
             if not can_download and not user.is_admin:
                 # Check if user has explicit download permission
@@ -404,6 +424,14 @@ class WebUserService(BaseService):
                 # Documentation fields (cached from file server)
                 "readme_md": dataset.readme_md if hasattr(dataset, 'readme_md') else None,
                 "data_dictionary_json": dataset.data_dictionary_json if hasattr(dataset, 'data_dictionary_json') else None,
+                "manifest_yaml": dataset.manifest_yaml if hasattr(dataset, 'manifest_yaml') else None,
+                "manifest_json": dataset.manifest_json if hasattr(dataset, 'manifest_json') else None,
+                "has_manifest": bool(
+                    (dataset.manifest_yaml if hasattr(dataset, 'manifest_yaml') else None)
+                    or (dataset.manifest_json if hasattr(dataset, 'manifest_json') else None)
+                ),
+                "manifest_updated_at": dataset.manifest_updated_at.isoformat() if hasattr(dataset, 'manifest_updated_at') and dataset.manifest_updated_at else None,
+                "manifest_updated_by": dataset.manifest_updated_by if hasattr(dataset, 'manifest_updated_by') else None,
                 "documentation_synced_at": dataset.documentation_synced_at.isoformat() if hasattr(dataset, 'documentation_synced_at') and dataset.documentation_synced_at else None,
             }
         except HTTPException:
@@ -414,13 +442,55 @@ class WebUserService(BaseService):
         finally:
             session.close()
 
-    def get_dataset_download_urls(self, user: User, dataset_id: str) -> dict:
+    def get_dataset_manifest(self, user: User, dataset_id: str) -> dict:
+        """
+        Get the canonical manifest for a standardised dataset the user can view.
+        """
+        from dataio.api.models import VersionType
+        from dataio.api.services.filestore_service import FilestoreService
+
+        session = DBSession()
+        try:
+            dataset = self._get_accessible_dataset(user, dataset_id)
+            manifest = FilestoreService().get_manifest(dataset_id, VersionType.STANDARDISED)
+            if not manifest.get("has_manifest"):
+                raise HTTPException(status_code=404, detail="Manifest not found")
+
+            return {
+                "dataset_id": dataset_id,
+                "bucket_type": VersionType.STANDARDISED.value,
+                **manifest,
+                "manifest_updated_at": (
+                    dataset.manifest_updated_at.isoformat()
+                    if hasattr(dataset, "manifest_updated_at") and dataset.manifest_updated_at
+                    else None
+                ),
+                "manifest_updated_by": (
+                    dataset.manifest_updated_by
+                    if hasattr(dataset, "manifest_updated_by")
+                    else None
+                ),
+            }
+        finally:
+            session.close()
+
+    def get_dataset_download_urls(
+        self,
+        user: User,
+        dataset_id: str,
+        access_channel: str = "WEB",
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> dict:
         """
         Get presigned download URLs for all tables in a dataset.
 
         Args:
             user: The authenticated user
             dataset_id: The dataset ID
+            access_channel: Access channel ('WEB', 'SDK', 'MCP')
+            ip_address: Optional client IP address
+            user_agent: Optional user agent string
 
         Returns:
             dict: Download URLs for tables and metadata
@@ -479,12 +549,48 @@ class WebUserService(BaseService):
             if not tables and last_error:
                 self.logger.error(f"No tables found for {dataset_id}. Last error: {str(last_error)}")
 
+            # Record the download only once there is something to download, so
+            # failed or empty requests (and their retries) aren't counted.
+            if tables:
+                try:
+                    download_log = DatasetDownload(
+                        user_email=user.email,
+                        dataset_id=dataset_id,
+                        access_channel=access_channel,
+                        ip_address=ip_address,
+                        user_agent=user_agent,
+                    )
+                    session.add(download_log)
+                    session.commit()
+                    self.logger.info(f"Logged dataset download: user={user.email}, dataset={dataset_id}, channel={access_channel}")
+                except Exception as log_err:
+                    session.rollback()
+                    self.logger.warning(f"Failed to record download log for {dataset_id}: {str(log_err)}")
+
+            manifest_yaml = dataset.manifest_yaml if hasattr(dataset, 'manifest_yaml') else None
+            # Postgres JSONB storage does not preserve key order, so the stored
+            # manifest_json column can't be trusted to match manifest_yaml's
+            # field order (which the UI and downloads should stay consistent
+            # with). Re-derive it from the order-preserving YAML text instead.
+            manifest_json = None
+            db_manifest_json = dataset.manifest_json if hasattr(dataset, 'manifest_json') else None
+            if manifest_yaml:
+                try:
+                    parsed = yaml.safe_load(manifest_yaml)
+                    manifest_json = parsed if isinstance(parsed, dict) else db_manifest_json
+                except Exception:
+                    manifest_json = db_manifest_json
+            else:
+                manifest_json = db_manifest_json
+
             return {
                 "ds_id": dataset.ds_id,
                 "title": dataset.title,
                 "tables": tables,
                 "readme_md": dataset.readme_md if hasattr(dataset, 'readme_md') else None,
                 "data_dictionary_json": dataset.data_dictionary_json if hasattr(dataset, 'data_dictionary_json') else None,
+                "manifest_yaml": manifest_yaml,
+                "manifest_json": manifest_json,
             }
         except HTTPException:
             raise
@@ -694,6 +800,14 @@ class WebUserService(BaseService):
                 # Documentation fields (cached from file server)
                 "readme_md": dataset.readme_md if hasattr(dataset, 'readme_md') else None,
                 "data_dictionary_json": dataset.data_dictionary_json if hasattr(dataset, 'data_dictionary_json') else None,
+                "manifest_yaml": dataset.manifest_yaml if hasattr(dataset, 'manifest_yaml') else None,
+                "manifest_json": dataset.manifest_json if hasattr(dataset, 'manifest_json') else None,
+                "has_manifest": bool(
+                    (dataset.manifest_yaml if hasattr(dataset, 'manifest_yaml') else None)
+                    or (dataset.manifest_json if hasattr(dataset, 'manifest_json') else None)
+                ),
+                "manifest_updated_at": dataset.manifest_updated_at.isoformat() if hasattr(dataset, 'manifest_updated_at') and dataset.manifest_updated_at else None,
+                "manifest_updated_by": dataset.manifest_updated_by if hasattr(dataset, 'manifest_updated_by') else None,
                 "documentation_synced_at": dataset.documentation_synced_at.isoformat() if hasattr(dataset, 'documentation_synced_at') and dataset.documentation_synced_at else None,
             }
         except HTTPException:

@@ -1,5 +1,9 @@
+import inspect
 from functools import wraps
 from typing import Callable
+
+from starlette.concurrency import run_in_threadpool
+
 from dataio.api.database.models import User
 from dataio.api.auth.permissions import require_admin
 from dataio.api.auth.exceptions import AuthenticationError
@@ -31,6 +35,11 @@ def admin_required(func: Callable) -> Callable:
 
         require_admin(user)
 
-        return await func(*args, **kwargs)
+        if inspect.iscoroutinefunction(func):
+            return await func(*args, **kwargs)
+        # Plain `def` routes do blocking work (LLM calls, CSV profiling, full
+        # validation); the wrapper itself is async, so run them in the
+        # threadpool rather than on the event loop.
+        return await run_in_threadpool(func, *args, **kwargs)
 
     return wrapper

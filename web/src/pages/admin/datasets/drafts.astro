@@ -1,0 +1,25 @@
+---
+import AdminDatasetsSubnav from '../../../components/admin/AdminDatasetsSubnav.astro';
+import DraftReviewManager from '../../../components/admin/DraftReviewManager';
+import DashboardLayout from '../../../layouts/DashboardLayout.astro';
+---
+
+<DashboardLayout title="Metadata Drafts" fullWidth={true}>
+  <div class="space-y-6">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">Metadata Drafts</h1>
+      <p class="mt-1 text-gray-600">
+        LLM-drafted metadata.yaml pending curator review, before anything is uploaded.
+      </p>
+    </div>
+
+    <AdminDatasetsSubnav />
+    <DraftReviewManager client:load />
+  </div>
+</DashboardLayout>
+
+<script>
+  import { requireAuthenticatedPage } from '../../../lib/auth';
+
+  requireAuthenticatedPage({ adminOnly: true });
+</script>

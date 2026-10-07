@@ -1,0 +1,25 @@
+---
+import AdminDatasetsHub from '../../../components/admin/AdminDatasetsHub';
+import AdminDatasetsSubnav from '../../../components/admin/AdminDatasetsSubnav.astro';
+import DashboardLayout from '../../../layouts/DashboardLayout.astro';
+---
+
+<DashboardLayout title="Dataset Admin" fullWidth={true}>
+  <div class="space-y-6">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">Dataset Admin</h1>
+      <p class="mt-1 text-gray-600">
+        Start from the right workflow: create or import datasets, browse the catalog, reserve IDs, or review documentation sync state.
+      </p>
+    </div>
+
+    <AdminDatasetsSubnav />
+    <AdminDatasetsHub client:load />
+  </div>
+</DashboardLayout>
+
+<script>
+  import { requireAuthenticatedPage } from '../../../lib/auth';
+
+  requireAuthenticatedPage({ adminOnly: true });
+</script>

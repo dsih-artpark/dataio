@@ -17,17 +17,7 @@ import AdminUsersTabs from '../../components/admin/AdminUsersTabs';
 </DashboardLayout>
 
 <script>
-  import { initAuth, requireAuth, isAdmin } from '../../lib/auth';
+  import { requireAuthenticatedPage } from '../../lib/auth';
 
-  // Check auth immediately
-  if (!requireAuth()) {
-    // Not authenticated, redirecting
-  } else {
-    // Initialize auth and check admin status
-    initAuth().then(() => {
-      if (!isAdmin()) {
-        window.location.replace('/datasets');
-      }
-    });
-  }
+  requireAuthenticatedPage({ adminOnly: true });
 </script>

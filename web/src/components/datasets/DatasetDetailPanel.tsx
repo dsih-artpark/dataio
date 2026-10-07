@@ -1,5 +1,10 @@
 import { useState, useMemo, useEffect } from 'preact/hooks';
-import type { DatasetDetail, MetadataJson, TableMetadata } from '../../lib/types';
+import type {
+  DatasetDetail,
+  DatasetManifestRecord,
+  MetadataJson,
+  TableMetadata,
+} from '../../lib/types';
 import CodeSnippets from './CodeSnippets';
 import { marked } from 'marked';
 import JSZip from 'jszip';
@@ -12,7 +17,13 @@ interface DatasetDetailPanelProps {
   isAuthenticated?: boolean;
 }
 
-type TabId = 'about' | 'metadata' | 'readme' | 'code';
+type TabId = 'about' | 'manifest' | 'metadata' | 'readme' | 'code';
+
+interface ManifestTableMetadata {
+  table_name: string;
+  description: string | null;
+  data_dictionary: Record<string, { description: string | null; comments: string | null }>;
+}
 
 export default function DatasetDetailPanel({
   dataset,
@@ -25,6 +36,12 @@ export default function DatasetDetailPanel({
   const [metadataFormat, setMetadataFormat] = useState<'json' | 'yaml'>('json');
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [manifestRecord, setManifestRecord] = useState<DatasetManifestRecord | null>(null);
+  const [manifestLoading, setManifestLoading] = useState(false);
+  const [manifestError, setManifestError] = useState<string | null>(null);
+  const [activeManifestTableTab, setActiveManifestTableTab] = useState<string | null>(null);
+
+  const hasManifest = Boolean(dataset?.has_manifest);
 
   // Parse the metadata JSON
   const parsedMetadata = useMemo<MetadataJson | null>(() => {
@@ -54,6 +71,103 @@ export default function DatasetDetailPanel({
     }
   }, [tableNames]);
 
+  useEffect(() => {
+    setManifestRecord(null);
+    setManifestLoading(false);
+    setManifestError(null);
+    setActiveManifestTableTab(null);
+    if (activeTab === 'manifest' && !hasManifest) {
+      setActiveTab('about');
+    }
+  }, [dataset?.ds_id, hasManifest]);
+
+  // Derive per-table metadata (name, description, fields) from the manifest's
+  // datasetTables block, instead of showing the raw dataset-level manifest.
+  const manifestTables = useMemo<Record<string, ManifestTableMetadata>>(() => {
+    const rawManifestJson =
+      (manifestRecord && manifestRecord.dataset_id === dataset?.ds_id
+        ? manifestRecord.manifest_json
+        : dataset?.manifest_json) || dataset?.manifest_json;
+    const datasetTables = rawManifestJson?.datasetTables as
+      | Record<
+          string,
+          {
+            description?: string | null;
+            dataDictionary?: Record<string, { description?: string | null; comments?: string | null }>;
+          }
+        >
+      | undefined;
+    if (!datasetTables) return {};
+
+    const result: Record<string, ManifestTableMetadata> = {};
+    for (const [tableName, table] of Object.entries(datasetTables)) {
+      const dataDictionary: Record<string, { description: string | null; comments: string | null }> = {};
+      for (const [fieldName, field] of Object.entries(table.dataDictionary || {})) {
+        dataDictionary[fieldName] = {
+          description: field.description ?? null,
+          comments: field.comments ?? null,
+        };
+      }
+      result[tableName] = {
+        table_name: tableName,
+        description: table.description ?? null,
+        data_dictionary: dataDictionary,
+      };
+    }
+    return result;
+  }, [manifestRecord, dataset]);
+
+  const manifestTableNames = useMemo(() => Object.keys(manifestTables), [manifestTables]);
+
+  useEffect(() => {
+    if (manifestTableNames.length > 0) {
+      if (!activeManifestTableTab || !manifestTableNames.includes(activeManifestTableTab)) {
+        setActiveManifestTableTab(manifestTableNames[0]);
+      }
+    } else {
+      setActiveManifestTableTab(null);
+    }
+  }, [manifestTableNames]);
+
+  const activeManifestTableMetadata = useMemo<ManifestTableMetadata | null>(() => {
+    if (!activeManifestTableTab) return null;
+    return manifestTables[activeManifestTableTab] || null;
+  }, [manifestTables, activeManifestTableTab]);
+
+  useEffect(() => {
+    if (!dataset || !isAuthenticated || !hasManifest || activeTab !== 'manifest') {
+      return;
+    }
+    if (manifestRecord && manifestRecord.dataset_id === dataset.ds_id) {
+      return;
+    }
+
+    let cancelled = false;
+    setManifestLoading(true);
+    setManifestError(null);
+
+    api.getDatasetManifest(dataset.ds_id)
+      .then((response) => {
+        if (!cancelled) {
+          setManifestRecord(response);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setManifestError(err instanceof Error ? err.message : 'Failed to load manifest');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setManifestLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, dataset?.ds_id, hasManifest, isAuthenticated]);
+
   // Parse README markdown
   const renderedReadme = useMemo(() => {
     if (!dataset?.readme_md) return null;
@@ -76,7 +190,13 @@ export default function DatasetDetailPanel({
       { id: 'about', label: 'About', icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
     ];
 
-    if (parsedMetadata?.tables && Object.keys(parsedMetadata.tables).length > 0) {
+    if (hasManifest && isAuthenticated) {
+      result.push({
+        id: 'manifest',
+        label: 'Manifest',
+        icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
+      });
+    } else if (parsedMetadata?.tables && Object.keys(parsedMetadata.tables).length > 0) {
       result.push({ id: 'metadata', label: 'Data Dictionary', icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' });
     }
 
@@ -87,7 +207,7 @@ export default function DatasetDetailPanel({
     result.push({ id: 'code', label: 'Code Snippets', icon: 'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4' });
 
     return result;
-  }, [parsedMetadata, dataset?.readme_md]);
+  }, [hasManifest, isAuthenticated, parsedMetadata, dataset?.readme_md]);
 
   const formatDateRange = (startDate?: string, endDate?: string) => {
     if (!startDate && !endDate) return '—';
@@ -206,8 +326,25 @@ export default function DatasetDetailPanel({
         folder.file('README.md', downloadData.readme_md);
       }
 
-      // Add metadata file (json or yaml based on user preference)
-      if (downloadData.data_dictionary_json) {
+      // Add metadata file (json or yaml based on user preference).
+      // Prefer the full canonical manifest (dataset-level fields, enum
+      // definitions, and table-level dataDictionary) over data_dictionary_json,
+      // which only ever carried the narrow table-tracking metadata.json content.
+      if (downloadData.manifest_yaml || downloadData.manifest_json) {
+        if (metadataFormat === 'json') {
+          if (downloadData.manifest_json) {
+            folder.file('metadata.json', JSON.stringify(downloadData.manifest_json, null, 2));
+          } else if (downloadData.manifest_yaml) {
+            // No YAML parser available in this file to convert yaml -> json;
+            // degrade to the yaml file rather than the narrower data_dictionary_json.
+            folder.file('metadata.yaml', downloadData.manifest_yaml);
+          }
+        } else if (downloadData.manifest_yaml) {
+          folder.file('metadata.yaml', downloadData.manifest_yaml);
+        } else if (downloadData.manifest_json) {
+          folder.file('metadata.yaml', jsonToYaml(downloadData.manifest_json));
+        }
+      } else if (downloadData.data_dictionary_json) {
         if (metadataFormat === 'json') {
           // Pretty print the JSON
           try {
@@ -286,9 +423,48 @@ export default function DatasetDetailPanel({
     }
   };
 
+  // JSON/YAML toggle + Download button, shown on both the Data Dictionary
+  // and the Manifest tab.
+  const renderMetadataDownloadControls = (disabled = false) => (
+    <div class="flex items-center gap-2">
+      <div class="flex items-center bg-gray-100 rounded-lg p-1">
+        <button
+          onClick={() => setMetadataFormat('json')}
+          class={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+            metadataFormat === 'json'
+              ? 'bg-white text-gray-900 shadow-sm'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          JSON
+        </button>
+        <button
+          onClick={() => setMetadataFormat('yaml')}
+          class={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+            metadataFormat === 'yaml'
+              ? 'bg-white text-gray-900 shadow-sm'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          YAML
+        </button>
+      </div>
+      <button
+        onClick={downloadMetadataOnly}
+        disabled={disabled}
+        class="flex items-center gap-1.5 px-3 py-1.5 bg-primary-600 text-white rounded-lg text-xs font-medium hover:bg-primary-700 transition-colors disabled:opacity-50"
+      >
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+        </svg>
+        Download
+      </button>
+    </div>
+  );
+
   // Download metadata only
   const downloadMetadataOnly = () => {
-    if (!dataset || !dataset.data_dictionary_json) return;
+    if (!dataset) return;
 
     let content: string;
     let filename: string;
@@ -296,24 +472,48 @@ export default function DatasetDetailPanel({
 
     const safeTitle = dataset.title.replace(/[^a-zA-Z0-9-_]/g, '_').substring(0, 50);
 
-    if (metadataFormat === 'json') {
-      try {
-        const parsed = JSON.parse(dataset.data_dictionary_json);
-        content = JSON.stringify(parsed, null, 2);
-      } catch {
-        content = dataset.data_dictionary_json;
+    const manifestYaml = manifestRecord?.manifest_yaml || dataset.manifest_yaml;
+    const manifestJson = manifestRecord?.manifest_json || dataset.manifest_json;
+    const dataDictJson = dataset.data_dictionary_json;
+
+    if (metadataFormat === 'json' && !manifestJson && !dataDictJson && manifestYaml) {
+      // No YAML parser in this file to convert yaml -> json (same as the zip
+      // download above): give the YAML as a .yaml file, not YAML named .json.
+      content = manifestYaml;
+      filename = `${dataset.ds_id}_${safeTitle}_metadata.yaml`;
+      mimeType = 'text/yaml';
+    } else if (metadataFormat === 'json') {
+      if (manifestJson) {
+        content = JSON.stringify(manifestJson, null, 2);
+      } else if (dataDictJson) {
+        try {
+          const parsed = JSON.parse(dataDictJson);
+          content = JSON.stringify(parsed, null, 2);
+        } catch {
+          content = dataDictJson;
+        }
+      } else {
+        return;
       }
       filename = `${dataset.ds_id}_${safeTitle}_metadata.json`;
       mimeType = 'application/json';
     } else {
-      try {
-        const parsed = JSON.parse(dataset.data_dictionary_json);
-        content = jsonToYaml(parsed);
-        filename = `${dataset.ds_id}_${safeTitle}_metadata.yaml`;
-        mimeType = 'text/yaml';
-      } catch {
+      if (manifestYaml) {
+        content = manifestYaml;
+      } else if (manifestJson) {
+        content = jsonToYaml(manifestJson);
+      } else if (dataDictJson) {
+        try {
+          const parsed = JSON.parse(dataDictJson);
+          content = jsonToYaml(parsed);
+        } catch {
+          content = dataDictJson;
+        }
+      } else {
         return;
       }
+      filename = `${dataset.ds_id}_${safeTitle}_metadata.yaml`;
+      mimeType = 'text/yaml';
     }
 
     const blob = new Blob([content], { type: mimeType });
@@ -572,39 +772,7 @@ export default function DatasetDetailPanel({
             {/* Download button and format toggle */}
             <div class="flex items-center justify-between">
               <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Data Dictionary</h3>
-              <div class="flex items-center gap-2">
-                <div class="flex items-center bg-gray-100 rounded-lg p-1">
-                  <button
-                    onClick={() => setMetadataFormat('json')}
-                    class={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
-                      metadataFormat === 'json'
-                        ? 'bg-white text-gray-900 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    JSON
-                  </button>
-                  <button
-                    onClick={() => setMetadataFormat('yaml')}
-                    class={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
-                      metadataFormat === 'yaml'
-                        ? 'bg-white text-gray-900 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    YAML
-                  </button>
-                </div>
-                <button
-                  onClick={downloadMetadataOnly}
-                  class="flex items-center gap-1.5 px-3 py-1.5 bg-primary-600 text-white rounded-lg text-xs font-medium hover:bg-primary-700 transition-colors"
-                >
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
-                  Download
-                </button>
-              </div>
+              {renderMetadataDownloadControls()}
             </div>
 
             {/* Table tabs */}
@@ -681,6 +849,117 @@ export default function DatasetDetailPanel({
                         </tbody>
                       </table>
                     </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'manifest' && (
+          <div class="space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Data Dictionary</h3>
+              <div class="flex flex-wrap items-center gap-3">
+                {manifestRecord?.manifest_updated_at && (
+                  <p class="text-xs text-gray-500">
+                    Updated {new Date(manifestRecord.manifest_updated_at).toLocaleString()}
+                    {manifestRecord.manifest_updated_by ? ` by ${manifestRecord.manifest_updated_by}` : ''}
+                  </p>
+                )}
+                {renderMetadataDownloadControls(manifestLoading)}
+              </div>
+            </div>
+
+            {manifestLoading && (
+              <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+                Loading manifest...
+              </div>
+            )}
+
+            {manifestError && (
+              <div class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                {manifestError}
+              </div>
+            )}
+
+            {!manifestLoading && !manifestError && manifestTableNames.length === 0 && (
+              <div class="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+                No table-level metadata found in this manifest.
+              </div>
+            )}
+
+            {!manifestLoading && !manifestError && manifestTableNames.length > 0 && (
+              <div class="space-y-4">
+                {/* Available files */}
+                {manifestTableNames.length > 1 && (
+                  <div class="flex gap-1 p-1 bg-gray-100 rounded-lg overflow-x-auto">
+                    {manifestTableNames.map((tableName) => (
+                      <button
+                        key={tableName}
+                        onClick={() => setActiveManifestTableTab(tableName)}
+                        class={`flex-shrink-0 px-3 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                          activeManifestTableTab === tableName
+                            ? 'bg-white text-gray-900 shadow-sm'
+                            : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                        }`}
+                      >
+                        {tableName}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Active table metadata */}
+                {activeManifestTableMetadata && (
+                  <div class="space-y-4">
+                    <div class="bg-gray-50 rounded-xl p-4 space-y-2">
+                      <div class="flex items-center gap-2">
+                        <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                        <span class="font-semibold text-gray-900">{activeManifestTableMetadata.table_name}</span>
+                      </div>
+                      {activeManifestTableMetadata.description && (
+                        <p class="text-sm text-gray-600">{activeManifestTableMetadata.description}</p>
+                      )}
+                    </div>
+
+                    {Object.keys(activeManifestTableMetadata.data_dictionary).length > 0 && (
+                      <div class="border border-gray-200 rounded-xl overflow-hidden">
+                        <div class="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                          <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                            Fields ({Object.keys(activeManifestTableMetadata.data_dictionary).length})
+                          </span>
+                        </div>
+                        <div class="overflow-x-auto">
+                          <table class="w-full text-sm">
+                            <thead class="bg-gray-50 border-b border-gray-200">
+                              <tr>
+                                <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Field</th>
+                                <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Description</th>
+                                <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Comments</th>
+                              </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100">
+                              {Object.entries(activeManifestTableMetadata.data_dictionary).map(([fieldName, fieldInfo]) => (
+                                <tr key={fieldName} class="hover:bg-gray-50">
+                                  <td class="px-4 py-3">
+                                    <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded font-mono text-gray-800">{fieldName}</code>
+                                  </td>
+                                  <td class="px-4 py-3 text-gray-700">
+                                    {fieldInfo.description || <span class="text-gray-400 italic">—</span>}
+                                  </td>
+                                  <td class="px-4 py-3 text-gray-500 text-xs">
+                                    {fieldInfo.comments || <span class="text-gray-400 italic">—</span>}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

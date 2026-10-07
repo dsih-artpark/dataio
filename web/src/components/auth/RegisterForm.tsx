@@ -35,7 +35,11 @@ export default function RegisterForm() {
 
     try {
       const response = await api.verifyRegistration(email, code);
-      currentUser.value = response.user;
+      if (response.access_token) {
+        currentUser.value = response.user;
+      } else {
+        currentUser.value = null;
+      }
 
       if (response.verification_status === 'pending') {
         setPendingMessage(response.verification_message || 'Your account is pending admin approval.');
@@ -188,7 +192,7 @@ export default function RegisterForm() {
             value={email}
             onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
             class="input"
-            placeholder="you@institution.edu"
+            placeholder="name@institute.ac.in"
             required
             disabled={loading}
           />

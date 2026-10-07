@@ -14,12 +14,64 @@ interface User {
 
 // Reactive state for auth
 export const currentUser = signal<User | null>(null);
-// Start as true only if there might be tokens to check
-export const isLoading = signal(typeof window !== 'undefined' && !!localStorage.getItem('access_token'));
+// Start as true because session restoration may happen from the refresh cookie.
+export const isLoading = signal(typeof window !== 'undefined');
 
 // Promise to track in-flight auth initialization (prevents race conditions)
 let initAuthPromise: Promise<void> | null = null;
 let initAuthCompleted = false;
+
+const DEFAULT_POST_LOGIN_PATH = '/datasets';
+
+function normalizeRedirectPath(target: string | null | undefined): string {
+  if (!target) return DEFAULT_POST_LOGIN_PATH;
+  if (!target.startsWith('/')) return DEFAULT_POST_LOGIN_PATH;
+  if (target.startsWith('//')) return DEFAULT_POST_LOGIN_PATH;
+  return target;
+}
+
+export function getCurrentPathWithSearch(): string {
+  if (typeof window === 'undefined') return DEFAULT_POST_LOGIN_PATH;
+  return `${window.location.pathname}${window.location.search}${window.location.hash}`;
+}
+
+export function setPostLoginRedirect(target: string): void {
+  if (typeof window === 'undefined') return;
+  sessionStorage.setItem('post_login_redirect', normalizeRedirectPath(target));
+}
+
+export function getPostLoginRedirect(): string {
+  if (typeof window === 'undefined') return DEFAULT_POST_LOGIN_PATH;
+  const fromQuery = new URLSearchParams(window.location.search).get('next');
+  const fromStorage = sessionStorage.getItem('post_login_redirect');
+  return normalizeRedirectPath(fromQuery || fromStorage);
+}
+
+export function consumePostLoginRedirect(): string {
+  const target = getPostLoginRedirect();
+  if (typeof window !== 'undefined') {
+    sessionStorage.removeItem('post_login_redirect');
+  }
+  return target;
+}
+
+export function redirectToPath(target: string, replace = true): void {
+  if (typeof window === 'undefined') return;
+  const normalized = normalizeRedirectPath(target);
+  if (replace) {
+    window.location.replace(normalized);
+  } else {
+    window.location.href = normalized;
+  }
+}
+
+export function redirectToLogin(target?: string): void {
+  if (typeof window === 'undefined') return;
+  const destination = normalizeRedirectPath(target || getCurrentPathWithSearch());
+  setPostLoginRedirect(destination);
+  const params = new URLSearchParams({ next: destination });
+  window.location.replace(`/login?${params.toString()}`);
+}
 
 /**
  * Initialize auth state from stored tokens.
@@ -46,6 +98,10 @@ export async function initAuth(): Promise<void> {
 
 async function _doInitAuth(): Promise<void> {
   isLoading.value = true;
+
+  if (!api.isAuthenticated()) {
+    await api.restoreSession();
+  }
 
   if (api.isAuthenticated()) {
     try {
@@ -81,12 +137,16 @@ export function resetAuthState(): void {
 export async function loginWithOTP(email: string, code: string): Promise<{
   user: User;
   needsPasskey: boolean;
+  verificationStatus?: string;
+  verificationMessage?: string | null;
 }> {
   const response = await api.verifyLogin(email, code);
-  currentUser.value = response.user;
+  currentUser.value = response.access_token ? response.user : null;
   return {
     user: response.user,
     needsPasskey: response.needs_passkey,
+    verificationStatus: response.verification_status,
+    verificationMessage: response.verification_message,
   };
 }
 
@@ -113,8 +173,6 @@ export function requireAuth(): boolean {
   if (typeof window === 'undefined') return true;
 
   if (!api.isAuthenticated()) {
-    // Use replace to avoid back-button loops
-    window.location.replace('/login');
     return false;
   }
   return true;
@@ -128,19 +186,49 @@ export function requireAuth(): boolean {
 export async function redirectIfAuthenticated(): Promise<boolean> {
   if (typeof window === 'undefined') return true;
 
-  // If there are tokens, wait for auth to complete before deciding
-  if (api.isAuthenticated()) {
-    try {
-      await initAuth();
-      // If user is now set, redirect
-      if (currentUser.value) {
-        window.location.replace('/datasets');
-        return false;
-      }
-    } catch {
-      // Auth failed, stay on page
-      return true;
-    }
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  if (
+    hashParams.get('oauth') === 'success' ||
+    hashParams.get('needs_passkey') === 'true' ||
+    hashParams.get('verification_status') === 'pending'
+  ) {
+    return true;
   }
+
+  try {
+    await initAuth();
+    if (currentUser.value) {
+      redirectToPath(consumePostLoginRedirect());
+      return false;
+    }
+  } catch {
+    return true;
+  }
+  return true;
+}
+
+export async function requireAuthenticatedPage(options?: {
+  adminOnly?: boolean;
+  fallbackPath?: string;
+}): Promise<boolean> {
+  if (typeof window === 'undefined') return true;
+
+  try {
+    await initAuth();
+  } catch {
+    redirectToLogin();
+    return false;
+  }
+
+  if (!currentUser.value) {
+    redirectToLogin();
+    return false;
+  }
+
+  if (options?.adminOnly && !isAdmin()) {
+    redirectToPath(options.fallbackPath || DEFAULT_POST_LOGIN_PATH);
+    return false;
+  }
+
   return true;
 }

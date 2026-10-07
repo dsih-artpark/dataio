@@ -1,0 +1,25 @@
+---
+import AdminDatasetsSubnav from '../../../components/admin/AdminDatasetsSubnav.astro';
+import DatasetAdminManager from '../../../components/admin/DatasetAdminManager';
+import DashboardLayout from '../../../layouts/DashboardLayout.astro';
+---
+
+<DashboardLayout title="Dataset Catalog" fullWidth={true}>
+  <div class="space-y-6">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">Dataset Catalog</h1>
+      <p class="mt-1 text-gray-600">
+        Search the full dataset list, update access levels quickly, and open a dedicated workspace for deeper edits and sharing.
+      </p>
+    </div>
+
+    <AdminDatasetsSubnav />
+    <DatasetAdminManager view="catalog" client:load />
+  </div>
+</DashboardLayout>
+
+<script>
+  import { requireAuthenticatedPage } from '../../../lib/auth';
+
+  requireAuthenticatedPage({ adminOnly: true });
+</script>

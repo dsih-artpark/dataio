@@ -9,17 +9,48 @@ Provides endpoints for:
 """
 
 import logging
-from typing import Optional, List
+import json
+import os
+import secrets
 from datetime import datetime
+from typing import List, Optional
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr
 
+from dataio.api.database.enums import VersionType
 from dataio.api.database.models import User
-from dataio.api.auth.jwt import get_current_web_user
+from dataio.api.auth.jwt import REFRESH_COOKIE_NAME, get_current_web_user
+from dataio.api.models import (
+    ClassifyColumnsRequest,
+    DatasetCreate,
+    DatasetDocumentationUpdate,
+    DatasetUpdate,
+    ManifestDraftEdit,
+    ManifestDraftFlagField,
+    ManifestDraftImportRequest,
+    ManifestDraftInfoYamlRequest,
+    ManifestDraftReject,
+    RawDatasetCreate,
+    RawDatasetUpdate,
+)
+from dataio.api.services.draft_review_service import parse_curator_input_json
 from dataio.api.services.web_auth_service import WebAuthService
-from dataio.api.services.web_user_service import WebUserService
 from dataio.api.services.web_admin_service import WebAdminService
+from dataio.api.services.web_user_service import WebUserService
+from dataio.validate import DatasetKind
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +72,11 @@ class LoginVerifyRequest(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    refresh_token: Optional[str] = None
 
 
 class LogoutRequest(BaseModel):
-    refresh_token: str
+    refresh_token: Optional[str] = None
 
 
 class PasskeyRegisterRequest(BaseModel):
@@ -54,8 +85,12 @@ class PasskeyRegisterRequest(BaseModel):
 
 
 class PasskeyAuthRequest(BaseModel):
-    email: EmailStr
+    email: Optional[EmailStr] = None
     credential: dict
+
+
+class PasskeyOptionsRequest(BaseModel):
+    email: Optional[EmailStr] = None
 
 
 class UpdateProfileRequest(BaseModel):
@@ -102,8 +137,42 @@ class AccountDeleteVerifyRequest(BaseModel):
     code: str
 
 
+class DatasetDeleteVerifyRequest(BaseModel):
+    code: str
+    confirmation_dataset_id: str
+
+
+class ReserveDatasetIdRequest(BaseModel):
+    # Format is checked by WebAdminService.reserve_dataset_id, which returns a
+    # readable 400 (a model pattern would return a 422 the UI can't show).
+    ds_id: str
+    collection_id: Optional[str] = None
+    note: Optional[str] = None
+
+
 class AcceptInvitationRequest(BaseModel):
     token: str
+
+
+class OAuthCallbackRequest(BaseModel):
+    code: str
+    state: str
+
+
+class AuthProvidersResponse(BaseModel):
+    google: bool
+    github: bool
+    passkey: bool
+
+
+class SessionInfoResponse(BaseModel):
+    id: str
+    created_at: str
+    last_seen_at: str
+    expires_at: str
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    current: bool
 
 
 # =============================================================================
@@ -115,7 +184,34 @@ def get_client_info(request: Request) -> tuple[Optional[str], Optional[str]]:
     """Extract user agent and IP address from request."""
     user_agent = request.headers.get("user-agent")
     ip_address = request.client.host if request.client else None
+
+    if os.getenv("TRUST_PROXY_HEADERS", "false").lower() == "true":
+        forwarded_for = request.headers.get("x-forwarded-for")
+        real_ip = request.headers.get("x-real-ip")
+        cf_ip = request.headers.get("cf-connecting-ip")
+        if cf_ip:
+            ip_address = cf_ip.strip()
+        elif real_ip:
+            ip_address = real_ip.strip()
+        elif forwarded_for:
+            ip_address = forwarded_for.split(",")[0].strip()
     return user_agent, ip_address
+
+
+def set_refresh_cookie(response: Response, refresh_token: str) -> None:
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value=refresh_token,
+        httponly=True,
+        secure=os.getenv("COOKIE_SECURE", "false").lower() == "true",
+        samesite=os.getenv("COOKIE_SAMESITE", "lax"),
+        max_age=7 * 24 * 60 * 60,
+        path="/",
+    )
+
+
+def clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(key=REFRESH_COOKIE_NAME, path="/")
 
 
 # =============================================================================
@@ -123,9 +219,24 @@ def get_client_info(request: Request) -> tuple[Optional[str], Optional[str]]:
 # =============================================================================
 
 
+@web_router.get("/auth/providers", tags=["auth"], response_model=AuthProvidersResponse)
+async def get_auth_providers():
+    """Return which login providers are configured and should be shown in the UI."""
+    return {
+        "google": bool(
+            os.getenv("GOOGLE_OAUTH_CLIENT_ID") and os.getenv("GOOGLE_OAUTH_CLIENT_SECRET")
+        ),
+        "github": bool(
+            os.getenv("GITHUB_OAUTH_CLIENT_ID") and os.getenv("GITHUB_OAUTH_CLIENT_SECRET")
+        ),
+        "passkey": True,
+    }
+
+
 @web_router.post("/auth/login/initiate", tags=["auth"])
 async def initiate_login(
     body: LoginInitiateRequest,
+    request: Request,
     auth_service: WebAuthService = Depends(WebAuthService),
 ):
     """
@@ -133,13 +244,19 @@ async def initiate_login(
 
     No authentication required.
     """
-    return auth_service.initiate_login(body.email)
+    user_agent, ip_address = get_client_info(request)
+    return auth_service.initiate_login(
+        body.email,
+        user_agent=user_agent,
+        ip_address=ip_address,
+    )
 
 
 @web_router.post("/auth/login/verify", tags=["auth"])
 async def verify_login(
     body: LoginVerifyRequest,
     request: Request,
+    response: Response,
     auth_service: WebAuthService = Depends(WebAuthService),
 ):
     """
@@ -149,18 +266,22 @@ async def verify_login(
     Also indicates if passkey setup is needed.
     """
     user_agent, ip_address = get_client_info(request)
-    return auth_service.verify_login(
+    result = auth_service.verify_login(
         email=body.email,
         code=body.code,
         user_agent=user_agent,
         ip_address=ip_address,
     )
+    if result.get("refresh_token"):
+        set_refresh_cookie(response, result["refresh_token"])
+    return {k: v for k, v in result.items() if k != "refresh_token"}
 
 
 @web_router.post("/auth/refresh", tags=["auth"])
 async def refresh_tokens(
     body: RefreshRequest,
     request: Request,
+    response: Response,
     auth_service: WebAuthService = Depends(WebAuthService),
 ):
     """
@@ -169,27 +290,43 @@ async def refresh_tokens(
     Returns new access token and refresh token.
     """
     user_agent, ip_address = get_client_info(request)
-    return auth_service.refresh_tokens(
-        refresh_token=body.refresh_token,
+    refresh_token = body.refresh_token or request.cookies.get(REFRESH_COOKIE_NAME)
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="Missing refresh token")
+    result = auth_service.refresh_tokens(
+        refresh_token=refresh_token,
         user_agent=user_agent,
         ip_address=ip_address,
     )
+    if result.get("refresh_token"):
+        set_refresh_cookie(response, result["refresh_token"])
+    return {k: v for k, v in result.items() if k != "refresh_token"}
 
 
 @web_router.post("/auth/logout", tags=["auth"])
 async def logout(
-    body: LogoutRequest,
+    body: Optional[LogoutRequest] = None,
+    request: Request = None,
+    response: Response = None,
     auth_service: WebAuthService = Depends(WebAuthService),
 ):
     """
     Logout by revoking the current session.
     """
-    return auth_service.logout(body.refresh_token)
+    refresh_token = (body.refresh_token if body else None) or (
+        request.cookies.get(REFRESH_COOKIE_NAME) if request else None
+    )
+    if refresh_token:
+        auth_service.logout(refresh_token)
+    if response:
+        clear_refresh_cookie(response)
+    return {"logged_out": True}
 
 
 @web_router.post("/auth/logout-all", tags=["auth"])
 async def logout_all(
     user: User = Depends(get_current_web_user),
+    response: Response = None,
     auth_service: WebAuthService = Depends(WebAuthService),
 ):
     """
@@ -197,7 +334,50 @@ async def logout_all(
 
     Requires authentication.
     """
+    if response:
+        clear_refresh_cookie(response)
     return auth_service.logout_all_sessions(user.email)
+
+
+@web_router.get("/auth/sessions", tags=["auth"])
+async def list_auth_sessions(
+    request: Request,
+    user: User = Depends(get_current_web_user),
+    auth_service: WebAuthService = Depends(WebAuthService),
+):
+    """
+    List the user's active browser sessions.
+
+    Requires authentication.
+    """
+    return auth_service.list_sessions(
+        user.email,
+        current_refresh_token=request.cookies.get(REFRESH_COOKIE_NAME),
+    )
+
+
+@web_router.delete("/auth/sessions/{session_id}", tags=["auth"])
+async def revoke_auth_session(
+    session_id: str,
+    request: Request,
+    response: Response,
+    user: User = Depends(get_current_web_user),
+    auth_service: WebAuthService = Depends(WebAuthService),
+):
+    """
+    Revoke one active browser session.
+
+    Requires authentication.
+    """
+    current_refresh_token = request.cookies.get(REFRESH_COOKIE_NAME)
+    current_session = auth_service.list_sessions(
+        user.email,
+        current_refresh_token=current_refresh_token,
+    )
+    result = auth_service.revoke_session_by_id(user.email, session_id)
+    if any(session["id"] == session_id and session["current"] for session in current_session["sessions"]):
+        clear_refresh_cookie(response)
+    return result
 
 
 # =============================================================================
@@ -208,6 +388,7 @@ async def logout_all(
 @web_router.post("/auth/register/initiate", tags=["auth"])
 async def initiate_registration(
     body: RegisterInitiateRequest,
+    request: Request,
     auth_service: WebAuthService = Depends(WebAuthService),
 ):
     """
@@ -218,13 +399,19 @@ async def initiate_registration(
 
     No authentication required.
     """
-    return auth_service.initiate_registration(body.email)
+    user_agent, ip_address = get_client_info(request)
+    return auth_service.initiate_registration(
+        body.email,
+        user_agent=user_agent,
+        ip_address=ip_address,
+    )
 
 
 @web_router.post("/auth/register/verify", tags=["auth"])
 async def verify_registration(
     body: RegisterVerifyRequest,
     request: Request,
+    response: Response,
     auth_service: WebAuthService = Depends(WebAuthService),
 ):
     """
@@ -235,13 +422,106 @@ async def verify_registration(
     No authentication required.
     """
     user_agent, ip_address = get_client_info(request)
-    return auth_service.verify_registration(
+    result = auth_service.verify_registration(
         email=body.email,
         code=body.code,
         magic_token=body.magic_token,
         user_agent=user_agent,
         ip_address=ip_address,
     )
+    if result.get("refresh_token"):
+        set_refresh_cookie(response, result["refresh_token"])
+    return {k: v for k, v in result.items() if k != "refresh_token"}
+
+
+@web_router.get("/auth/oauth/{provider}/start", tags=["auth"])
+async def start_oauth(
+    provider: str,
+    request: Request,
+    next: Optional[str] = None,
+    auth_service: WebAuthService = Depends(WebAuthService),
+):
+    state = secrets.token_urlsafe(24)
+    redirect_url = auth_service.get_oauth_authorize_url(provider, state)
+    response = RedirectResponse(url=redirect_url, status_code=302)
+    response.set_cookie(
+        key=f"oauth_state_{provider}",
+        value=state,
+        httponly=True,
+        secure=os.getenv("COOKIE_SECURE", "false").lower() == "true",
+        samesite="lax",
+        max_age=600,
+        path="/",
+    )
+    safe_next = next if next and next.startswith("/") and not next.startswith("//") else "/datasets"
+    response.set_cookie(
+        key=f"oauth_next_{provider}",
+        value=safe_next,
+        httponly=True,
+        secure=os.getenv("COOKIE_SECURE", "false").lower() == "true",
+        samesite="lax",
+        max_age=600,
+        path="/",
+    )
+    return response
+
+
+@web_router.get("/auth/oauth/{provider}/callback", tags=["auth"])
+async def oauth_callback(
+    provider: str,
+    code: str,
+    state: str,
+    request: Request,
+    auth_service: WebAuthService = Depends(WebAuthService),
+):
+    expected_state = request.cookies.get(f"oauth_state_{provider}")
+    if not expected_state or expected_state != state:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+
+    user_agent, ip_address = get_client_info(request)
+    if provider == "google":
+        result = auth_service.complete_google_oauth(
+            code=code,
+            user_agent=user_agent,
+            ip_address=ip_address,
+        )
+    elif provider == "github":
+        result = auth_service.complete_github_oauth(
+            code=code,
+            user_agent=user_agent,
+            ip_address=ip_address,
+        )
+    else:
+        raise HTTPException(status_code=404, detail="Unsupported OAuth provider")
+
+    next_target = request.cookies.get(f"oauth_next_{provider}") or "/datasets"
+    if not next_target.startswith("/") or next_target.startswith("//"):
+        next_target = "/datasets"
+
+    params = {}
+    if result.get("needs_passkey"):
+        params["needs_passkey"] = "true"
+    if result.get("verification_status"):
+        params["verification_status"] = result["verification_status"]
+    if result.get("verification_message"):
+        params["verification_message"] = result["verification_message"]
+
+    frontend_base = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+    if result.get("needs_passkey") or result.get("verification_status") == "pending":
+        params["oauth"] = "success"
+        params["next"] = next_target
+        redirect_target = f"{frontend_base}/login"
+        if params:
+            redirect_target = f"{redirect_target}#{urlencode(params)}"
+    else:
+        redirect_target = f"{frontend_base}{next_target}"
+
+    response = RedirectResponse(url=redirect_target, status_code=302)
+    response.delete_cookie(key=f"oauth_state_{provider}", path="/")
+    response.delete_cookie(key=f"oauth_next_{provider}", path="/")
+    if result.get("refresh_token"):
+        set_refresh_cookie(response, result["refresh_token"])
+    return response
 
 
 # =============================================================================
@@ -253,6 +533,7 @@ async def verify_registration(
 async def accept_invitation(
     body: AcceptInvitationRequest,
     request: Request,
+    response: Response,
     auth_service: WebAuthService = Depends(WebAuthService),
 ):
     """
@@ -264,11 +545,14 @@ async def accept_invitation(
     No authentication required.
     """
     user_agent, ip_address = get_client_info(request)
-    return auth_service.accept_invitation(
+    result = auth_service.accept_invitation(
         token=body.token,
         user_agent=user_agent,
         ip_address=ip_address,
     )
+    if result.get("refresh_token"):
+        set_refresh_cookie(response, result["refresh_token"])
+    return {k: v for k, v in result.items() if k != "refresh_token"}
 
 
 # =============================================================================
@@ -344,7 +628,8 @@ async def verify_passkey_registration(
 
 @web_router.post("/auth/passkey/login/options", tags=["passkey"])
 async def get_passkey_login_options(
-    body: LoginInitiateRequest,
+    body: PasskeyOptionsRequest,
+    request: Request,
     auth_service: WebAuthService = Depends(WebAuthService),
 ):
     """
@@ -352,13 +637,19 @@ async def get_passkey_login_options(
 
     No authentication required.
     """
-    return auth_service.get_passkey_authentication_options(body.email)
+    user_agent, ip_address = get_client_info(request)
+    return auth_service.get_passkey_authentication_options(
+        body.email,
+        user_agent=user_agent,
+        ip_address=ip_address,
+    )
 
 
 @web_router.post("/auth/passkey/login/verify", tags=["passkey"])
 async def verify_passkey_login(
     body: PasskeyAuthRequest,
     request: Request,
+    response: Response,
     auth_service: WebAuthService = Depends(WebAuthService),
 ):
     """
@@ -367,12 +658,15 @@ async def verify_passkey_login(
     Returns access token, refresh token, and user info.
     """
     user_agent, ip_address = get_client_info(request)
-    return auth_service.verify_passkey_authentication(
+    result = auth_service.verify_passkey_authentication(
         email=body.email,
         credential=body.credential,
         user_agent=user_agent,
         ip_address=ip_address,
     )
+    if result.get("refresh_token"):
+        set_refresh_cookie(response, result["refresh_token"])
+    return {k: v for k, v in result.items() if k != "refresh_token"}
 
 
 @web_router.get("/passkeys", tags=["passkey"])
@@ -602,9 +896,24 @@ async def get_dataset(
     return user_service.get_dataset(user, dataset_id)
 
 
+@web_router.get("/datasets/{dataset_id}/manifest", tags=["datasets"])
+async def get_dataset_manifest(
+    dataset_id: str,
+    user: User = Depends(get_current_web_user),
+    user_service: WebUserService = Depends(WebUserService),
+):
+    """
+    Get the canonical manifest for a standardised dataset the user can view.
+
+    Requires authentication and dataset view access.
+    """
+    return user_service.get_dataset_manifest(user, dataset_id)
+
+
 @web_router.get("/datasets/{dataset_id}/download-urls", tags=["datasets"])
 async def get_dataset_download_urls(
     dataset_id: str,
+    request: Request,
     user: User = Depends(get_current_web_user),
     user_service: WebUserService = Depends(WebUserService),
 ):
@@ -616,7 +925,14 @@ async def get_dataset_download_urls(
 
     Requires authentication and download permission.
     """
-    return user_service.get_dataset_download_urls(user, dataset_id)
+    user_agent, ip_address = get_client_info(request)
+    return user_service.get_dataset_download_urls(
+        user,
+        dataset_id,
+        access_channel="WEB",
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
 
 
 @web_router.get("/collections", tags=["datasets"])
@@ -965,6 +1281,12 @@ class SetPermissionRequest(BaseModel):
     permission: str  # 'VIEW', 'DOWNLOAD', or 'NONE'
 
 
+class DocumentationSyncRequest(BaseModel):
+    dataset_id: Optional[str] = None
+    only_outdated: bool = True
+    force: bool = False
+
+
 @web_router.post("/admin/users/{email}/permissions", tags=["web-admin/users"])
 async def admin_set_user_permission(
     email: str,
@@ -1028,6 +1350,537 @@ async def admin_list_datasets(
     """
     return admin_service.list_datasets_for_permissions(
         user, search=search, limit=limit, offset=offset
+    )
+
+
+@web_router.get("/admin/datasets/suggest-id", tags=["web-admin/datasets"])
+async def admin_suggest_dataset_id(
+    collection_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Suggest the next sequential dataset ID for a collection."""
+    return admin_service.suggest_next_dataset_id(user, collection_id)
+
+
+@web_router.get("/admin/datasets/next-id-number", tags=["web-admin/datasets"])
+async def admin_get_next_dataset_id_number(
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """The next dataset ID number, catalogue-wide (independent of collection)."""
+    return admin_service.get_next_dataset_id_number(user)
+
+
+@web_router.get("/admin/raw-datasets/suggest-id", tags=["web-admin/datasets"])
+async def admin_suggest_raw_dataset_id(
+    collection_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Suggest the next sequential raw dataset ID for a collection."""
+    return admin_service.suggest_next_raw_dataset_id(user, collection_id)
+
+
+@web_router.get("/admin/raw-datasets/suggest-id-by-category", tags=["web-admin/datasets"])
+async def admin_suggest_raw_dataset_id_by_category(
+    category_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Suggest the next raw dataset ID for a category (shared across its collections)."""
+    return admin_service.suggest_next_raw_dataset_id_for_category(user, category_id)
+
+
+@web_router.get("/admin/dataset-id-reservations", tags=["web-admin/datasets"])
+async def admin_list_reserved_dataset_ids(
+    search: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """List reserved dataset IDs."""
+    return admin_service.list_reserved_dataset_ids(user, search=search, limit=limit, offset=offset)
+
+
+@web_router.post("/admin/dataset-id-reservations", tags=["web-admin/datasets"])
+async def admin_reserve_dataset_id(
+    body: ReserveDatasetIdRequest,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Reserve a dataset ID for future use."""
+    return admin_service.reserve_dataset_id(user, body.ds_id, body.collection_id, body.note)
+
+
+@web_router.delete("/admin/dataset-id-reservations/{dataset_id}", tags=["web-admin/datasets"])
+async def admin_delete_reserved_dataset_id(
+    dataset_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Remove a dataset ID reservation."""
+    return admin_service.delete_reserved_dataset_id(user, dataset_id)
+
+
+@web_router.get("/admin/datasets/{dataset_id}", tags=["web-admin/datasets"])
+async def admin_get_dataset_detail(
+    dataset_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Get detailed dataset information for admin editing."""
+    return admin_service.get_dataset_detail(user, dataset_id)
+
+
+@web_router.post("/admin/datasets", tags=["web-admin/datasets"])
+async def admin_create_dataset(
+    body: DatasetCreate,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Create a dataset."""
+    return admin_service.create_dataset(user, body)
+
+
+@web_router.put("/admin/datasets/{dataset_id}", tags=["web-admin/datasets"])
+async def admin_update_dataset(
+    dataset_id: str,
+    body: DatasetUpdate,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Update dataset metadata and raw dataset links."""
+    return admin_service.update_dataset(user, dataset_id, body)
+
+
+@web_router.put("/admin/datasets/{dataset_id}/documentation", tags=["web-admin/datasets"])
+async def admin_update_dataset_documentation(
+    dataset_id: str,
+    body: DatasetDocumentationUpdate,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Update cached dataset README and data dictionary content."""
+    return admin_service.update_dataset_documentation(user, dataset_id, body)
+
+
+@web_router.post("/admin/datasets/import/preview", tags=["web-admin/datasets"])
+def admin_preview_dataset_import(
+    info_file: UploadFile = File(...),
+    metadata_file: UploadFile = File(...),
+    csv_files: List[UploadFile] = File(default=[]),
+    dataset_override_json: Optional[str] = Form(default=None),
+    raw_dataset_override_json: Optional[str] = Form(default=None),
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Preview a dataset package import from info.yml, metadata.yml, and optional CSV files."""
+    dataset_override = json.loads(dataset_override_json) if dataset_override_json else None
+    raw_dataset_override = json.loads(raw_dataset_override_json) if raw_dataset_override_json else None
+    return admin_service.preview_dataset_package_import(
+        user,
+        info_file,
+        metadata_file,
+        csv_files=csv_files,
+        dataset_override=dataset_override,
+        raw_dataset_override=raw_dataset_override,
+    )
+
+
+@web_router.post("/admin/datasets/import/apply", tags=["web-admin/datasets"])
+def admin_apply_dataset_import(
+    info_file: UploadFile = File(...),
+    metadata_file: UploadFile = File(...),
+    csv_files: List[UploadFile] = File(...),
+    dataset_override_json: Optional[str] = Form(default=None),
+    raw_dataset_override_json: Optional[str] = Form(default=None),
+    bucket_type: VersionType = Form(default=VersionType.STANDARDISED),
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Create a dataset from an uploaded package and upload the referenced CSV tables."""
+    dataset_override = json.loads(dataset_override_json) if dataset_override_json else None
+    raw_dataset_override = json.loads(raw_dataset_override_json) if raw_dataset_override_json else None
+    return admin_service.import_dataset_package(
+        user,
+        info_file,
+        metadata_file,
+        csv_files=csv_files,
+        dataset_override=dataset_override,
+        raw_dataset_override=raw_dataset_override,
+        bucket_type=bucket_type,
+    )
+
+
+@web_router.post("/admin/datasets/{dataset_id}/delete/initiate", tags=["web-admin/datasets"])
+async def admin_initiate_dataset_deletion(
+    dataset_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Send an email verification code before deleting a dataset."""
+    return admin_service.initiate_dataset_deletion(user, dataset_id)
+
+
+@web_router.post("/admin/datasets/{dataset_id}/delete/verify", tags=["web-admin/datasets"])
+async def admin_verify_dataset_deletion(
+    dataset_id: str,
+    body: DatasetDeleteVerifyRequest,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Delete a dataset after OTP verification and explicit dataset-ID confirmation."""
+    return admin_service.verify_dataset_deletion(
+        user,
+        dataset_id,
+        body.code,
+        body.confirmation_dataset_id,
+    )
+
+
+@web_router.get("/admin/raw-datasets", tags=["web-admin/datasets"])
+async def admin_list_raw_datasets(
+    search: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """List raw datasets for admin editing."""
+    return admin_service.list_raw_datasets(user, search=search, limit=limit, offset=offset)
+
+
+@web_router.post("/admin/raw-datasets", tags=["web-admin/datasets"])
+async def admin_create_raw_dataset(
+    body: RawDatasetCreate,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Create a raw dataset."""
+    return admin_service.create_raw_dataset(user, body)
+
+
+@web_router.put("/admin/raw-datasets/{raw_dataset_id}", tags=["web-admin/datasets"])
+async def admin_update_raw_dataset(
+    raw_dataset_id: str,
+    body: RawDatasetUpdate,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Update a raw dataset."""
+    return admin_service.update_raw_dataset(user, raw_dataset_id, body)
+
+
+@web_router.get("/admin/datasets/{dataset_id}/{bucket_type}/tables", tags=["web-admin/datasets"])
+async def admin_list_dataset_tables(
+    dataset_id: str,
+    bucket_type: VersionType,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """List tables stored for a dataset/version."""
+    return admin_service.list_dataset_tables(user, dataset_id, bucket_type)
+
+
+@web_router.post("/admin/datasets/{dataset_id}/{bucket_type}/tables", tags=["web-admin/datasets"])
+async def admin_create_dataset_table(
+    dataset_id: str,
+    bucket_type: VersionType,
+    file: UploadFile = File(...),
+    table_metadata_file: UploadFile = File(...),
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Upload a new table for a dataset/version."""
+    return admin_service.create_dataset_table(
+        user,
+        dataset_id,
+        bucket_type,
+        file,
+        table_metadata_file,
+    )
+
+
+@web_router.get("/admin/datasets/{dataset_id}/{bucket_type}/manifest", tags=["web-admin/datasets"])
+async def admin_get_dataset_manifest(
+    dataset_id: str,
+    bucket_type: VersionType,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Get the canonical manifest for a dataset/version."""
+    return admin_service.get_dataset_manifest(user, dataset_id, bucket_type)
+
+
+@web_router.put("/admin/datasets/{dataset_id}/{bucket_type}/manifest", tags=["web-admin/datasets"])
+async def admin_upsert_dataset_manifest(
+    dataset_id: str,
+    bucket_type: VersionType,
+    manifest_file: UploadFile = File(...),
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Validate and persist the canonical manifest for a dataset/version."""
+    return admin_service.upsert_dataset_manifest(
+        user,
+        dataset_id,
+        bucket_type,
+        manifest_file,
+    )
+
+
+@web_router.post("/admin/manifest-drafts/generate", tags=["web-admin/manifest-drafts"])
+def web_generate_manifest_draft(
+    csv_files: List[UploadFile] = File(...),
+    category_id: str = Form(...),
+    collection_id: str = Form(...),
+    data_owner_name: str = Form(...),
+    dataset_id: Optional[str] = Form(None),
+    digitization_log_file: Optional[UploadFile] = File(None),
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.generate_manifest_draft(
+        user,
+        csv_files,
+        category_id,
+        collection_id,
+        data_owner_name,
+        dataset_id=dataset_id,
+        digitization_log_file=digitization_log_file,
+    )
+
+
+@web_router.post(
+    "/admin/manifest-drafts/generate-deterministic", tags=["web-admin/manifest-drafts"]
+)
+def web_generate_deterministic_manifest_draft(
+    csv_files: List[UploadFile] = File(...),
+    category_id: str = Form(...),
+    collection_id: str = Form(...),
+    data_owner_name: str = Form(...),
+    curator_input: str = Form(...),
+    dataset_id: Optional[str] = Form(None),
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.generate_deterministic_manifest_draft(
+        user,
+        csv_files,
+        category_id,
+        collection_id,
+        data_owner_name,
+        parse_curator_input_json(curator_input),
+        dataset_id=dataset_id,
+    )
+
+
+@web_router.post("/admin/manifest-drafts/classify-columns", tags=["web-admin/manifest-drafts"])
+async def web_classify_columns(
+    body: ClassifyColumnsRequest,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.classify_columns(user, body.column_names)
+
+
+@web_router.post("/admin/manifest-drafts/infer-coverage", tags=["web-admin/manifest-drafts"])
+def web_infer_dataset_coverage(
+    csv_files: List[UploadFile] = File(...),
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Suggests spatialCoverage/spatialResolution/temporalCoverage for the
+    deterministic-draft intake form, from the CSVs' own profiled structure
+    - a starting point the curator reviews and can edit, never silently
+    trusted as final."""
+    return admin_service.infer_dataset_coverage(user, csv_files)
+
+
+@web_router.get("/admin/manifest-drafts", tags=["web-admin/manifest-drafts"])
+async def web_list_manifest_drafts(
+    status: Optional[str] = None,
+    dataset_id: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.list_manifest_drafts(user, status=status, dataset_id=dataset_id, limit=limit, offset=offset)
+
+
+@web_router.get("/admin/manifest-drafts/{draft_id}", tags=["web-admin/manifest-drafts"])
+async def web_get_manifest_draft(
+    draft_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.get_manifest_draft(user, draft_id)
+
+
+@web_router.delete("/admin/manifest-drafts/{draft_id}", tags=["web-admin/manifest-drafts"])
+async def web_delete_manifest_draft(
+    draft_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    admin_service.delete_manifest_draft(user, draft_id)
+    return {"message": "Manifest draft deleted", "draft_id": draft_id}
+
+
+@web_router.post("/admin/manifest-drafts/{draft_id}/validate", tags=["web-admin/manifest-drafts"])
+def web_revalidate_manifest_draft(
+    draft_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.revalidate_manifest_draft(user, draft_id)
+
+
+@web_router.post("/admin/manifest-drafts/{draft_id}/approve", tags=["web-admin/manifest-drafts"])
+async def web_approve_manifest_draft(
+    draft_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.approve_manifest_draft(user, draft_id)
+
+
+@web_router.post("/admin/manifest-drafts/{draft_id}/reject", tags=["web-admin/manifest-drafts"])
+async def web_reject_manifest_draft(
+    draft_id: str,
+    body: ManifestDraftReject,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.reject_manifest_draft(user, draft_id, reason=body.reason)
+
+
+@web_router.put("/admin/manifest-drafts/{draft_id}", tags=["web-admin/manifest-drafts"])
+def web_update_manifest_draft(
+    draft_id: str,
+    body: ManifestDraftEdit,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.update_manifest_draft_content(user, draft_id, body.draft_yaml)
+
+
+@web_router.post("/admin/manifest-drafts/{draft_id}/flag-field", tags=["web-admin/manifest-drafts"])
+async def web_flag_manifest_draft_field(
+    draft_id: str,
+    body: ManifestDraftFlagField,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.flag_manifest_draft_field(user, draft_id, body.field_path, body.note)
+
+
+@web_router.post("/admin/manifest-drafts/{draft_id}/regenerate", tags=["web-admin/manifest-drafts"])
+def web_regenerate_manifest_draft(
+    draft_id: str,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.regenerate_manifest_draft(user, draft_id)
+
+
+@web_router.post(
+    "/admin/manifest-drafts/{draft_id}/info-yaml", tags=["web-admin/manifest-drafts"]
+)
+async def web_generate_manifest_draft_info_yaml(
+    draft_id: str,
+    body: ManifestDraftInfoYamlRequest,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    return admin_service.generate_manifest_draft_info_yaml(user, draft_id, body.access_level.value)
+
+
+@web_router.post(
+    "/admin/manifest-drafts/{draft_id}/import", tags=["web-admin/manifest-drafts"]
+)
+def web_import_dataset_from_draft(
+    draft_id: str,
+    body: ManifestDraftImportRequest,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Publishes an approved draft straight to the catalog - the same
+    import_dataset_package pipeline the Import Dataset Package tool uses,
+    driven directly from the draft's own stored fields instead of a manual
+    download/re-upload round-trip."""
+    return admin_service.import_dataset_from_draft(user, draft_id, body.access_level.value, body.bucket_type)
+
+
+@web_router.get("/admin/documentation-sync", tags=["web-admin/datasets"])
+def admin_check_documentation_sync(
+    dataset_id: Optional[str] = None,
+    check_all: bool = False,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Check which datasets have documentation out of sync with filestore.
+    Pass dataset_id for the interactive per-dataset check, or check_all=true
+    for a summary count across every dataset (e.g. the admin overview).
+    """
+    return admin_service.check_dataset_documentation_sync(user, dataset_id, check_all=check_all)
+
+
+@web_router.post("/admin/documentation-sync", tags=["web-admin/datasets"])
+def admin_run_documentation_sync(
+    body: DocumentationSyncRequest,
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Sync dataset documentation from filestore into cached database fields."""
+    return admin_service.sync_dataset_documentation(
+        user,
+        dataset_id=body.dataset_id,
+        only_outdated=body.only_outdated,
+        force=body.force,
+    )
+
+
+@web_router.post("/admin/validate/tabular", tags=["web-admin/validate"])
+async def admin_validate_tabular(
+    manifest_file: UploadFile = File(...),
+    table_file: UploadFile | None = File(None),
+    table_name: str | None = Form(None),
+    deep_check: bool = Form(False),
+    extra_column_policy: str = Form("warn"),
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Validate a tabular manifest and optional data file."""
+    return admin_service.validate_dataset(
+        user,
+        dataset_kind=DatasetKind.TABULAR,
+        manifest_file=manifest_file,
+        data_file=table_file,
+        table_name=table_name,
+        deep_check=deep_check,
+        extra_column_policy=extra_column_policy,
+    )
+
+
+@web_router.post("/admin/validate/geojson", tags=["web-admin/validate"])
+async def admin_validate_geojson(
+    manifest_file: UploadFile = File(...),
+    geojson_file: UploadFile | None = File(None),
+    deep_check: bool = Form(False),
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """Validate a GeoJSON manifest and optional GeoJSON payload."""
+    return admin_service.validate_dataset(
+        user,
+        dataset_kind=DatasetKind.GEOJSON,
+        manifest_file=manifest_file,
+        data_file=geojson_file,
+        deep_check=deep_check,
     )
 
 
@@ -1208,3 +2061,37 @@ async def delete_chat_session(
         user_email=user.email,
     )
     return {"deleted": deleted}
+
+
+# =============================================================================
+# Admin Metrics & Analytics Endpoints
+# =============================================================================
+
+
+@web_router.get("/admin/metrics/downloads", tags=["web-admin/metrics"])
+async def admin_get_download_metrics(
+    search: Optional[str] = None,
+    dataset_id: Optional[str] = None,
+    user_email: Optional[str] = None,
+    channel: Optional[str] = None,
+    # The admin CSV export requests up to 100000 rows in one call
+    limit: int = Query(100, ge=1, le=100000),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(get_current_web_user),
+    admin_service: WebAdminService = Depends(WebAdminService),
+):
+    """
+    Get dataset download audit logs and analytics summary.
+
+    Requires admin privileges.
+    """
+    return admin_service.get_download_metrics(
+        user,
+        search=search,
+        dataset_id=dataset_id,
+        user_email=user_email,
+        channel=channel,
+        limit=limit,
+        offset=offset,
+    )
+

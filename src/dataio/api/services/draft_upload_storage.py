@@ -101,6 +101,14 @@ def delete_managed_file(path: str) -> None:
     if not path or not is_managed_path(path):
         return
     resolved = Path(path).resolve()
-    resolved.unlink(missing_ok=True)
+    try:
+        resolved.unlink(missing_ok=True)
+    except OSError:
+        # Callers run this mid-delete or inside error handling; a file that
+        # can't be removed must not abort them.
+        logging.getLogger(__name__).warning(
+            "Could not delete draft file %s", resolved, exc_info=True
+        )
+        return
     with contextlib.suppress(OSError):
         resolved.parent.rmdir()

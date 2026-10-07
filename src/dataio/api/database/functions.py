@@ -999,7 +999,9 @@ def create_user(user_create: UserCreate):
             key = secrets.token_urlsafe()
             bytes = key.encode("utf-8")
             salt = bcrypt.gensalt()
-            hash = bcrypt.hashpw(bytes, salt)
+            # users.key is TEXT: store the hash as str, not bytes (psycopg2 would
+            # bind bytes as bytea and store its '\x...' hex form)
+            hash = bcrypt.hashpw(bytes, salt).decode("utf-8")
             user = User(
                 email=user_create.email, is_group=user_create.is_group, key=hash
             )

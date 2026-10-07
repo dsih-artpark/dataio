@@ -18,6 +18,21 @@ logger = logging.getLogger(__name__)
 API_KEY_PREFIX = os.getenv("API_KEY_PREFIX", "dio_")
 
 
+def _legacy_key_hash_bytes(stored_key) -> bytes:
+    """Returns a legacy users.key bcrypt hash as bytes for bcrypt.checkpw.
+
+    users.key is a TEXT column, so it comes back as str (pyca bcrypt >= 4
+    rejects str hashes). Hashes written while create_user stored raw bytes
+    were bound by psycopg2 as bytea and landed in TEXT as their hex form
+    ('\\x2432...'); decode those back to the original '$2b$...' hash.
+    """
+    if isinstance(stored_key, bytes):
+        return stored_key
+    if stored_key.startswith("\\x"):
+        return bytes.fromhex(stored_key[2:])
+    return stored_key.encode("utf-8")
+
+
 def check_api_key(api_key: str) -> User:
     """
     Validate API key against database.
@@ -82,7 +97,7 @@ def check_api_key(api_key: str) -> User:
         for user in users:
             if user.key:
                 try:
-                    if bcrypt.checkpw(api_key.encode("utf-8"), user.key):
+                    if bcrypt.checkpw(api_key.encode("utf-8"), _legacy_key_hash_bytes(user.key)):
                         logger.warning(
                             f"DEPRECATION: Legacy API key used for user: {user.email}. "
                             "Legacy API keys are deprecated and will be removed in a future version. "
@@ -92,7 +107,8 @@ def check_api_key(api_key: str) -> User:
                         # Mark this as a legacy key authentication for response header
                         user._legacy_key_used = True
                         return user
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Legacy key check failed for {user.email}: {str(e)}")
                     continue
 
         return None

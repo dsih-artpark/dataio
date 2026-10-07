@@ -840,9 +840,11 @@ export default function DatasetAdminManager({
   // these N" is a sequential loop over the same single-dataset endpoint
   // "Sync selected" already uses, not a new backend capability.
   // Only ticked rows the "Show only outdated" filter currently shows count:
-  // a ticked row hidden by the filter is never synced unseen.
+  // a ticked row hidden by the filter is never synced unseen. Failed checks
+  // (needs_update false, error set) stay visible so they aren't missed.
   const visibleDocumentationStatuses = documentationStatuses.filter(
-    (item) => !(documentationStatusesCheckedAll && showOnlyOutdated) || item.needs_update
+    (item) =>
+      !(documentationStatusesCheckedAll && showOnlyOutdated) || item.needs_update || !!item.error
   );
   const visibleSelectedSyncIds = visibleDocumentationStatuses
     .filter((item) => selectedSyncIds.has(item.ds_id))

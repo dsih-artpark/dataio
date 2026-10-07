@@ -437,7 +437,8 @@ class DatasetManifestDraft(Base):
     flagged_fields = Column(JSONB, nullable=False, default=list)
     reviewer_notes = Column(JSONB, nullable=False, default=list)
     validation_result = Column(JSONB, nullable=True)
-    llm_model_id = Column(Text, nullable=False)
+    # NULL for a deterministic (rule-based) draft; migration 021 dropped NOT NULL.
+    llm_model_id = Column(Text, nullable=True)
     llm_prompt_tokens = Column(Integer, nullable=True)
     llm_completion_tokens = Column(Integer, nullable=True)
     created_by = Column(Text, ForeignKey("users.email", ondelete="SET NULL"), nullable=True)
@@ -445,6 +446,13 @@ class DatasetManifestDraft(Base):
     reviewed_by = Column(Text, ForeignKey("users.email", ondelete="SET NULL"), nullable=True)
     reviewed_at = Column(DateTime, nullable=True)
     superseded_by_draft_id = Column(UUID(as_uuid=True), ForeignKey("dataset_manifest_drafts.draft_id"), nullable=True)
+    # "Upload dataset now" tracking (migration 024). import_started_at is set
+    # while an upload holds the draft and cleared if it fails; imported_at/by
+    # are set once the dataset is fully published.
+    import_started_at = Column(DateTime, nullable=True)
+    imported_at = Column(DateTime, nullable=True)
+    imported_by = Column(Text, ForeignKey("users.email", ondelete="SET NULL"), nullable=True)
+    import_result = Column(JSONB, nullable=True)
 
 
 class DatasetDownload(Base):

@@ -6,7 +6,7 @@ from sqlalchemy.orm import joinedload
 import bcrypt
 import secrets
 import dateutil
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, text
 from datetime import datetime, timedelta
 
 from dataio.api.database.config import Session
@@ -63,6 +63,8 @@ def check_if_dataset_exists(dataset_id: str):
     except Exception as e:
         logger.error(f"Error checking if dataset exists: {str(e)}")
         raise
+    finally:
+        session.close()
 
 
 def get_dataset(dataset_id: str):
@@ -110,6 +112,18 @@ def get_collection_by_identifier(collection_id: str):
         session.close()
 
 
+def category_exists(category_id: str) -> bool:
+    """Categories have no table of their own; one exists if a collection uses it."""
+    session = Session()
+    try:
+        return (
+            session.query(Collection.id).filter(Collection.category_id == category_id).first()
+            is not None
+        )
+    finally:
+        session.close()
+
+
 def get_raw_dataset_by_identifier(raw_dataset_id: str):
     session = Session()
     try:
@@ -141,14 +155,61 @@ def list_reserved_dataset_ids(search: str | None = None, limit: int = 100, offse
         session.close()
 
 
+class ReservedIdConflict(ValueError):
+    """The ID, or for a dataset ID its catalogue-wide number, is already taken."""
+
+
+# pg_advisory_xact_lock keys, one per ID counter. Held until the reserving
+# transaction ends, so two reservations can't both pass the "is it taken?"
+# checks before either is inserted.
+_DATASET_ID_LOCK_KEY = 7_340_001
+_RAW_DATASET_ID_LOCK_KEY = 7_340_002
+
+DATASET_SERIAL_RE = re.compile(r"DS(\d{4})$")
+MAX_DATASET_SERIAL = 9999
+
+
+def _lock_id_counter(session, key: int) -> None:
+    session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
+
+
+def _dataset_serial_owner(session, ds_id: str) -> str | None:
+    """Another dataset or reservation already using ds_id's DSnnnn number.
+    The number is one counter shared by every collection, so CS0026DS0113
+    clashes with CS0007DS0113."""
+    match = DATASET_SERIAL_RE.search(ds_id)
+    if not match:
+        return None
+    suffix = f"%DS{match.group(1)}"
+    for model in (Dataset, ReservedDatasetID):
+        owner = (
+            session.query(model.ds_id)
+            .filter(model.ds_id.like(suffix), model.ds_id != ds_id)
+            .first()
+        )
+        if owner:
+            return owner[0]
+    return None
+
+
 def create_reserved_dataset_id(ds_id: str, collection_id: str | None, note: str | None, reserved_by: str):
     session = Session()
     try:
-        if check_if_dataset_exists(ds_id):
-            raise ValueError(f"Dataset with ID {ds_id} already exists")
+        # Checks use this locked session, so a concurrent reservation can't
+        # slip in between them and the insert.
+        _lock_id_counter(session, _DATASET_ID_LOCK_KEY)
+        if session.query(Dataset.id).filter(Dataset.ds_id == ds_id).first():
+            raise ReservedIdConflict(f"Dataset with ID {ds_id} already exists")
         existing = session.query(ReservedDatasetID).filter(ReservedDatasetID.ds_id == ds_id).first()
         if existing:
-            raise ValueError(f"Dataset ID {ds_id} is already reserved")
+            raise ReservedIdConflict(f"Dataset ID {ds_id} is already reserved")
+        serial_owner = _dataset_serial_owner(session, ds_id)
+        if serial_owner:
+            raise ReservedIdConflict(
+                f"Dataset number {DATASET_SERIAL_RE.search(ds_id).group(1)} is already used by "
+                f"{serial_owner}. Numbers are shared across all collections; "
+                "use the next suggested ID."
+            )
         reservation = ReservedDatasetID(
             ds_id=ds_id,
             collection_id=collection_id,
@@ -160,8 +221,58 @@ def create_reserved_dataset_id(ds_id: str, collection_id: str | None, note: str 
         session.refresh(reservation)
         return reservation
     except Exception as e:
+        session.rollback()
         logger.error(f"Error creating reserved dataset ID: {str(e)}")
         raise
+    finally:
+        session.close()
+
+
+def reserve_next_dataset_id(collection_id: str, note: str | None, reserved_by: str) -> str:
+    """Reserves the next free dataset ID in collection_id. The number is
+    computed and reserved under one lock, so concurrent callers (e.g. two
+    draft generations) always get different numbers."""
+    session = Session()
+    try:
+        _lock_id_counter(session, _DATASET_ID_LOCK_KEY)
+        next_number = get_next_dataset_serial_number(session)
+        if next_number > MAX_DATASET_SERIAL:
+            raise ValueError(
+                f"The dataset number counter is past {MAX_DATASET_SERIAL}; "
+                "dataset IDs only have four digits."
+            )
+        ds_id = f"{collection_id}DS{next_number:04d}"
+        session.add(
+            ReservedDatasetID(
+                ds_id=ds_id, collection_id=collection_id, note=note, reserved_by=reserved_by
+            )
+        )
+        session.commit()
+        return ds_id
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error reserving the next dataset ID: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def get_reserved_dataset_id(ds_id: str):
+    session = Session()
+    try:
+        return session.query(ReservedDatasetID).filter(ReservedDatasetID.ds_id == ds_id).first()
+    finally:
+        session.close()
+
+
+def get_reserved_raw_dataset_id(rds_id: str):
+    session = Session()
+    try:
+        return (
+            session.query(ReservedRawDatasetID)
+            .filter(ReservedRawDatasetID.rds_id == rds_id)
+            .first()
+        )
     finally:
         session.close()
 
@@ -194,19 +305,17 @@ def check_if_raw_dataset_exists(rds_id: str) -> bool:
 
 
 def create_reserved_raw_dataset_id(rds_id: str, category_id: str | None, note: str | None, reserved_by: str):
-    """Mirrors create_reserved_dataset_id, for rds_id. Called immediately
-    after resolving a suggested rds_id (e.g. in draft_service.generate_draft)
-    so two concurrent callers in the same category can't be handed the same
-    suggestion - suggest_next_raw_dataset_id_for_category folds these
-    reservations into its max-suffix computation.
+    """Mirrors create_reserved_dataset_id, for rds_id. To reserve the next
+    free rds_id of a category, use reserve_next_raw_dataset_id instead.
     """
     session = Session()
     try:
-        if check_if_raw_dataset_exists(rds_id):
-            raise ValueError(f"Raw dataset with ID {rds_id} already exists")
+        _lock_id_counter(session, _RAW_DATASET_ID_LOCK_KEY)
+        if session.query(RawDataset.id).filter(RawDataset.rds_id == rds_id).first():
+            raise ReservedIdConflict(f"Raw dataset with ID {rds_id} already exists")
         existing = session.query(ReservedRawDatasetID).filter(ReservedRawDatasetID.rds_id == rds_id).first()
         if existing:
-            raise ValueError(f"Raw dataset ID {rds_id} is already reserved")
+            raise ReservedIdConflict(f"Raw dataset ID {rds_id} is already reserved")
         reservation = ReservedRawDatasetID(
             rds_id=rds_id,
             category_id=category_id,
@@ -218,7 +327,31 @@ def create_reserved_raw_dataset_id(rds_id: str, category_id: str | None, note: s
         session.refresh(reservation)
         return reservation
     except Exception as e:
+        session.rollback()
         logger.error(f"Error creating reserved raw dataset ID: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def reserve_next_raw_dataset_id(category_id: str, note: str | None, reserved_by: str) -> str:
+    """Reserves the next free rds_id of a category (see
+    suggest_next_raw_dataset_id_for_category), computed and reserved under
+    one lock so concurrent callers always get different IDs."""
+    session = Session()
+    try:
+        _lock_id_counter(session, _RAW_DATASET_ID_LOCK_KEY)
+        rds_id = suggest_next_raw_dataset_id_for_category(category_id, session)
+        session.add(
+            ReservedRawDatasetID(
+                rds_id=rds_id, category_id=category_id, note=note, reserved_by=reserved_by
+            )
+        )
+        session.commit()
+        return rds_id
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error reserving the next raw dataset ID: {str(e)}")
         raise
     finally:
         session.close()
@@ -463,6 +596,79 @@ def other_draft_uses_path(exclude_draft_id, path: str) -> bool:
         return session.query(query.exists()).scalar()
     finally:
         session.close()
+
+
+# An import that claimed a draft this long ago without finishing is treated
+# as dead (e.g. the worker was restarted mid-upload) and can be claimed again.
+DRAFT_IMPORT_STALE_AFTER = timedelta(minutes=30)
+
+
+class DraftImportConflict(ValueError):
+    """An "Upload dataset now" import was refused because the draft is already
+    imported or another import of it is still running."""
+
+
+def draft_import_running(draft) -> bool:
+    """True while an import holds the draft (claimed, not finished, not stale)."""
+    return (
+        draft.import_started_at is not None
+        and draft.imported_at is None
+        and datetime.utcnow() - draft.import_started_at < DRAFT_IMPORT_STALE_AFTER
+    )
+
+
+def claim_manifest_draft_import(draft_id, session=None):
+    """Marks an approved draft's import as started, under the row lock, so two
+    imports of the same draft can't run at once."""
+    owns_session = session is None
+    session = session or Session()
+    try:
+        draft = _get_draft_for_update(session, draft_id, expected_statuses=("approved",))
+        if draft.imported_at is not None:
+            raise DraftImportConflict(f"Manifest draft {draft_id} has already been uploaded")
+        if draft_import_running(draft):
+            raise DraftImportConflict(
+                f"An upload of manifest draft {draft_id} is already running "
+                f"(started {draft.import_started_at.isoformat()} UTC)"
+            )
+        draft.import_started_at = datetime.utcnow()
+        session.commit()
+        session.refresh(draft)
+        return draft
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error claiming import of manifest draft {draft_id}: {str(e)}")
+        raise
+    finally:
+        if owns_session:
+            session.close()
+
+
+def finish_manifest_draft_import(
+    draft_id, *, succeeded: bool, result: dict, imported_by: str | None = None, session=None
+):
+    """Records how a claimed import ended. On success the draft is stamped as
+    imported; on failure the claim is released so the upload can be retried."""
+    owns_session = session is None
+    session = session or Session()
+    try:
+        draft = _get_draft_for_update(session, draft_id)
+        draft.import_result = result
+        if succeeded:
+            draft.imported_at = datetime.utcnow()
+            draft.imported_by = imported_by
+        else:
+            draft.import_started_at = None
+        session.commit()
+        session.refresh(draft)
+        return draft
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error recording import result of manifest draft {draft_id}: {str(e)}")
+        raise
+    finally:
+        if owns_session:
+            session.close()
 
 
 def update_manifest_draft_content(
@@ -946,6 +1152,11 @@ def suggest_next_dataset_id(collection_id: str) -> str:
     session = Session()
     try:
         next_number = get_next_dataset_serial_number(session)
+        if next_number > MAX_DATASET_SERIAL:
+            raise ValueError(
+                f"The dataset number counter is past {MAX_DATASET_SERIAL}; "
+                "dataset IDs only have four digits."
+            )
         prefix = f"{collection_id}DS"
         return f"{prefix}{next_number:04d}"
     except Exception as e:
@@ -1299,6 +1510,31 @@ def create_raw_dataset(raw_dataset: RawDatasetCreate):
     except Exception as e:
         session.rollback()
         logger.error(f"Error creating raw dataset: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def delete_raw_dataset(rds_id: str):
+    """Deletes a raw dataset that no dataset links to. Used to undo a failed
+    import that created it; a linked raw dataset is never removed."""
+    session = Session()
+    try:
+        raw_dataset = session.query(RawDataset).filter(RawDataset.rds_id == rds_id).first()
+        if not raw_dataset:
+            raise ValueError(f"Raw dataset with ID {rds_id} not found")
+        linked = (
+            session.query(DatasetRawDataset)
+            .filter(DatasetRawDataset.raw_dataset_id == raw_dataset.id)
+            .first()
+        )
+        if linked:
+            raise ValueError(f"Raw dataset {rds_id} is still linked to a dataset")
+        session.delete(raw_dataset)
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error deleting raw dataset: {str(e)}")
         raise
     finally:
         session.close()

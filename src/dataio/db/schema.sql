@@ -840,7 +840,7 @@ CREATE TABLE public.otp_tokens (
     expires_at timestamp without time zone NOT NULL,
     used_at timestamp without time zone,
     attempts integer DEFAULT 0 NOT NULL,
-    CONSTRAINT otp_tokens_purpose_check CHECK ((purpose = ANY (ARRAY['login'::text, 'verify_email'::text, 'invite'::text, 'registration'::text, 'account_deletion'::text])))
+    CONSTRAINT otp_tokens_purpose_check CHECK (((purpose = ANY (ARRAY['login'::text, 'verify_email'::text, 'invite'::text, 'registration'::text, 'account_deletion'::text])) OR (purpose ~~ 'dataset\_deletion:_%'::text)))
 );
 
 

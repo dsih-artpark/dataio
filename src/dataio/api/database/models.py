@@ -286,7 +286,9 @@ class OTPToken(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(Text, nullable=False)
     code = Column(Text, nullable=False)
-    purpose = Column(Text, nullable=False)  # 'login', 'verify_email', 'invite'
+    # 'login', 'registration', 'account_deletion', 'dataset_deletion:<ds_id>', ...
+    # (allowed values: otp_tokens_purpose_check, migrations 010 and 025)
+    purpose = Column(Text, nullable=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     expires_at = Column(DateTime, nullable=False)
     used_at = Column(DateTime, nullable=True)

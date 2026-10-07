@@ -11,3 +11,7 @@ Related note:
 - they have now been patched in place to register with `add_migration(...)` so
   environments missing them in `db_migration_history` can apply them safely on
   the next runner execution
+- the schema from `008_registration_and_verification.sql` (the
+  `magic_link_tokens` table and the `users` verification columns) is now
+  created idempotently at the top of `011_invitation_magic_links.sql`, so a
+  fresh database can be built with `uv run all-migrations`

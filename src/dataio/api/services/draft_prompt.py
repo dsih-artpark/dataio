@@ -514,6 +514,13 @@ def parse_llm_output(text: str) -> tuple[dict, list[dict]]:
         flags_doc = yaml.safe_load(flags_text) or {}
     except yaml.YAMLError as exc:
         raise ValueError(f"Flags block is not valid YAML: {exc}") from exc
-    flags = flags_doc.get("flags", []) if isinstance(flags_doc, dict) else []
+    flags = flags_doc.get("flags") if isinstance(flags_doc, dict) else []
+    # "flags:" with nothing under it parses as None and means no flags. Any
+    # other shape is malformed output: raise ValueError so the caller retries
+    # instead of crashing later with a TypeError the retry doesn't catch.
+    if flags is None:
+        flags = []
+    if not isinstance(flags, list) or not all(isinstance(flag, dict) for flag in flags):
+        raise ValueError("Flags block must be a list of mappings with 'field' and 'reason' keys")
 
     return manifest_dict, flags

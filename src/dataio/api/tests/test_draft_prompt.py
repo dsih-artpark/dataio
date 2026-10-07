@@ -240,6 +240,27 @@ flags: []
     assert flags == []
 
 
+def test_parse_llm_output_treats_an_empty_flags_key_as_no_flags():
+    # "flags:" with no items parses as None; it used to crash generation
+    # later with a TypeError that the retry loop didn't catch.
+    _, flags = parse_llm_output("---MANIFEST---\ndatasetTitle: Foo\n---FLAGS---\nflags:\n")
+    assert flags == []
+
+
+@pytest.mark.parametrize(
+    "flags_block",
+    [
+        "flags: not a list\n",
+        "flags:\n  - just a string\n",
+        "flags: {field: x, reason: y}\n",
+    ],
+)
+def test_parse_llm_output_raises_value_error_for_malformed_flags(flags_block):
+    # ValueError is what _complete_with_retry catches to re-prompt the model.
+    with pytest.raises(ValueError):
+        parse_llm_output(f"---MANIFEST---\ndatasetTitle: Foo\n---FLAGS---\n{flags_block}")
+
+
 def test_parse_llm_output_raises_value_error_on_malformed_manifest_yaml():
     # Reproduces the exact failure the user hit in production: a multi-line
     # plain-scalar list item (no block-scalar marker) directly followed by a

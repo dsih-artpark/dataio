@@ -32,6 +32,10 @@ DRAFTER_REASONING_EFFORT = os.getenv("DRAFTER_REASONING_EFFORT")
 DRAFTER_REASONING_MAX_TOKENS = os.getenv("DRAFTER_REASONING_MAX_TOKENS")
 
 
+class OpenRouterError(RuntimeError):
+    """OpenRouter accepted the request but returned no completion."""
+
+
 class DraftCompletion(BaseModel):
     text: str
     model: str
@@ -90,7 +94,7 @@ class OpenRouterDraftClient:
             # upstream provider fails after accepting the request (e.g. a
             # provider-side error or moderation block) - the failure reason
             # lives in body["error"], not in the HTTP status.
-            raise RuntimeError(f"OpenRouter returned no choices: {body.get('error', body)}")
+            raise OpenRouterError(f"OpenRouter returned no choices: {body.get('error', body)}")
         choice = body["choices"][0]["message"]
         usage = body.get("usage", {})
         return DraftCompletion(

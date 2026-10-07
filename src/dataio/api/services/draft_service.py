@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import re
 from datetime import date
 from pathlib import Path
@@ -20,12 +21,11 @@ from pydantic import BaseModel
 
 from dataio.api.database import functions as database
 from dataio.api.database.functions import (
-    create_reserved_dataset_id,
-    create_reserved_raw_dataset_id,
     get_collection_by_identifier,
-    suggest_next_dataset_id,
+    reserve_next_dataset_id,
+    reserve_next_raw_dataset_id,
 )
-from dataio.api.database.rds_id_helpers import resolve_rds_id
+from dataio.api.database.rds_id_helpers import resolve_category_id
 from dataio.api.services.csv_profiler import CsvProfile, profile_csv
 from dataio.api.services.digitization_log import load_digitization_log
 from dataio.api.services.draft_prompt import (
@@ -38,6 +38,8 @@ from dataio.api.services.field_inference import infer_fixed_column_description, 
 from dataio.api.services.manifest_v2_conversion import convert_v2_manifest_to_contract
 from dataio.api.services.openrouter_draft_client import OpenRouterDraftClient
 from dataio.validate.sdk import DataIOValidator
+
+logger = logging.getLogger(__name__)
 
 # Every real metadata.yaml uses this literal value - it's a schema version
 # marker, not something that varies per dataset or that the LLM has any
@@ -168,6 +170,10 @@ class DraftRecord(BaseModel):
 MAX_COMPLETION_ATTEMPTS = 3
 
 
+class DraftOutputError(ValueError):
+    """Every LLM attempt returned output that could not be parsed into a draft."""
+
+
 def _complete_with_retry(client: OpenRouterDraftClient, system_prompt: str, user_prompt: str) -> tuple[dict, list]:
     """Calls the LLM and parses its output, retrying with a corrective
     follow-up turn (up to MAX_COMPLETION_ATTEMPTS total calls) if the
@@ -200,7 +206,11 @@ def _complete_with_retry(client: OpenRouterDraftClient, system_prompt: str, user
                 "block scalar (using '|' or '>'), never as plain multi-line "
                 "text that isn't quoted or block-scalared."
             )
-    raise last_error  # every attempt failed to parse; surface the last error
+    # every attempt failed to parse; surface the last error
+    raise DraftOutputError(
+        f"The model's reply could not be read after {MAX_COMPLETION_ATTEMPTS} attempts: "
+        f"{last_error}"
+    ) from last_error
 
 
 # Target combined per-table prompt-context size per LLM call, well under
@@ -254,6 +264,20 @@ _SINGLE_SOURCE_DATASET_FIELDS = (
 _MERGED_LIST_FIELDS = ("source", "references", "joinKeys", "comments")
 
 
+def _mapping(value) -> dict:
+    """value if it is a mapping, else {}. LLM output can put a string or list
+    where a mapping belongs; the merges below must not crash on it."""
+    return value if isinstance(value, dict) else {}
+
+
+def _list(value) -> list:
+    """value as a list: a lone string becomes a one-item list (iterating it
+    would split it into characters), anything else that isn't a list, []."""
+    if isinstance(value, str):
+        return [value]
+    return value if isinstance(value, list) else []
+
+
 def _merge_batch_manifests(batch_results: list[tuple[dict, list]]) -> tuple[dict, list]:
     """Combines each batch's (manifest_dict, flags) - produced by separate
     LLM calls over disjoint subsets of a dataset's tables (see
@@ -283,23 +307,23 @@ def _merge_batch_manifests(batch_results: list[tuple[dict, list]]) -> tuple[dict
 
     for manifest_dict, flags in batch_results:
         all_flags.extend(flags)
-        merged_tables.update(manifest_dict.get("tables") or {})
+        merged_tables.update(_mapping(manifest_dict.get("tables")))
 
-        tags = manifest_dict.get("tags") or {}
-        for concept in tags.get("concept") or []:
+        tags = _mapping(manifest_dict.get("tags"))
+        for concept in _list(tags.get("concept")):
             if concept not in merged_tags_concept:
                 merged_tags_concept.append(concept)
-        for epi_type in tags.get("epiType") or []:
+        for epi_type in _list(tags.get("epiType")):
             if epi_type not in merged_tags_epi_type:
                 merged_tags_epi_type.append(epi_type)
 
-        for name, definition in (manifest_dict.get("enumDefinitions") or {}).items():
+        for name, definition in _mapping(manifest_dict.get("enumDefinitions")).items():
             merged_enum_defs.setdefault(name, definition)
-        for name, definition in (manifest_dict.get("canonicalEnumDefinitions") or {}).items():
+        for name, definition in _mapping(manifest_dict.get("canonicalEnumDefinitions")).items():
             merged_canonical_enum_defs.setdefault(name, definition)
 
         for field in _MERGED_LIST_FIELDS:
-            for item in manifest_dict.get(field) or []:
+            for item in _list(manifest_dict.get(field)):
                 dedup_key = item if isinstance(item, str) else yaml.safe_dump(item, sort_keys=True)
                 if dedup_key not in seen_list_values[field]:
                     seen_list_values[field].add(dedup_key)
@@ -346,16 +370,16 @@ def _resolve_dataset_id(dataset_id: str | None, collection_id: str, created_by: 
     """Existing dataset_id is used as-is (updating that dataset's metadata).
     Otherwise mints and reserves a new one now, not at approval time - the
     validator requires a real, correctly-formatted datasetID on every
-    manifest it checks, draft or not. Reserving it (not just computing it)
-    stops two concurrent draft generations from being handed the same ID;
-    create_dataset already releases the reservation automatically once the
-    dataset is actually created.
+    manifest it checks, draft or not. The number is computed and reserved
+    in one locked step, so two concurrent draft generations always get
+    different IDs; create_dataset releases the reservation once the dataset
+    is actually created.
     """
     if dataset_id:
         return dataset_id
-    new_id = suggest_next_dataset_id(collection_id)
-    create_reserved_dataset_id(new_id, collection_id, "Reserved for LLM-drafted metadata.yaml", created_by)
-    return new_id
+    return reserve_next_dataset_id(
+        collection_id, "Reserved for LLM-drafted metadata.yaml", created_by
+    )
 
 
 def _resolve_and_reserve_raw_dataset_id(
@@ -363,17 +387,41 @@ def _resolve_and_reserve_raw_dataset_id(
 ) -> str:
     """Same pattern as _resolve_dataset_id, for rds_id: an existing
     raw_dataset_id (passed by regenerate_draft, reusing the original
-    draft's id) is used as-is; otherwise a fresh one is resolved and
-    reserved immediately - suggest_next_raw_dataset_id_for_category alone
-    has no side effects (it also backs the read-only "Next ID" admin tool,
-    which must never reserve anything), so two concurrent draft generations
-    in the same category would otherwise be handed the same suggestion.
+    draft's id) is used as-is; otherwise the category's next rds_id is
+    reserved in one locked step (suggest_next_raw_dataset_id_for_category
+    alone has no side effects - it also backs the read-only "Next ID" admin
+    tool, which must never reserve anything).
     """
     if raw_dataset_id:
         return raw_dataset_id
-    new_id = resolve_rds_id({"category": {"ID": category_id}, "collection": {"ID": collection_id}})
-    create_reserved_raw_dataset_id(new_id, category_id, "Reserved for LLM-drafted metadata.yaml", created_by)
-    return new_id
+    category = resolve_category_id(
+        {"category": {"ID": category_id}, "collection": {"ID": collection_id}}
+    )
+    if not category:
+        raise ValueError(
+            "Cannot resolve rds_id: metadata has no category.ID and no collection.ID "
+            "to fall back to."
+        )
+    return reserve_next_raw_dataset_id(
+        category, "Reserved for LLM-drafted metadata.yaml", created_by
+    )
+
+
+def _release_new_reservations(dataset_id: str | None, raw_dataset_id: str | None) -> None:
+    """Releases IDs a failed draft generation reserved for itself, so a
+    failure doesn't permanently skip those numbers."""
+    for release, reserved_id in (
+        (database.delete_reserved_dataset_id, dataset_id),
+        (database.delete_reserved_raw_dataset_id, raw_dataset_id),
+    ):
+        if reserved_id is None:
+            continue
+        try:
+            release(reserved_id)
+        except Exception:
+            logger.exception(
+                "Could not release reservation %s after a failed draft generation", reserved_id
+            )
 
 
 _SLUG_ID_PREFIX_RE = re.compile(r"^[a-z]{2}\d{4}ds\d{4}-?", re.IGNORECASE)
@@ -460,52 +508,60 @@ def _finalize_draft(
     # reused as-is if raw_dataset_id was passed in, e.g. by regenerate_draft)
     # the same way resolved_dataset_id is below.
     rds_id = _resolve_and_reserve_raw_dataset_id(raw_dataset_id, category_id, collection_id, created_by)
+    # IDs this call reserved itself (not ones passed in, e.g. by
+    # regenerate_draft); released again if anything below fails.
+    new_rds_reservation = None if raw_dataset_id else rds_id
+    new_ds_reservation = None
+    try:
+        resolved_dataset_id = _resolve_dataset_id(dataset_id, collection_id, created_by)
+        new_ds_reservation = None if dataset_id else resolved_dataset_id
 
-    resolved_dataset_id = _resolve_dataset_id(dataset_id, collection_id, created_by)
+        # datasetTitle: for a single-CSV dataset, use that CSV's own filename -
+        # matches the established convention (e.g. CS0007DS0112's datasetTitle
+        # is literally "consolidated-livestock-census-1997-2019", its one and
+        # only table/CSV name). With more than one CSV there's no single file to
+        # name it after (e.g. CS0026DS0111's datasetTitle "bahs-milk-production-
+        # statistics-1950-2024" names none of its ~20 table CSVs), so the
+        # generator's own proposed dataset-level title is used instead, falling
+        # back to the first table's name only if none was produced. Set before
+        # building the slug so its fallback has a real title to work from.
+        table_names = list(csv_paths_by_table.keys())
+        if len(table_names) == 1:
+            manifest_dict["datasetTitle"] = table_names[0]
+        else:
+            manifest_dict["datasetTitle"] = manifest_dict.get("datasetTitle") or table_names[0]
+        manifest_dict["datasetID"] = resolved_dataset_id
+        manifest_dict["datasetSlug"] = _build_dataset_slug(
+            resolved_dataset_id, manifest_dict.get("datasetSlug"), manifest_dict.get("datasetTitle")
+        )
+        manifest_dict["metadataSpecVersion"] = METADATA_SPEC_VERSION
+        manifest_dict["category"] = category
+        manifest_dict["collection"] = collection_field
+        manifest_dict["datasetOwner"] = data_owner_name
+        manifest_dict["lastUpdated"] = date.today().isoformat()
+        manifest_dict = _reorder_manifest_keys(manifest_dict)
 
-    # datasetTitle: for a single-CSV dataset, use that CSV's own filename -
-    # matches the established convention (e.g. CS0007DS0112's datasetTitle
-    # is literally "consolidated-livestock-census-1997-2019", its one and
-    # only table/CSV name). With more than one CSV there's no single file to
-    # name it after (e.g. CS0026DS0111's datasetTitle "bahs-milk-production-
-    # statistics-1950-2024" names none of its ~20 table CSVs), so the
-    # generator's own proposed dataset-level title is used instead, falling
-    # back to the first table's name only if none was produced. Set before
-    # building the slug so its fallback has a real title to work from.
-    table_names = list(csv_paths_by_table.keys())
-    if len(table_names) == 1:
-        manifest_dict["datasetTitle"] = table_names[0]
-    else:
-        manifest_dict["datasetTitle"] = manifest_dict.get("datasetTitle") or table_names[0]
-    manifest_dict["datasetID"] = resolved_dataset_id
-    manifest_dict["datasetSlug"] = _build_dataset_slug(
-        resolved_dataset_id, manifest_dict.get("datasetSlug"), manifest_dict.get("datasetTitle")
-    )
-    manifest_dict["metadataSpecVersion"] = METADATA_SPEC_VERSION
-    manifest_dict["category"] = category
-    manifest_dict["collection"] = collection_field
-    manifest_dict["datasetOwner"] = data_owner_name
-    manifest_dict["lastUpdated"] = date.today().isoformat()
-    manifest_dict = _reorder_manifest_keys(manifest_dict)
+        manifest_yaml = yaml.safe_dump(manifest_dict, sort_keys=False, allow_unicode=True)
+        validation_result = _validate_manifest(manifest_dict, csv_paths_by_table)
 
-    manifest_yaml = yaml.safe_dump(manifest_dict, sort_keys=False, allow_unicode=True)
-    validation_result = _validate_manifest(manifest_dict, csv_paths_by_table)
-
-    draft = database.create_manifest_draft(
-        dataset_id=resolved_dataset_id,
-        collection_id=collection_id,
-        category_id=category_id,
-        source_csv_path=_encode_csv_paths(csv_paths_by_table),
-        digitization_log_path=digitization_log_path,
-        raw_dataset_id=rds_id,
-        draft_yaml=manifest_yaml,
-        draft_json=manifest_dict,
-        flagged_fields=flags,
-        validation_result=validation_result.model_dump(),
-        llm_model_id=llm_model_id,
-        created_by=created_by,
-        superseded_by_draft_id=superseded_by_draft_id,
-    )
+        draft = database.create_manifest_draft(
+            dataset_id=resolved_dataset_id,
+            collection_id=collection_id,
+            category_id=category_id,
+            source_csv_path=_encode_csv_paths(csv_paths_by_table),
+            digitization_log_path=digitization_log_path,
+            raw_dataset_id=rds_id,
+            draft_yaml=manifest_yaml,
+            draft_json=manifest_dict,
+            flagged_fields=flags,
+            validation_result=validation_result.model_dump(),
+            llm_model_id=llm_model_id,
+            created_by=created_by,
+            superseded_by_draft_id=superseded_by_draft_id,
+        )
+    except BaseException:
+        _release_new_reservations(new_ds_reservation, new_rds_reservation)
+        raise
 
     return DraftRecord(
         draft_id=str(draft.draft_id),
@@ -577,18 +633,22 @@ def _merge_narrative_into_base(base: dict, narrative_manifest: dict) -> dict:
     merged["joinKeys"] = base["join_keys"]
     if base["canonical_enum_definitions"]:
         merged["canonicalEnumDefinitions"] = base["canonical_enum_definitions"]
-    merged["comments"] = [*base["region_gap_comments"], *(narrative_manifest.get("comments") or [])]
+    merged["comments"] = [*base["region_gap_comments"], *_list(narrative_manifest.get("comments"))]
 
-    narrative_tables = narrative_manifest.get("tables") or {}
+    narrative_tables = _mapping(narrative_manifest.get("tables"))
     merged_tables: dict[str, dict] = {}
     for table_name, base_table in base["tables"].items():
-        narrative_table = narrative_tables.get(table_name) or {}
+        narrative_table = _mapping(narrative_tables.get(table_name))
         data_dictionary = base_table["data_dictionary"]
-        narrative_data_dictionary = narrative_table.get("data_dictionary") or {}
+        narrative_data_dictionary = _mapping(narrative_table.get("data_dictionary"))
         for column_name, field in data_dictionary.items():
             if field.get("description"):
                 continue
-            llm_description = (narrative_data_dictionary.get(column_name) or {}).get("description")
+            llm_description = _mapping(narrative_data_dictionary.get(column_name)).get(
+                "description"
+            )
+            if not isinstance(llm_description, str):
+                llm_description = None
             field["description"] = llm_description or f"'{column_name}' column."
         merged_tables[table_name] = {
             "description": narrative_table.get("description", ""),
@@ -599,14 +659,14 @@ def _merge_narrative_into_base(base: dict, narrative_manifest: dict) -> dict:
     merged["tables"] = merged_tables
 
     if base["enum_definitions"]:
-        narrative_enum_defs = narrative_manifest.get("enumDefinitions") or {}
+        narrative_enum_defs = _mapping(narrative_manifest.get("enumDefinitions"))
         merged_enum_defs: dict[str, dict] = {}
         for block, base_def in base["enum_definitions"].items():
-            narrative_def = narrative_enum_defs.get(block) or {}
-            narrative_values = narrative_def.get("values") or {}
+            narrative_def = _mapping(narrative_enum_defs.get(block))
+            narrative_values = _mapping(narrative_def.get("values"))
             values = {}
             for value, base_value in base_def["values"].items():
-                llm_value_description = (narrative_values.get(value) or {}).get("description")
+                llm_value_description = _mapping(narrative_values.get(value)).get("description")
                 values[value] = {
                     **base_value,
                     "description": llm_value_description or base_value["description"],

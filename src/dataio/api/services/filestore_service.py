@@ -372,6 +372,46 @@ class FilestoreService(BaseService):
         for version_type in (VersionType.STANDARDISED, VersionType.PREPROCESSED):
             self._move_dataset_objects(old_dataset_id, new_dataset_id, version_type)
 
+    def _archive_prefix(self, dataset_id: str, version_type: VersionType, stamp: str) -> str:
+        # Outside filestore/<version>/<dataset_id>/ so that deleting or
+        # replacing the dataset never touches its own archive.
+        return f"archive/{self._get_prefix_for_dataset(dataset_id, version_type)}/{stamp}"
+
+    def list_dataset_version_files(self, dataset_id: str, version_type: VersionType) -> list[str]:
+        prefix = self._get_prefix_for_dataset(dataset_id, version_type)
+        return [key[len(prefix) + 1:] for key in self._list_dataset_objects(dataset_id, version_type)]
+
+    def archive_dataset_version(
+        self, dataset_id: str, version_type: VersionType, stamp: str
+    ) -> tuple[str, list[str]]:
+        """Copies every file of one dataset version to its archive prefix.
+        Returns the archive prefix and the copied file names."""
+        source_prefix = self._get_prefix_for_dataset(dataset_id, version_type)
+        archive_prefix = self._archive_prefix(dataset_id, version_type, stamp)
+        copied = []
+        for key in self._list_dataset_objects(dataset_id, version_type):
+            name = key[len(source_prefix) + 1:]
+            self.bucket.copy({"Bucket": self.bucket.name, "Key": key}, f"{archive_prefix}/{name}")
+            copied.append(name)
+        return archive_prefix, copied
+
+    def delete_dataset_version(self, dataset_id: str, version_type: VersionType) -> None:
+        keys = [{"Key": key} for key in self._list_dataset_objects(dataset_id, version_type)]
+        for start in range(0, len(keys), 1000):
+            self.bucket.delete_objects(Delete={"Objects": keys[start:start + 1000]})
+
+    def restore_dataset_version(
+        self, dataset_id: str, version_type: VersionType, archive_prefix: str
+    ) -> None:
+        """Replaces one dataset version's files with the copies under archive_prefix."""
+        self.delete_dataset_version(dataset_id, version_type)
+        target_prefix = self._get_prefix_for_dataset(dataset_id, version_type)
+        for obj in self.bucket.objects.filter(Prefix=f"{archive_prefix}/"):
+            if obj.key.endswith("/"):
+                continue
+            name = obj.key[len(archive_prefix) + 1:]
+            self.bucket.copy({"Bucket": self.bucket.name, "Key": obj.key}, f"{target_prefix}/{name}")
+
     def delete_dataset(self, dataset_id: str) -> None:
         keys_to_delete = []
         for version_type in (VersionType.STANDARDISED, VersionType.PREPROCESSED):

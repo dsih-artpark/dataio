@@ -24,6 +24,10 @@ from dataio.api.services.dataset_documentation_sync_service import (
     sync_dataset_documentation,
 )
 from dataio.api.services.filestore_service import FilestoreService, ValidationError
+from dataio.api.services.manifest_v2_conversion import (
+    authored_metadata_to_manifest,
+    is_authored_metadata,
+)
 from dataio.api.services.yaml_utils import stringify_yaml_dates
 from dataio.api.services.platform_manifest_validation_service import (
     apply_platform_manifest_checks,
@@ -522,6 +526,9 @@ class AdminDatasetService(BaseService):
             parsed_manifest = stringify_yaml_dates(yaml.safe_load(manifest_text))
             if not isinstance(parsed_manifest, dict):
                 raise ValidationError("Manifest must deserialize to an object")
+            if is_authored_metadata(parsed_manifest):
+                parsed_manifest = authored_metadata_to_manifest(parsed_manifest)
+                manifest_text = yaml.safe_dump(parsed_manifest, sort_keys=False, allow_unicode=True)
 
             return self._validate_and_persist_manifest(
                 dataset_id, bucket_type, manifest_text, parsed_manifest, updated_by

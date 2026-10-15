@@ -268,12 +268,14 @@ def test_web_admin_dataset_import_preview_endpoint():
             csv_files=None,
             dataset_override=None,
             raw_dataset_override=None,
+            replace_existing=False,
         ):
             recorded["user"] = user.email
             recorded["info_name"] = info_file.filename
             recorded["metadata_name"] = metadata_file.filename
             recorded["csv_count"] = len(csv_files or [])
             recorded["dataset_override"] = dataset_override
+            recorded["replace_existing"] = replace_existing
             return {
                 "dataset": {
                     "ds_id": "CUSTOM-ID",
@@ -325,6 +327,19 @@ def test_web_admin_dataset_import_preview_endpoint():
     assert response.json()["dataset"]["ds_id"] == "CUSTOM-ID"
     assert recorded["csv_count"] == 1
     assert recorded["dataset_override"]["ds_id"] == "CUSTOM-ID"
+    assert recorded["replace_existing"] is False
+
+    response = client.post(
+        "/api/v1/web/admin/datasets/import/preview",
+        files={
+            "info_file": ("info.yml", io.BytesIO(b"title: Preview Dataset\n"), "application/x-yaml"),
+            "metadata_file": ("metadata.yml", io.BytesIO(b"tables: {}\n"), "application/x-yaml"),
+        },
+        data={"replace_existing": "true"},
+    )
+
+    assert response.status_code == 200
+    assert recorded["replace_existing"] is True
 
     app.dependency_overrides.clear()
 

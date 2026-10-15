@@ -30,8 +30,10 @@ def convert_v2_field_to_manifest_field(
     manifest_field: dict[str, Any] = {
         "description": field_spec.get("description"),
         "comments": field_spec.get("comments"),
-        "nullable": field_spec.get("nullable", True),
     }
+    # Copied only when authored, so the validator can report a missing nullable.
+    if "nullable" in field_spec:
+        manifest_field["nullable"] = field_spec["nullable"]
     if field_type == "year":
         manifest_field["type"] = "date"
         manifest_field["format"] = "%Y"

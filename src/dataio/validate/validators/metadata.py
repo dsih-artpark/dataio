@@ -92,6 +92,32 @@ def validate_metadata_contract(
                 )
             )
         for field_name, field in table.dataDictionary.items():
+            field_path = f"datasetTables.{table_name}.dataDictionary.{field_name}"
+            if not (field.description and field.description.strip()):
+                result.add_finding(
+                    Finding(
+                        severity="error",
+                        code="missing_field_description",
+                        message=f"Column '{field_name}' must define a non-empty description.",
+                        path=f"{field_path}.description",
+                        table=table_name,
+                        field=field_name,
+                        rule_id="field_requires_description",
+                    )
+                )
+            # nullable has a model default, so check whether it was actually written.
+            if "nullable" not in field.model_fields_set:
+                result.add_finding(
+                    Finding(
+                        severity="error",
+                        code="missing_field_nullable",
+                        message=f"Column '{field_name}' must declare nullable: true or false.",
+                        path=f"{field_path}.nullable",
+                        table=table_name,
+                        field=field_name,
+                        rule_id="field_requires_nullable",
+                    )
+                )
             if field.enumRef and field.enumRef not in manifest.enumDefinitions:
                 result.add_finding(
                     Finding(

@@ -38,9 +38,11 @@ datasetTables:
       year:
         type: date
         format: "%Y"
+        description: Year
         nullable: false
       value:
         type: int
+        description: Value
         nullable: false
 """,
         encoding="utf-8",

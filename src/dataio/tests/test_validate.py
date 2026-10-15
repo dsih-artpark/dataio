@@ -29,18 +29,22 @@ datasetTables:
     dataDictionary:
       state.ID:
         type: regionID
+        description: State ID
         nullable: false
       year:
         type: date
         format: "%Y"
+        description: Census year
         nullable: false
       species:
         type: enum
         enumRef: livestockSpecies
+        description: Livestock species
         nullable: false
       count:
         type: int
         range: [0, 1000]
+        description: Number of animals
         nullable: false
 enumDefinitions:
   livestockSpecies:
@@ -432,3 +436,62 @@ def test_deep_check_surfaces_clean_api_error(monkeypatch):
             data_files={"livestock": "state.ID,year,species,count\nstate_29,2024,cattle,10\n"},
             deep_check=True,
         )
+
+
+COLUMN_KEYS_MANIFEST = """
+metadataSpecVersion: v2
+datasetTitle: Column Keys Manifest
+datasetSlug: ts0001ds0001-column-keys
+datasetDescription: Example
+source: Test
+category: {ID: TS, name: Test}
+collection: {ID: TS0001, name: Tests}
+datasetID: TS0001DS0001
+datasetKind: tabular
+datasetTables:
+  sample:
+    dataDictionary:
+      year:
+        type: date
+        format: "%Y"
+COLUMN_KEYS
+"""
+
+
+def test_column_without_description_is_an_error():
+    manifest = COLUMN_KEYS_MANIFEST.replace("COLUMN_KEYS", "        nullable: false")
+    result = DataIOValidator().validate_tabular(manifest=manifest, data_files={})
+    findings = [f for f in result.findings if f.code == "missing_field_description"]
+    assert len(findings) == 1
+    assert findings[0].severity == "error"
+    assert findings[0].field == "year"
+    assert not any(f.code == "missing_field_nullable" for f in result.findings)
+
+
+def test_column_with_blank_description_is_an_error():
+    manifest = COLUMN_KEYS_MANIFEST.replace(
+        "COLUMN_KEYS", '        description: "  "\n        nullable: false'
+    )
+    result = DataIOValidator().validate_tabular(manifest=manifest, data_files={})
+    assert any(f.code == "missing_field_description" for f in result.findings)
+
+
+def test_column_without_nullable_is_an_error():
+    manifest = COLUMN_KEYS_MANIFEST.replace("COLUMN_KEYS", "        description: Year")
+    result = DataIOValidator().validate_tabular(manifest=manifest, data_files={})
+    findings = [f for f in result.findings if f.code == "missing_field_nullable"]
+    assert len(findings) == 1
+    assert findings[0].severity == "error"
+    assert findings[0].path == "datasetTables.sample.dataDictionary.year.nullable"
+    assert not any(f.code == "missing_field_description" for f in result.findings)
+
+
+def test_column_with_description_and_nullable_has_no_column_key_findings():
+    manifest = COLUMN_KEYS_MANIFEST.replace(
+        "COLUMN_KEYS", "        description: Year\n        nullable: true"
+    )
+    result = DataIOValidator().validate_tabular(manifest=manifest, data_files={})
+    assert not any(
+        f.code in {"missing_field_description", "missing_field_nullable"}
+        for f in result.findings
+    )

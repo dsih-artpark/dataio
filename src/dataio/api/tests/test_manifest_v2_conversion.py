@@ -140,3 +140,25 @@ def test_converted_real_production_manifest_passes_the_existing_validator():
 
     errors = [f for f in result.findings if f.severity == "error"]
     assert errors == [], errors
+
+
+def test_convert_field_does_not_default_missing_nullable():
+    field = convert_v2_field_to_manifest_field("count", {"type": "int", "description": "Count"})
+    assert "nullable" not in field
+
+
+def test_convert_field_keeps_authored_nullable():
+    field = convert_v2_field_to_manifest_field(
+        "count", {"type": "int", "description": "Count", "nullable": True}
+    )
+    assert field["nullable"] is True
+
+
+def test_converted_manifest_without_nullable_fails_validation(tmp_path):
+    manifest = yaml.safe_load(yaml.safe_dump(V2_MANIFEST))
+    del manifest["tables"]["consolidated-livestock-census"]["data_dictionary"]["count"]["nullable"]
+    contract = convert_v2_manifest_to_contract(manifest)
+    result = DataIOValidator().validate_tabular(manifest=contract, data_files={})
+    assert any(
+        f.code == "missing_field_nullable" and f.field == "count" for f in result.findings
+    )

@@ -931,6 +931,7 @@ class ApiClient {
     csvFiles?: File[];
     datasetOverride?: Record<string, unknown>;
     rawDatasetOverride?: Record<string, unknown>;
+    replaceExisting?: boolean;
   }) {
     const formData = new FormData();
     formData.append('info_file', params.infoFile);
@@ -943,6 +944,9 @@ class ApiClient {
     }
     if (params.rawDatasetOverride) {
       formData.append('raw_dataset_override_json', JSON.stringify(params.rawDatasetOverride));
+    }
+    if (params.replaceExisting) {
+      formData.append('replace_existing', 'true');
     }
     return this.request<AdminDatasetPackagePreview>('/admin/datasets/import/preview', {
       method: 'POST',
@@ -957,6 +961,7 @@ class ApiClient {
     datasetOverride?: Record<string, unknown>;
     rawDatasetOverride?: Record<string, unknown>;
     bucketType?: string;
+    replaceExisting?: boolean;
   }) {
     const formData = new FormData();
     formData.append('info_file', params.infoFile);
@@ -971,11 +976,17 @@ class ApiClient {
       formData.append('raw_dataset_override_json', JSON.stringify(params.rawDatasetOverride));
     }
     formData.append('bucket_type', params.bucketType ?? 'STANDARDISED');
+    if (params.replaceExisting) {
+      formData.append('replace_existing', 'true');
+    }
     return this.request<{
       dataset_id: string;
       bucket_type: string;
       uploaded_tables: string[];
       manifest_uploaded: boolean;
+      replaced?: boolean;
+      archive_prefix?: string;
+      archived_files?: string[];
     }>('/admin/datasets/import/apply', {
       method: 'POST',
       body: formData,

@@ -93,6 +93,89 @@ class _ImportUndo:
     dataset_created: bool = False
 
 
+# Dataset fields a replace takes from the package. ds_id and collection_id
+# can't change in a replace, and access_level is kept as it is.
+_REPLACE_DATASET_FIELDS = (
+    "title",
+    "data_owner_name",
+    "description",
+    "spatial_coverage_region_id",
+    "spatial_resolution",
+    "temporal_coverage_start_date",
+    "temporal_coverage_end_date",
+    "temporal_resolution",
+    "additional_metadata",
+    "tags",
+)
+
+
+@dataclass
+class _ReplaceUndo:
+    """What replacing an existing dataset has changed so far, so a failure can
+    put it back. Its old files stay copied under archive_prefix."""
+
+    ds_id: str
+    rds_id: str
+    bucket_type: VersionType
+    archive_prefix: str
+    # DatasetUpdate fields that restore the dataset row as it was.
+    previous_dataset: dict
+    rds_reservation: Optional[dict] = None
+    raw_created: bool = False
+    raw_previous: Optional[dict] = None
+    dataset_updated: bool = False
+    files_removed: bool = False
+
+
+def _dataset_restore_fields(dataset) -> dict:
+    return {
+        "title": dataset.title,
+        "data_owner_name": dataset.data_owner.name if dataset.data_owner else None,
+        "description": dataset.description,
+        "spatial_coverage_region_id": dataset.spatial_coverage_region_id,
+        "spatial_resolution": dataset.spatial_resolution.value if dataset.spatial_resolution else None,
+        "temporal_coverage_start_date": (
+            dataset.temporal_coverage_start_date.isoformat()
+            if dataset.temporal_coverage_start_date
+            else None
+        ),
+        "temporal_coverage_end_date": (
+            dataset.temporal_coverage_end_date.isoformat()
+            if dataset.temporal_coverage_end_date
+            else None
+        ),
+        "temporal_resolution": dataset.temporal_resolution.value if dataset.temporal_resolution else None,
+        "additional_metadata": dataset.additional_metadata,
+        "tags": [tag.tag_name for tag in (dataset.tags or [])],
+        "raw_dataset_ids": [raw.rds_id for raw in (dataset.raw_datasets or [])],
+    }
+
+
+def _replace_failed_error(exc: Exception, ds_id: str, leftovers: list[str], archive_prefix: str) -> HTTPException:
+    """The error for a replace that failed part-way and was rolled back."""
+    detail = exc.detail if isinstance(exc, HTTPException) else None
+    status_code = exc.status_code if isinstance(exc, HTTPException) else 500
+    if isinstance(detail, dict):
+        reason = detail.get("message") or "see details"
+    else:
+        reason = detail or "unexpected error, see the server log"
+    if leftovers:
+        message = (
+            f"Replacing {ds_id} failed ({reason}) and could not be fully rolled back. "
+            f"Still to fix by hand: {'; '.join(leftovers)}. "
+            f"The old files are archived under {archive_prefix}/."
+        )
+    else:
+        message = (
+            f"Replacing {ds_id} failed ({reason}). The dataset was put back as it was, "
+            "so you can fix the problem and retry."
+        )
+    body = {"message": message, "undone": not leftovers, "leftovers": leftovers}
+    if isinstance(detail, dict) and "findings" in detail:
+        body["findings"] = detail["findings"]
+    return HTTPException(status_code=status_code, detail=body)
+
+
 def _reservation_fields(reservation, scope_field: str) -> Optional[dict]:
     if reservation is None:
         return None
@@ -226,6 +309,7 @@ class WebAdminService(BaseService):
         csv_files: Optional[List] = None,
         dataset_override: Optional[dict] = None,
         raw_dataset_override: Optional[dict] = None,
+        replace_existing: bool = False,
     ) -> dict:
         try:
             info = yaml.safe_load(info_text) or {}
@@ -371,10 +455,20 @@ class WebAdminService(BaseService):
                 custom_findings.append({"severity": "error", "code": "missing_collection", "message": "Collection ID is required.", "path": "info.collection_id"})
             elif collection is None:
                 custom_findings.append({"severity": "error", "code": "unknown_collection", "message": f"Collection '{dataset_payload['collection_id']}' does not exist.", "path": "info.collection_id"})
+            existing_dataset = (
+                session.query(Dataset).filter(Dataset.ds_id == dataset_payload["ds_id"]).first()
+                if dataset_payload["ds_id"]
+                else None
+            )
             if not dataset_payload["ds_id"]:
                 custom_findings.append({"severity": "error", "code": "missing_dataset_id", "message": "Dataset ID is required.", "path": "info.ds_id"})
+            elif replace_existing:
+                if existing_dataset is None:
+                    custom_findings.append({"severity": "error", "code": "replace_target_missing", "message": f"Dataset '{dataset_payload['ds_id']}' does not exist, so it can't be replaced. Import it as a new dataset instead.", "path": "info.ds_id"})
+                elif existing_dataset.collection is None or existing_dataset.collection.collection_id != dataset_payload["collection_id"]:
+                    custom_findings.append({"severity": "error", "code": "replace_collection_mismatch", "message": f"Dataset '{dataset_payload['ds_id']}' belongs to collection '{existing_dataset.collection.collection_id if existing_dataset.collection else 'none'}', not '{dataset_payload['collection_id']}'. A replace can't move a dataset to another collection.", "path": "info.collection_id"})
             elif (
-                session.query(Dataset).filter(Dataset.ds_id == dataset_payload["ds_id"]).first() is not None
+                existing_dataset is not None
                 and dataset_override.get("existing_dataset_id") != dataset_payload["ds_id"]
             ):
                 custom_findings.append({"severity": "error", "code": "duplicate_dataset_id", "message": f"Dataset ID '{dataset_payload['ds_id']}' already exists.", "path": "info.ds_id"})
@@ -1440,19 +1534,48 @@ class WebAdminService(BaseService):
         csv_files: Optional[List] = None,
         dataset_override: Optional[dict] = None,
         raw_dataset_override: Optional[dict] = None,
+        replace_existing: bool = False,
+        bucket_type: VersionType = VersionType.STANDARDISED,
     ) -> dict:
         self._require_admin(admin_user)
         info_text = info_file.file.read().decode("utf-8")
         metadata_text = metadata_file.file.read().decode("utf-8")
         info_file.file.seek(0)
         metadata_file.file.seek(0)
-        return self._parse_dataset_package(
+        preview = self._parse_dataset_package(
             info_text,
             metadata_text,
             csv_files=csv_files,
             dataset_override=dataset_override,
             raw_dataset_override=raw_dataset_override,
+            replace_existing=replace_existing,
         )
+        preview["replace"] = (
+            self._replace_plan(preview, bucket_type) if replace_existing else None
+        )
+        return preview
+
+    def _replace_plan(self, preview: dict, bucket_type: VersionType) -> Optional[dict]:
+        """What replacing the existing dataset would archive and change, for the preview."""
+        ds_id = preview["dataset"]["ds_id"]
+        current = database.get_dataset(ds_id) if ds_id else None
+        if current is None:
+            return None
+        current_files = self.admin_dataset_service.filestore_service.list_dataset_version_files(
+            ds_id, bucket_type
+        )
+        current_tables = {Path(name).stem for name in current_files if name.lower().endswith(".csv")}
+        new_tables = {table["table_name"] for table in preview["tables"]}
+        return {
+            "dataset_id": ds_id,
+            "bucket_type": bucket_type.value,
+            "current_files": sorted(current_files),
+            "tables_replaced": sorted(new_tables & current_tables),
+            "tables_added": sorted(new_tables - current_tables),
+            "tables_removed": sorted(current_tables - new_tables),
+            "archive_location": f"archive/filestore/{bucket_type.value}/{ds_id}/<timestamp>/",
+            "access_level_kept": current.access_level.value if current.access_level else None,
+        }
 
     def import_dataset_package(
         self,
@@ -1463,6 +1586,7 @@ class WebAdminService(BaseService):
         dataset_override: Optional[dict] = None,
         raw_dataset_override: Optional[dict] = None,
         bucket_type: VersionType = VersionType.STANDARDISED,
+        replace_existing: bool = False,
     ) -> dict:
         self._require_admin(admin_user)
         preview = self.preview_dataset_package_import(
@@ -1472,6 +1596,8 @@ class WebAdminService(BaseService):
             csv_files=csv_files,
             dataset_override=dataset_override,
             raw_dataset_override=raw_dataset_override,
+            replace_existing=replace_existing,
+            bucket_type=bucket_type,
         )
         if not preview["can_import"]:
             raise HTTPException(
@@ -1488,6 +1614,10 @@ class WebAdminService(BaseService):
         # write into the dataset's S3 folder that a failed import's undo deletes.
         try:
             with database.dataset_upload_lock(ds_id, exclusive=True):
+                if replace_existing:
+                    return self._replace_dataset_package_locked(
+                        admin_user, preview, csv_files, bucket_type
+                    )
                 return self._import_dataset_package_locked(
                     admin_user, preview, csv_files, bucket_type
                 )
@@ -1592,6 +1722,185 @@ class WebAdminService(BaseService):
             "uploaded_tables": uploaded_tables,
             "manifest_uploaded": True,
         }
+
+    def _replace_dataset_package_locked(
+        self, admin_user: User, preview: dict, csv_files: List, bucket_type: VersionType
+    ) -> dict:
+        """Replaces an existing dataset's files and details with the package,
+        keeping its ID, collection, access level, permissions and groups.
+        The old files are archived first; a failure puts the dataset back."""
+        raw_dataset_payload = preview["raw_dataset"]
+        rds_id = raw_dataset_payload["rds_id"]
+        ds_id = preview["dataset"]["ds_id"]
+        current = database.get_dataset(ds_id)
+        if current is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Dataset {ds_id} does not exist, so it can't be replaced.",
+            )
+        previous_dataset = _dataset_restore_fields(current)
+
+        filestore = self.admin_dataset_service.filestore_service
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        try:
+            archive_prefix, archived_files = filestore.archive_dataset_version(
+                ds_id, bucket_type, stamp
+            )
+        except Exception as exc:
+            logger.exception("Archiving dataset %s before a replace failed", ds_id)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Could not archive the current files of {ds_id}, so nothing was replaced.",
+            ) from exc
+
+        existing_raw = database.get_raw_dataset_by_identifier(rds_id)
+        undo = _ReplaceUndo(
+            ds_id=ds_id,
+            rds_id=rds_id,
+            bucket_type=bucket_type,
+            archive_prefix=archive_prefix,
+            previous_dataset=previous_dataset,
+            rds_reservation=(
+                None
+                if existing_raw
+                else _reservation_fields(
+                    database.get_reserved_raw_dataset_id(rds_id), "category_id"
+                )
+            ),
+        )
+        try:
+            if existing_raw:
+                undo.raw_previous = {"title": existing_raw.title, "source": existing_raw.source}
+                self.admin_dataset_service.update_raw_dataset(
+                    rds_id,
+                    RawDatasetUpdate(
+                        title=raw_dataset_payload["title"],
+                        source=raw_dataset_payload["source"],
+                    ),
+                )
+            else:
+                self.admin_dataset_service.create_raw_dataset(
+                    RawDatasetCreate(**raw_dataset_payload)
+                )
+                undo.raw_created = True
+
+            # Existing raw links are kept; the package's raw dataset is added.
+            raw_dataset_ids = list(previous_dataset["raw_dataset_ids"])
+            if rds_id not in raw_dataset_ids:
+                raw_dataset_ids.append(rds_id)
+            dataset_update = {
+                field: preview["dataset"].get(field) for field in _REPLACE_DATASET_FIELDS
+            }
+            dataset_update["raw_dataset_ids"] = raw_dataset_ids
+            self.admin_dataset_service.update_dataset(ds_id, DatasetUpdate(**dataset_update))
+            undo.dataset_updated = True
+
+            # Set first: a delete that fails part-way has already removed files,
+            # and restoring from the archive is safe even if none were removed.
+            undo.files_removed = True
+            filestore.delete_dataset_version(ds_id, bucket_type)
+
+            table_files = {
+                Path(file.filename or "").stem: file for file in csv_files if file.filename
+            }
+            uploaded_tables = []
+            for table in preview["tables"]:
+                table_file = table_files.get(table["table_name"])
+                if table_file is None:
+                    continue
+                table_file.file.seek(0)
+                metadata_upload = UploadFile(
+                    filename="table-metadata.json",
+                    file=BytesIO(json.dumps(table["table_metadata"]).encode("utf-8")),
+                )
+                self.admin_dataset_service.create_dataset_table(
+                    ds_id,
+                    bucket_type,
+                    table_file,
+                    metadata_upload,
+                    hold_upload_lock=False,  # this replace already holds it
+                )
+                uploaded_tables.append(table["table_name"])
+
+            manifest_upload = UploadFile(
+                filename="manifest.yaml",
+                file=BytesIO(preview["manifest_yaml"].encode("utf-8")),
+            )
+            self.admin_dataset_service.upsert_dataset_manifest(
+                ds_id,
+                bucket_type,
+                manifest_upload,
+                admin_user.email,
+                hold_upload_lock=False,  # this replace already holds it
+            )
+        except Exception as exc:
+            logger.exception("Replacing dataset %s failed; rolling it back", ds_id)
+            leftovers = self._undo_dataset_replace(undo)
+            raise _replace_failed_error(exc, ds_id, leftovers, archive_prefix) from exc
+
+        return {
+            "dataset_id": ds_id,
+            "bucket_type": bucket_type.value,
+            "uploaded_tables": uploaded_tables,
+            "manifest_uploaded": True,
+            "replaced": True,
+            "archive_prefix": archive_prefix,
+            "archived_files": archived_files,
+        }
+
+    def _undo_dataset_replace(self, undo: "_ReplaceUndo") -> list[str]:
+        """Puts a dataset back after a failed replace, newest change first.
+        Returns the steps that could not be undone, for manual cleanup."""
+        leftovers: list[str] = []
+        filestore = self.admin_dataset_service.filestore_service
+
+        def attempt(description: str, action) -> None:
+            try:
+                action()
+            except Exception:
+                logger.exception("Could not undo failed replace step: %s", description)
+                leftovers.append(description)
+
+        if undo.files_removed:
+            attempt(
+                f"restore the files of dataset {undo.ds_id} from {undo.archive_prefix}/",
+                lambda: filestore.restore_dataset_version(
+                    undo.ds_id, undo.bucket_type, undo.archive_prefix
+                ),
+            )
+        if undo.dataset_updated:
+            attempt(
+                f"restore the details of dataset {undo.ds_id}",
+                lambda: database.update_dataset(
+                    undo.ds_id, DatasetUpdate(**undo.previous_dataset)
+                ),
+            )
+        if undo.raw_created:
+            attempt(
+                f"delete raw dataset {undo.rds_id}",
+                lambda: database.delete_raw_dataset(undo.rds_id),
+            )
+            if undo.rds_reservation is not None:
+                attempt(
+                    f"re-reserve raw dataset ID {undo.rds_id}",
+                    lambda: database.create_reserved_raw_dataset_id(
+                        undo.rds_id, **undo.rds_reservation
+                    ),
+                )
+        elif undo.raw_previous is not None:
+            attempt(
+                f"restore title and source of raw dataset {undo.rds_id}",
+                lambda: database.update_raw_dataset(
+                    undo.rds_id, RawDatasetUpdate(**undo.raw_previous)
+                ),
+            )
+        if undo.files_removed:
+            # The cached manifest and data dictionary are rebuilt from the restored files.
+            attempt(
+                f"refresh the documentation cache of dataset {undo.ds_id}",
+                lambda: self.admin_dataset_service.refresh_dataset_documentation_cache(undo.ds_id),
+            )
+        return leftovers
 
     def _undo_dataset_import(self, undo: "_ImportUndo") -> list[str]:
         """Removes what a failed import_dataset_package wrote, newest first,

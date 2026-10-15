@@ -552,3 +552,211 @@ def test_manual_uploads_take_the_shared_lock_and_refuse_during_an_import(monkeyp
     assert exc_info.value.status_code == 409
     assert "being imported" in exc_info.value.detail
     assert taken == [False]  # shared, so manual uploads don't block each other
+
+
+# --- import_dataset_package(replace_existing=True) ------------------------------
+
+ARCHIVE_PREFIX = "archive/filestore/STANDARDISED/CS0007DS0999/20261015T000000Z"
+
+
+def _current_dataset():
+    return SimpleNamespace(
+        title="Old title",
+        data_owner=SimpleNamespace(name="Old owner"),
+        description="Old description",
+        spatial_coverage_region_id="state_29",
+        spatial_resolution=SimpleNamespace(value="DISTRICT"),
+        temporal_coverage_start_date=None,
+        temporal_coverage_end_date=None,
+        temporal_resolution=SimpleNamespace(value="YEAR"),
+        additional_metadata=None,
+        tags=[SimpleNamespace(tag_name="old-tag")],
+        raw_datasets=[SimpleNamespace(rds_id="CSRDS0001")],
+        access_level=SimpleNamespace(value="VIEW"),
+    )
+
+
+class _PackageReplace(_PackageImport):
+    """_PackageImport for replace_existing=True, with the replace-only steps stubbed."""
+
+    def __init__(self, monkeypatch, *, current=True, fail_at=(), **kwargs):
+        super().__init__(monkeypatch, fail_at=fail_at, **kwargs)
+        db = "dataio.api.services.web_admin_service.database"
+        monkeypatch.setattr(f"{db}.get_dataset", lambda ds_id: _current_dataset() if current else None)
+        filestore = self.service.admin_dataset_service.filestore_service
+        admin = self.service.admin_dataset_service
+
+        def archive(ds_id, bucket_type, stamp):
+            self.calls.append(("archive", (ds_id, bucket_type, stamp), {}))
+            if "archive" in self.fail_at:
+                raise RuntimeError("S3 copy failed")
+            return ARCHIVE_PREFIX, ["foo.csv", "metadata.json"]
+
+        monkeypatch.setattr(filestore, "archive_dataset_version", archive)
+        monkeypatch.setattr(filestore, "delete_dataset_version", self._step("delete_version"))
+        monkeypatch.setattr(filestore, "restore_dataset_version", self._step("undo:restore_files"))
+        monkeypatch.setattr(admin, "update_dataset", self._step("update_dataset"))
+        monkeypatch.setattr(admin, "refresh_dataset_documentation_cache", self._step("undo:refresh_cache"))
+        monkeypatch.setattr(f"{db}.update_dataset", self._step("undo:restore_dataset"))
+
+    def run(self):
+        info = SimpleNamespace(file=None)
+        csv = SimpleNamespace(filename="foo.csv", file=BytesIO(b"a,b\n1,2\n"))
+        return self.service.import_dataset_package(ADMIN_USER, info, info, [csv], replace_existing=True)
+
+
+def test_replace_archives_then_swaps_files_and_keeps_the_dataset(monkeypatch):
+    package = _PackageReplace(monkeypatch, s3_has_files=True)
+
+    result = package.run()
+
+    assert package.names() == [
+        "archive", "create_raw_dataset", "update_dataset", "delete_version",
+        "create_dataset_table", "upsert_dataset_manifest",
+    ]
+    assert "create_dataset" not in package.names()
+    assert result["replaced"] is True
+    assert result["archive_prefix"] == ARCHIVE_PREFIX
+    assert result["archived_files"] == ["foo.csv", "metadata.json"]
+    assert result["uploaded_tables"] == ["foo"]
+    assert package.locks[0] == ("acquired", DS_ID, True)
+
+
+def test_replace_updates_details_but_keeps_access_level_and_raw_links(monkeypatch):
+    package = _PackageReplace(monkeypatch)
+
+    package.run()
+
+    (ds_id, update), _ = package.call("update_dataset")
+    assert ds_id == DS_ID
+    assert update.title == "Foo"
+    assert update.data_owner_name == "Owner"
+    assert "access_level" not in update.model_fields_set
+    assert update.ds_id is None and update.collection_id is None
+    assert update.raw_dataset_ids == ["CSRDS0001", RDS_ID]
+
+
+def test_replace_refuses_a_dataset_that_does_not_exist(monkeypatch):
+    package = _PackageReplace(monkeypatch, current=False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        package.run()
+
+    assert exc_info.value.status_code == 404
+    assert package.calls == []
+
+
+def test_replace_changes_nothing_when_archiving_fails(monkeypatch):
+    package = _PackageReplace(monkeypatch, fail_at={"archive"})
+
+    with pytest.raises(HTTPException) as exc_info:
+        package.run()
+
+    assert exc_info.value.status_code == 500
+    assert "nothing was replaced" in exc_info.value.detail
+    assert package.names() == ["archive"]
+
+
+def test_replace_puts_everything_back_when_a_table_upload_fails(monkeypatch):
+    package = _PackageReplace(monkeypatch, fail_at={"create_dataset_table"})
+
+    with pytest.raises(HTTPException) as exc_info:
+        package.run()
+
+    assert package.names() == [
+        "archive", "create_raw_dataset", "update_dataset", "delete_version", "create_dataset_table",
+        "undo:restore_files", "undo:restore_dataset",
+        "undo:delete_raw_dataset", "undo:reserve_raw_dataset_id",
+        "undo:refresh_cache",
+    ]
+    assert package.call("undo:restore_files")[0] == (DS_ID, VersionType.STANDARDISED, ARCHIVE_PREFIX)
+    (ds_id, previous), _ = package.call("undo:restore_dataset")
+    assert ds_id == DS_ID
+    assert previous.title == "Old title"
+    assert previous.tags == ["old-tag"]
+    assert previous.raw_dataset_ids == ["CSRDS0001"]
+    detail = exc_info.value.detail
+    assert detail["undone"] is True
+    assert "put back as it was" in detail["message"]
+
+
+def test_replace_restores_an_existing_raw_dataset_and_reports_leftovers(monkeypatch):
+    existing = SimpleNamespace(rds_id=RDS_ID, title="Old raw title", source="Old source")
+    package = _PackageReplace(
+        monkeypatch, existing_raw=existing, fail_at={"upsert_dataset_manifest", "undo:restore_files"}
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        package.run()
+
+    assert "undo:delete_raw_dataset" not in package.names()
+    (restored_id, restored_fields), _ = package.call("undo:restore_raw_dataset")
+    assert (restored_id, restored_fields.title) == (RDS_ID, "Old raw title")
+    detail = exc_info.value.detail
+    assert detail["undone"] is False
+    assert any("restore the files" in step for step in detail["leftovers"])
+    assert ARCHIVE_PREFIX in detail["message"]
+
+
+def test_replace_does_not_touch_files_or_details_when_the_raw_dataset_step_fails(monkeypatch):
+    package = _PackageReplace(monkeypatch, fail_at={"create_raw_dataset"})
+
+    with pytest.raises(HTTPException):
+        package.run()
+
+    names = package.names()
+    assert "delete_version" not in names
+    assert "undo:restore_files" not in names
+    assert "undo:restore_dataset" not in names
+    assert "undo:refresh_cache" not in names
+
+
+def test_replace_plan_lists_what_will_be_archived_and_changed(monkeypatch):
+    service = _service()
+    monkeypatch.setattr(
+        "dataio.api.services.web_admin_service.database.get_dataset", lambda ds_id: _current_dataset()
+    )
+    monkeypatch.setattr(
+        service.admin_dataset_service.filestore_service,
+        "list_dataset_version_files",
+        lambda ds_id, bucket_type: ["keep.csv", "old.csv", "metadata.json"],
+    )
+    preview = {
+        "dataset": {"ds_id": DS_ID},
+        "tables": [{"table_name": "keep"}, {"table_name": "new"}],
+    }
+
+    plan = service._replace_plan(preview, VersionType.STANDARDISED)
+
+    assert plan["current_files"] == ["keep.csv", "metadata.json", "old.csv"]
+    assert plan["tables_replaced"] == ["keep"]
+    assert plan["tables_added"] == ["new"]
+    assert plan["tables_removed"] == ["old"]
+    assert plan["access_level_kept"] == "VIEW"
+    assert plan["archive_location"] == f"archive/filestore/STANDARDISED/{DS_ID}/<timestamp>/"
+
+
+def test_replace_restores_files_when_the_delete_itself_fails_part_way(monkeypatch):
+    package = _PackageReplace(monkeypatch, fail_at={"delete_version"})
+
+    with pytest.raises(HTTPException) as exc_info:
+        package.run()
+
+    names = package.names()
+    assert names.index("delete_version") < names.index("undo:restore_files")
+    assert "undo:refresh_cache" in names
+    assert exc_info.value.detail["undone"] is True
+
+
+def test_replace_rollback_passes_every_field_so_empty_ones_are_restored(monkeypatch):
+    # database.update_dataset writes fields by model_fields_set, so a previous
+    # None (e.g. no temporal coverage) must be passed explicitly to restore it.
+    package = _PackageReplace(monkeypatch, fail_at={"create_dataset_table"})
+
+    with pytest.raises(HTTPException):
+        package.run()
+
+    (_, previous), _ = package.call("undo:restore_dataset")
+    assert {"description", "temporal_coverage_start_date", "temporal_coverage_end_date",
+            "additional_metadata"} <= previous.model_fields_set
+    assert previous.temporal_coverage_start_date is None

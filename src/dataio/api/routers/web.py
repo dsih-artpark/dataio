@@ -1473,10 +1473,13 @@ def admin_preview_dataset_import(
     csv_files: List[UploadFile] = File(default=[]),
     dataset_override_json: Optional[str] = Form(default=None),
     raw_dataset_override_json: Optional[str] = Form(default=None),
+    bucket_type: VersionType = Form(default=VersionType.STANDARDISED),
+    replace_existing: bool = Form(default=False),
     user: User = Depends(get_current_web_user),
     admin_service: WebAdminService = Depends(WebAdminService),
 ):
-    """Preview a dataset package import from info.yml, metadata.yml, and optional CSV files."""
+    """Preview a dataset package import from info.yml, metadata.yml, and optional CSV files.
+    With replace_existing, preview replacing an existing dataset instead."""
     dataset_override = json.loads(dataset_override_json) if dataset_override_json else None
     raw_dataset_override = json.loads(raw_dataset_override_json) if raw_dataset_override_json else None
     return admin_service.preview_dataset_package_import(
@@ -1486,6 +1489,8 @@ def admin_preview_dataset_import(
         csv_files=csv_files,
         dataset_override=dataset_override,
         raw_dataset_override=raw_dataset_override,
+        replace_existing=replace_existing,
+        bucket_type=bucket_type,
     )
 
 
@@ -1497,10 +1502,13 @@ def admin_apply_dataset_import(
     dataset_override_json: Optional[str] = Form(default=None),
     raw_dataset_override_json: Optional[str] = Form(default=None),
     bucket_type: VersionType = Form(default=VersionType.STANDARDISED),
+    replace_existing: bool = Form(default=False),
     user: User = Depends(get_current_web_user),
     admin_service: WebAdminService = Depends(WebAdminService),
 ):
-    """Create a dataset from an uploaded package and upload the referenced CSV tables."""
+    """Create a dataset from an uploaded package and upload the referenced CSV tables.
+    With replace_existing, replace an existing dataset's files and details instead,
+    archiving its old files first."""
     dataset_override = json.loads(dataset_override_json) if dataset_override_json else None
     raw_dataset_override = json.loads(raw_dataset_override_json) if raw_dataset_override_json else None
     return admin_service.import_dataset_package(
@@ -1511,6 +1519,7 @@ def admin_apply_dataset_import(
         dataset_override=dataset_override,
         raw_dataset_override=raw_dataset_override,
         bucket_type=bucket_type,
+        replace_existing=replace_existing,
     )
 
 

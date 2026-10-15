@@ -40,6 +40,8 @@ Read manifest:
 GET /api/v1/admin/datasets/{dataset_id}/{bucket_type}/manifest
 ```
 
+The upload can be either a platform manifest (`datasetTables` / `dataDictionary`) or a curator-authored `metadata.yaml` (`tables` / `data_dictionary`). An authored `metadata.yaml` is converted to the platform shape first, the same way the package import does it: `datasetKind: tabular` is added, each table gets `path: <table>.csv`, `year` columns become `date` with `"%Y"`, and a null `enumDefinitions` is dropped.
+
 The write path:
 
 1. validates the uploaded manifest
@@ -71,6 +73,23 @@ Get the stored manifest:
 manifest = client.get_manifest("TS0001DS0001", "STANDARDISED")
 ```
 
+## Replacing an Existing Dataset
+
+To replace both the CSV files and the metadata of a dataset that already exists, use **Import Dataset Package** in the admin UI with **Replace an existing dataset** ticked. The routes take a `replace_existing=true` form field:
+
+```text
+POST /api/v1/web/admin/datasets/import/preview
+POST /api/v1/web/admin/datasets/import/apply
+```
+
+The preview lists the files that will be archived and the tables that will be replaced, added and removed. The apply step, for a dataset whose ID and collection match the package:
+
+1. copies the dataset's current files to `archive/filestore/<bucket_type>/<dataset_id>/<UTC timestamp>/`, outside the dataset folder
+2. updates the dataset's details (title, owner, description, coverage, resolution, tags, additional metadata) from `info.yml`, and adds the package's raw dataset to its raw-dataset links
+3. removes the dataset's old files and uploads the package CSVs and the converted manifest
+
+The dataset ID, collection, access level, user permissions and group memberships are not changed. If a step fails, DataIO tries to restore the old files from the archive and put the dataset's details back. If part of that rollback also fails, the error lists the steps still to do by hand and the archive location; use the archive copy to finish recovery. The archive copy is always kept; remove it once the replacement has been checked.
+
 ## Dataset Folder Uploads
 
-If a dataset folder contains `manifest.yaml`, the admin SDK upload flow will upload it automatically after dataset creation and before table uploads.
+If a dataset folder contains `manifest.yaml`, the admin SDK upload flow will try to upload it after dataset creation and before table uploads. The upload is validated against the dataset's stored CSVs, which don't exist yet at that point, so it fails. `metadata.yaml` itself is not sent as a manifest. Use Import Dataset Package in the admin UI instead, or upload the manifest after the tables.

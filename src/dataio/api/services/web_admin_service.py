@@ -1795,8 +1795,10 @@ class WebAdminService(BaseService):
             self.admin_dataset_service.update_dataset(ds_id, DatasetUpdate(**dataset_update))
             undo.dataset_updated = True
 
-            filestore.delete_dataset_version(ds_id, bucket_type)
+            # Set first: a delete that fails part-way has already removed files,
+            # and restoring from the archive is safe even if none were removed.
             undo.files_removed = True
+            filestore.delete_dataset_version(ds_id, bucket_type)
 
             table_files = {
                 Path(file.filename or "").stem: file for file in csv_files if file.filename

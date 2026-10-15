@@ -734,3 +734,29 @@ def test_replace_plan_lists_what_will_be_archived_and_changed(monkeypatch):
     assert plan["tables_removed"] == ["old"]
     assert plan["access_level_kept"] == "VIEW"
     assert plan["archive_location"] == f"archive/filestore/STANDARDISED/{DS_ID}/<timestamp>/"
+
+
+def test_replace_restores_files_when_the_delete_itself_fails_part_way(monkeypatch):
+    package = _PackageReplace(monkeypatch, fail_at={"delete_version"})
+
+    with pytest.raises(HTTPException) as exc_info:
+        package.run()
+
+    names = package.names()
+    assert names.index("delete_version") < names.index("undo:restore_files")
+    assert "undo:refresh_cache" in names
+    assert exc_info.value.detail["undone"] is True
+
+
+def test_replace_rollback_passes_every_field_so_empty_ones_are_restored(monkeypatch):
+    # database.update_dataset writes fields by model_fields_set, so a previous
+    # None (e.g. no temporal coverage) must be passed explicitly to restore it.
+    package = _PackageReplace(monkeypatch, fail_at={"create_dataset_table"})
+
+    with pytest.raises(HTTPException):
+        package.run()
+
+    (_, previous), _ = package.call("undo:restore_dataset")
+    assert {"description", "temporal_coverage_start_date", "temporal_coverage_end_date",
+            "additional_metadata"} <= previous.model_fields_set
+    assert previous.temporal_coverage_start_date is None

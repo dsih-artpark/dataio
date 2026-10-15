@@ -11,8 +11,9 @@ class _FakeBucket:
 
     name = "test-bucket"
 
-    def __init__(self, objects: dict[str, bytes]):
+    def __init__(self, objects: dict[str, bytes], undeletable: set[str] = frozenset()):
         self.store = dict(objects)
+        self.undeletable = set(undeletable)
         self.objects = SimpleNamespace(filter=self._filter)
 
     def _filter(self, Prefix: str):
@@ -21,14 +22,20 @@ class _FakeBucket:
     def copy(self, source: dict, key: str) -> None:
         self.store[key] = self.store[source["Key"]]
 
-    def delete_objects(self, Delete: dict) -> None:
+    def delete_objects(self, Delete: dict) -> dict:
+        # Like S3: a 200 response that lists the keys it could not delete.
+        errors = []
         for obj in Delete["Objects"]:
-            self.store.pop(obj["Key"], None)
+            if obj["Key"] in self.undeletable:
+                errors.append({"Key": obj["Key"], "Code": "AccessDenied"})
+            else:
+                self.store.pop(obj["Key"], None)
+        return {"Errors": errors} if errors else {}
 
 
-def _filestore(objects: dict[str, bytes]) -> FilestoreService:
+def _filestore(objects: dict[str, bytes], undeletable: set[str] = frozenset()) -> FilestoreService:
     service = object.__new__(FilestoreService)
-    service.bucket = _FakeBucket(objects)
+    service.bucket = _FakeBucket(objects, undeletable)
     return service
 
 
@@ -42,7 +49,7 @@ def test_archive_copies_every_file_outside_the_dataset_folder():
     filestore = _filestore({
         f"{DATASET}/table.csv": b"old",
         f"{DATASET}/metadata.json": b"{}",
-        f"filestore/PREPROCESSED/CS0007DS0999/raw.csv": b"pre",
+        "filestore/PREPROCESSED/CS0007DS0999/raw.csv": b"pre",
         OTHER: b"other",
     })
 
@@ -54,13 +61,13 @@ def test_archive_copies_every_file_outside_the_dataset_folder():
     assert store[f"{ARCHIVE}/table.csv"] == b"old"
     assert store[f"{ARCHIVE}/metadata.json"] == b"{}"
     assert f"{DATASET}/table.csv" in store  # archiving copies, it doesn't move
-    assert not any(key.startswith(f"archive/filestore/PREPROCESSED") for key in store)
+    assert not any(key.startswith("archive/filestore/PREPROCESSED") for key in store)
 
 
 def test_delete_dataset_version_only_removes_that_version_of_that_dataset():
     filestore = _filestore({
         f"{DATASET}/table.csv": b"old",
-        f"filestore/PREPROCESSED/CS0007DS0999/raw.csv": b"pre",
+        "filestore/PREPROCESSED/CS0007DS0999/raw.csv": b"pre",
         f"{ARCHIVE}/table.csv": b"old",
         OTHER: b"other",
     })
@@ -96,3 +103,17 @@ def test_list_dataset_version_files_returns_names_inside_the_folder():
     assert sorted(filestore.list_dataset_version_files("CS0007DS0999", VersionType.STANDARDISED)) == [
         "metadata.json", "table.csv",
     ]
+
+
+def test_delete_dataset_version_raises_when_s3_reports_undeleted_keys():
+    filestore = _filestore(
+        {f"{DATASET}/table.csv": b"old", f"{DATASET}/metadata.json": b"{}"},
+        undeletable={f"{DATASET}/table.csv"},
+    )
+
+    try:
+        filestore.delete_dataset_version("CS0007DS0999", VersionType.STANDARDISED)
+    except RuntimeError as exc:
+        assert "Could not delete 1 file(s) of CS0007DS0999" in str(exc)
+    else:
+        raise AssertionError("a partial delete must not look like success")

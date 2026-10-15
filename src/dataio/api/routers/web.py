@@ -1473,6 +1473,7 @@ def admin_preview_dataset_import(
     csv_files: List[UploadFile] = File(default=[]),
     dataset_override_json: Optional[str] = Form(default=None),
     raw_dataset_override_json: Optional[str] = Form(default=None),
+    bucket_type: VersionType = Form(default=VersionType.STANDARDISED),
     replace_existing: bool = Form(default=False),
     user: User = Depends(get_current_web_user),
     admin_service: WebAdminService = Depends(WebAdminService),
@@ -1489,6 +1490,7 @@ def admin_preview_dataset_import(
         dataset_override=dataset_override,
         raw_dataset_override=raw_dataset_override,
         replace_existing=replace_existing,
+        bucket_type=bucket_type,
     )
 
 

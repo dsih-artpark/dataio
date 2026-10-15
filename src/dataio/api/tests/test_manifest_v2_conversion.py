@@ -162,3 +162,17 @@ def test_converted_manifest_without_nullable_fails_validation(tmp_path):
     assert any(
         f.code == "missing_field_nullable" and f.field == "count" for f in result.findings
     )
+
+
+def test_authored_metadata_uses_info_table_name_like_the_package_import():
+    from dataio.api.services.manifest_v2_conversion import authored_metadata_to_manifest
+
+    manifest = yaml.safe_load(yaml.safe_dump(V2_MANIFEST))
+    table = manifest["tables"].pop("consolidated-livestock-census")
+    table["info"] = {"table_name": "livestock-counts"}
+    manifest["tables"]["alias"] = table
+
+    contract = authored_metadata_to_manifest(manifest)
+
+    assert list(contract["datasetTables"]) == ["livestock-counts"]
+    assert contract["datasetTables"]["livestock-counts"]["path"] == "livestock-counts.csv"

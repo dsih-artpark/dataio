@@ -1725,6 +1725,7 @@ export default function DatasetAdminManager({
               accept=".yml,.yaml"
               onChange={(e) => {
                 setImportInfoFile((e.currentTarget as HTMLInputElement).files?.[0] ?? null);
+                setImportPreview(null);
                 setImportReplaceConfirmed(false);
               }}
               class="block w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
@@ -1737,6 +1738,7 @@ export default function DatasetAdminManager({
               accept=".yml,.yaml"
               onChange={(e) => {
                 setImportMetadataFile((e.currentTarget as HTMLInputElement).files?.[0] ?? null);
+                setImportPreview(null);
                 setImportReplaceConfirmed(false);
               }}
               class="block w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
@@ -1750,6 +1752,7 @@ export default function DatasetAdminManager({
               multiple
               onChange={(e) => {
                 setImportCsvFiles(Array.from((e.currentTarget as HTMLInputElement).files ?? []));
+                setImportPreview(null);
                 setImportReplaceConfirmed(false);
               }}
               class="block w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"

@@ -88,7 +88,7 @@ The preview lists the files that will be archived and the tables that will be re
 2. updates the dataset's details (title, owner, description, coverage, resolution, tags, additional metadata) from `info.yml`, and adds the package's raw dataset to its raw-dataset links
 3. removes the dataset's old files and uploads the package CSVs and the converted manifest
 
-The dataset ID, collection, access level, user permissions and group memberships are not changed. If a step fails, the old files are restored from the archive and the dataset's details are put back. The archive copy is kept; remove it once the replacement has been checked.
+The dataset ID, collection, access level, user permissions and group memberships are not changed. If a step fails, DataIO tries to restore the old files from the archive and put the dataset's details back. If part of that rollback also fails, the error lists the steps still to do by hand and the archive location; use the archive copy to finish recovery. The archive copy is always kept; remove it once the replacement has been checked.
 
 ## Dataset Folder Uploads
 

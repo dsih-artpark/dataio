@@ -398,7 +398,14 @@ class FilestoreService(BaseService):
     def delete_dataset_version(self, dataset_id: str, version_type: VersionType) -> None:
         keys = [{"Key": key} for key in self._list_dataset_objects(dataset_id, version_type)]
         for start in range(0, len(keys), 1000):
-            self.bucket.delete_objects(Delete={"Objects": keys[start:start + 1000]})
+            response = self.bucket.delete_objects(Delete={"Objects": keys[start:start + 1000]})
+            # S3 reports per-key failures in a successful (200) response.
+            errors = (response or {}).get("Errors") or []
+            if errors:
+                raise RuntimeError(
+                    f"Could not delete {len(errors)} file(s) of {dataset_id} "
+                    f"({version_type.value}), e.g. {errors[0].get('Key')}"
+                )
 
     def restore_dataset_version(
         self, dataset_id: str, version_type: VersionType, archive_prefix: str

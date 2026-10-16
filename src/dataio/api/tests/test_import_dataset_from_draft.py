@@ -669,7 +669,9 @@ def test_replace_puts_everything_back_when_a_table_upload_fails(monkeypatch):
         "undo:delete_raw_dataset", "undo:reserve_raw_dataset_id",
         "undo:refresh_cache",
     ]
-    assert package.call("undo:restore_files")[0] == (DS_ID, VersionType.STANDARDISED, ARCHIVE_PREFIX)
+    assert package.call("undo:restore_files")[0] == (
+        DS_ID, VersionType.STANDARDISED, ARCHIVE_PREFIX, ["foo.csv", "metadata.json"]
+    )
     (ds_id, previous), _ = package.call("undo:restore_dataset")
     assert ds_id == DS_ID
     assert previous.title == "Old title"

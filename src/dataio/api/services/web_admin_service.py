@@ -118,6 +118,8 @@ class _ReplaceUndo:
     rds_id: str
     bucket_type: VersionType
     archive_prefix: str
+    # File names copied to archive_prefix, so a restore can tell a missing archive from an empty one.
+    archived_files: list[str]
     # DatasetUpdate fields that restore the dataset row as it was.
     previous_dataset: dict
     rds_reservation: Optional[dict] = None
@@ -1759,6 +1761,7 @@ class WebAdminService(BaseService):
             rds_id=rds_id,
             bucket_type=bucket_type,
             archive_prefix=archive_prefix,
+            archived_files=archived_files,
             previous_dataset=previous_dataset,
             rds_reservation=(
                 None
@@ -1865,7 +1868,7 @@ class WebAdminService(BaseService):
             attempt(
                 f"restore the files of dataset {undo.ds_id} from {undo.archive_prefix}/",
                 lambda: filestore.restore_dataset_version(
-                    undo.ds_id, undo.bucket_type, undo.archive_prefix
+                    undo.ds_id, undo.bucket_type, undo.archive_prefix, undo.archived_files
                 ),
             )
         if undo.dataset_updated:

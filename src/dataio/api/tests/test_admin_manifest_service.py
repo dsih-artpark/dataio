@@ -119,6 +119,78 @@ datasetTables:
     assert recorded["request"].data_files == {"sample": "year\n2024\n"}
 
 
+def test_upsert_dataset_manifest_converts_an_authored_metadata_yaml(monkeypatch):
+    """A curator's metadata.yaml (tables/data_dictionary, no datasetKind) is
+    converted to the platform manifest instead of being rejected."""
+    service = object.__new__(AdminDatasetService)
+    service.logger = logging.getLogger(__name__)
+    recorded = {}
+
+    class FilestoreStub:
+        def upload_manifest(self, dataset_id, version_type, manifest_yaml, manifest_json):
+            recorded["manifest_yaml"] = manifest_yaml
+            recorded["manifest_json"] = manifest_json
+
+        def get_tabular_validation_sources(self, dataset_id, version_type):
+            return {"sample": "year\n2024\n"}
+
+    class ValidatorStub:
+        def validate(self, request):
+            recorded["request"] = request
+            return ValidationResult(dataset_kind=request.dataset_kind.value)
+
+    service.filestore_service = FilestoreStub()
+    service.validation_service = ValidatorStub()
+    service.refresh_dataset_documentation_cache = lambda _dataset_id: None
+    monkeypatch.setattr(
+        "dataio.api.services.admin_dataset_service.database.check_if_dataset_exists",
+        lambda _dataset_id: True,
+    )
+    monkeypatch.setattr(
+        "dataio.api.services.admin_dataset_service.database.update_dataset_manifest_cache",
+        lambda dataset_id, **kwargs: recorded.setdefault("db", kwargs),
+    )
+
+    authored = b"""
+metadataSpecVersion: v2
+datasetTitle: Sample Manifest
+datasetSlug: ts0001ds0001-sample-manifest
+datasetDescription: Example
+source: Test
+category: {ID: TS, name: Test}
+collection: {ID: TS0001, name: Tests}
+datasetID: TS0001DS0001
+tags: {concept: [sample]}
+enumDefinitions: null
+tables:
+  sample:
+    description: Sample table
+    data_dictionary:
+      year:
+        type: year
+        description: Year
+        nullable: false
+"""
+    result = service.upsert_dataset_manifest(
+        "TS0001DS0001",
+        VersionType.STANDARDISED,
+        UploadFile(filename="metadata.yaml", file=io.BytesIO(authored)),
+        "admin@example.com",
+    )
+
+    assert result["message"] == "Manifest uploaded successfully"
+    manifest = recorded["manifest_json"]
+    assert manifest["datasetKind"] == "tabular"
+    assert "tables" not in manifest
+    assert manifest["datasetTables"]["sample"]["path"] == "sample.csv"
+    year = manifest["datasetTables"]["sample"]["dataDictionary"]["year"]
+    assert (year["type"], year["format"]) == ("date", "%Y")
+    assert manifest["tags"] == {"concept": ["sample"]}
+    assert "enumDefinitions" not in manifest
+    assert "datasetTables:" in recorded["manifest_yaml"]
+    assert "datasetTables:" in recorded["request"].manifest_source
+
+
 def test_upsert_dataset_manifest_rejects_when_stored_data_fails(monkeypatch):
     service = object.__new__(AdminDatasetService)
     service.logger = logging.getLogger(__name__)

@@ -75,9 +75,11 @@ class FilestoreService(BaseService):
 
     def _list_dataset_objects(self, dataset_id: str, version_type: VersionType) -> list[str]:
         prefix = self._get_prefix_for_dataset(dataset_id, version_type)
+        # Trailing slash: without it, listing CS0007DS099 would also match
+        # every key under CS0007DS0999/.
         return [
             obj.key
-            for obj in self.bucket.objects.filter(Prefix=prefix)
+            for obj in self.bucket.objects.filter(Prefix=f"{prefix}/")
             if not obj.key.endswith("/")
         ]
 
@@ -371,6 +373,69 @@ class FilestoreService(BaseService):
     def rename_dataset(self, old_dataset_id: str, new_dataset_id: str) -> None:
         for version_type in (VersionType.STANDARDISED, VersionType.PREPROCESSED):
             self._move_dataset_objects(old_dataset_id, new_dataset_id, version_type)
+
+    def _archive_prefix(self, dataset_id: str, version_type: VersionType, stamp: str) -> str:
+        # Outside filestore/<version>/<dataset_id>/ so that deleting or
+        # replacing the dataset never touches its own archive.
+        return f"archive/{self._get_prefix_for_dataset(dataset_id, version_type)}/{stamp}"
+
+    def list_dataset_version_files(self, dataset_id: str, version_type: VersionType) -> list[str]:
+        prefix = self._get_prefix_for_dataset(dataset_id, version_type)
+        return [key[len(prefix) + 1:] for key in self._list_dataset_objects(dataset_id, version_type)]
+
+    def archive_dataset_version(
+        self, dataset_id: str, version_type: VersionType, stamp: str
+    ) -> tuple[str, list[str]]:
+        """Copies every file of one dataset version to its archive prefix.
+        Returns the archive prefix and the copied file names."""
+        source_prefix = self._get_prefix_for_dataset(dataset_id, version_type)
+        archive_prefix = self._archive_prefix(dataset_id, version_type, stamp)
+        copied = []
+        for key in self._list_dataset_objects(dataset_id, version_type):
+            name = key[len(source_prefix) + 1:]
+            self.bucket.copy({"Bucket": self.bucket.name, "Key": key}, f"{archive_prefix}/{name}")
+            copied.append(name)
+        return archive_prefix, copied
+
+    def delete_dataset_version(self, dataset_id: str, version_type: VersionType) -> None:
+        keys = [{"Key": key} for key in self._list_dataset_objects(dataset_id, version_type)]
+        for start in range(0, len(keys), 1000):
+            response = self.bucket.delete_objects(Delete={"Objects": keys[start:start + 1000]})
+            # S3 reports per-key failures in a successful (200) response.
+            errors = (response or {}).get("Errors") or []
+            if errors:
+                raise RuntimeError(
+                    f"Could not delete {len(errors)} file(s) of {dataset_id} "
+                    f"({version_type.value}), e.g. {errors[0].get('Key')}"
+                )
+
+    def restore_dataset_version(
+        self,
+        dataset_id: str,
+        version_type: VersionType,
+        archive_prefix: str,
+        expected_files: list[str] | None = None,
+    ) -> None:
+        """Replaces one dataset version's files with the copies under archive_prefix.
+
+        expected_files are the names archive_dataset_version copied. If any were
+        copied but none can be found now, nothing is deleted: the current files
+        are better than an empty dataset."""
+        archived = [
+            obj.key
+            for obj in self.bucket.objects.filter(Prefix=f"{archive_prefix}/")
+            if not obj.key.endswith("/")
+        ]
+        if expected_files and not archived:
+            raise RuntimeError(
+                f"Archive {archive_prefix}/ is empty but should hold "
+                f"{len(expected_files)} file(s); current files of {dataset_id} were left in place"
+            )
+        self.delete_dataset_version(dataset_id, version_type)
+        target_prefix = self._get_prefix_for_dataset(dataset_id, version_type)
+        for key in archived:
+            name = key[len(archive_prefix) + 1:]
+            self.bucket.copy({"Bucket": self.bucket.name, "Key": key}, f"{target_prefix}/{name}")
 
     def delete_dataset(self, dataset_id: str) -> None:
         keys_to_delete = []

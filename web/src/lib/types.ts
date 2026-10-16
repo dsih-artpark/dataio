@@ -238,6 +238,19 @@ export interface AdminDatasetPackagePreview {
   findings: ValidationFinding[];
   suggested_dataset_id: string | null;
   can_import: boolean;
+  /** Set when previewing with replace_existing for a dataset that exists. */
+  replace?: AdminDatasetReplacePlan | null;
+}
+
+export interface AdminDatasetReplacePlan {
+  dataset_id: string;
+  bucket_type: string;
+  current_files: string[];
+  tables_replaced: string[];
+  tables_added: string[];
+  tables_removed: string[];
+  archive_location: string;
+  access_level_kept: string | null;
 }
 
 export interface ReservedDatasetId {

@@ -170,6 +170,8 @@ export default function DatasetAdminManager({
   const [importCsvFiles, setImportCsvFiles] = useState<File[]>([]);
   const [importPreview, setImportPreview] = useState<AdminDatasetPackagePreview | null>(null);
   const [importingPackage, setImportingPackage] = useState(false);
+  const [importReplaceExisting, setImportReplaceExisting] = useState(false);
+  const [importReplaceConfirmed, setImportReplaceConfirmed] = useState(false);
   const [deleteVerificationCode, setDeleteVerificationCode] = useState('');
   const [deleteConfirmationDatasetId, setDeleteConfirmationDatasetId] = useState('');
   const [deletingDataset, setDeletingDataset] = useState(false);
@@ -680,6 +682,13 @@ export default function DatasetAdminManager({
     }
   };
 
+  // Apply sends the form's ds_id, so editing it after a replace preview would
+  // replace a dataset nobody previewed.
+  const replaceTargetChanged =
+    importReplaceExisting &&
+    !!importPreview?.replace &&
+    createForm.ds_id !== importPreview.replace.dataset_id;
+
   const handlePreviewImport = async (e: Event, useCurrentEdits = false) => {
     e.preventDefault();
     if (!importInfoFile || !importMetadataFile) return;
@@ -692,8 +701,11 @@ export default function DatasetAdminManager({
         csvFiles: importCsvFiles,
         datasetOverride: useCurrentEdits ? buildImportDatasetOverride() : undefined,
         rawDatasetOverride: useCurrentEdits ? rawDatasetForm : undefined,
+        bucketType: STANDARDISED_BUCKET,
+        replaceExisting: importReplaceExisting,
       });
       applyImportPreview(preview);
+      setImportReplaceConfirmed(false);
       setStatusMessage(
         preview.can_import
           ? 'Package preview passed validation and is ready to import.'
@@ -718,10 +730,17 @@ export default function DatasetAdminManager({
         datasetOverride: buildImportDatasetOverride(),
         rawDatasetOverride: rawDatasetForm,
         bucketType: STANDARDISED_BUCKET,
+        replaceExisting: importReplaceExisting,
       });
-      setStatusMessage(`Imported dataset ${response.dataset_id} with ${response.uploaded_tables.length} table(s).`);
+      setStatusMessage(
+        response.replaced
+          ? `Replaced dataset ${response.dataset_id} with ${response.uploaded_tables.length} table(s). ` +
+              `The previous ${response.archived_files?.length ?? 0} file(s) are archived under ${response.archive_prefix}/.`
+          : `Imported dataset ${response.dataset_id} with ${response.uploaded_tables.length} table(s).`
+      );
       setSelectedDatasetId(response.dataset_id);
       setImportPreview(null);
+      setImportReplaceConfirmed(false);
       setImportCsvFiles([]);
       setImportInfoFile(null);
       setImportMetadataFile(null);
@@ -1712,7 +1731,11 @@ export default function DatasetAdminManager({
             <input
               type="file"
               accept=".yml,.yaml"
-              onChange={(e) => setImportInfoFile((e.currentTarget as HTMLInputElement).files?.[0] ?? null)}
+              onChange={(e) => {
+                setImportInfoFile((e.currentTarget as HTMLInputElement).files?.[0] ?? null);
+                setImportPreview(null);
+                setImportReplaceConfirmed(false);
+              }}
               class="block w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
             />
           </label>
@@ -1721,7 +1744,11 @@ export default function DatasetAdminManager({
             <input
               type="file"
               accept=".yml,.yaml"
-              onChange={(e) => setImportMetadataFile((e.currentTarget as HTMLInputElement).files?.[0] ?? null)}
+              onChange={(e) => {
+                setImportMetadataFile((e.currentTarget as HTMLInputElement).files?.[0] ?? null);
+                setImportPreview(null);
+                setImportReplaceConfirmed(false);
+              }}
               class="block w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
             />
           </label>
@@ -1731,9 +1758,33 @@ export default function DatasetAdminManager({
               type="file"
               accept=".csv"
               multiple
-              onChange={(e) => setImportCsvFiles(Array.from((e.currentTarget as HTMLInputElement).files ?? []))}
+              onChange={(e) => {
+                setImportCsvFiles(Array.from((e.currentTarget as HTMLInputElement).files ?? []));
+                setImportPreview(null);
+                setImportReplaceConfirmed(false);
+              }}
               class="block w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
             />
+          </label>
+          <label class="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 md:col-span-2">
+            <input
+              type="checkbox"
+              class="mt-1"
+              checked={importReplaceExisting}
+              onChange={(e) => {
+                setImportReplaceExisting((e.currentTarget as HTMLInputElement).checked);
+                setImportPreview(null);
+                setImportReplaceConfirmed(false);
+              }}
+            />
+            <span>
+              <span class="font-medium">Replace an existing dataset</span>
+              <span class="mt-1 block text-amber-800">
+                For a dataset ID that already exists: its current files are archived, then its CSVs, manifest and details
+                are replaced by this package. Its ID, collection, access level, permissions and groups stay the same.
+                Preview first to see exactly what will change.
+              </span>
+            </span>
           </label>
           <div class="flex flex-wrap gap-3 md:col-span-2">
             <button
@@ -1754,10 +1805,25 @@ export default function DatasetAdminManager({
             <button
               type="button"
               onClick={(e) => handleApplyImport(e as unknown as Event)}
-              disabled={!importInfoFile || !importMetadataFile || importCsvFiles.length === 0 || importingPackage}
-              class="w-full rounded-xl bg-emerald-700 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              disabled={
+                !importInfoFile ||
+                !importMetadataFile ||
+                importCsvFiles.length === 0 ||
+                importingPackage ||
+                (importReplaceExisting &&
+                  (!importPreview?.replace || !importReplaceConfirmed || replaceTargetChanged))
+              }
+              class={`w-full rounded-xl px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto ${
+                importReplaceExisting ? 'bg-amber-700' : 'bg-emerald-700'
+              }`}
             >
-              {importingPackage ? 'Importing…' : 'Import Package'}
+              {importingPackage
+                ? importReplaceExisting
+                  ? 'Replacing…'
+                  : 'Importing…'
+                : importReplaceExisting
+                  ? 'Replace Dataset'
+                  : 'Import Package'}
             </button>
           </div>
         </form>
@@ -1772,6 +1838,41 @@ export default function DatasetAdminManager({
                 <span>{importPreview.can_import ? 'Ready to import' : 'Needs review'}</span>
               </div>
             </div>
+
+            {importPreview.replace ? (
+              <div class="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                <h4 class="font-semibold">Replacing dataset {importPreview.replace.dataset_id}</h4>
+                <ul class="mt-2 list-disc space-y-1 pl-5">
+                  <li>
+                    {importPreview.replace.current_files.length} current file(s) will be archived to{' '}
+                    <code class="rounded bg-amber-100 px-1 text-xs">{importPreview.replace.archive_location}</code>
+                    {importPreview.replace.current_files.length > 0 ? `: ${importPreview.replace.current_files.join(', ')}` : ''}
+                  </li>
+                  <li>Tables replaced: {importPreview.replace.tables_replaced.join(', ') || 'none'}</li>
+                  <li>Tables added: {importPreview.replace.tables_added.join(', ') || 'none'}</li>
+                  <li>Tables removed: {importPreview.replace.tables_removed.join(', ') || 'none'}</li>
+                  <li>Access level stays {importPreview.replace.access_level_kept ?? 'unchanged'}; permissions and groups are not changed.</li>
+                </ul>
+                <label class="mt-3 flex items-center gap-2 font-medium">
+                  <input
+                    type="checkbox"
+                    checked={importReplaceConfirmed}
+                    onChange={(e) => setImportReplaceConfirmed((e.currentTarget as HTMLInputElement).checked)}
+                  />
+                  I've checked this list and want to replace this dataset.
+                </label>
+                {replaceTargetChanged ? (
+                  <p class="mt-2 font-medium text-red-700">
+                    The Dataset ID was changed to {createForm.ds_id || '(empty)'} after this preview of{' '}
+                    {importPreview.replace.dataset_id}. Preview again before replacing.
+                  </p>
+                ) : null}
+              </div>
+            ) : importReplaceExisting ? (
+              <p class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                Nothing to replace yet: see the findings below (the dataset must already exist).
+              </p>
+            ) : null}
 
             {importPreview.findings.length > 0 ? (
               <div class="space-y-3">

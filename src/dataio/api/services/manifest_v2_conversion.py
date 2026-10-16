@@ -30,8 +30,10 @@ def convert_v2_field_to_manifest_field(
     manifest_field: dict[str, Any] = {
         "description": field_spec.get("description"),
         "comments": field_spec.get("comments"),
-        "nullable": field_spec.get("nullable", True),
     }
+    # Copied only when authored, so the validator can report a missing nullable.
+    if "nullable" in field_spec:
+        manifest_field["nullable"] = field_spec["nullable"]
     if field_type == "year":
         manifest_field["type"] = "date"
         manifest_field["format"] = "%Y"
@@ -77,6 +79,28 @@ def convert_v2_field_to_manifest_field(
         if key not in handled_keys and key not in manifest_field:
             manifest_field[key] = value
     return manifest_field
+
+
+def is_authored_metadata(manifest_dict: dict) -> bool:
+    """True for a curator-authored metadata.yaml (tables/data_dictionary)
+    rather than the platform manifest shape (datasetTables)."""
+    return "datasetTables" not in manifest_dict and isinstance(manifest_dict.get("tables"), dict)
+
+
+def authored_metadata_to_manifest(manifest_dict: dict) -> dict:
+    """Converts an authored metadata.yaml for the manifest-upload endpoint.
+    A null or empty enumDefinitions is dropped, as the package import does,
+    since authors often keep enum blocks at the top level instead."""
+    # Name each table the way the package import does: info.table_name,
+    # falling back to the mapping key, so its path matches the stored CSV.
+    tables = {}
+    for key, table in (manifest_dict.get("tables") or {}).items():
+        info = (table or {}).get("info") if isinstance(table, dict) else None
+        tables[(info or {}).get("table_name") or key] = table
+    contract = convert_v2_manifest_to_contract({**manifest_dict, "tables": tables})
+    if not (isinstance(contract.get("enumDefinitions"), dict) and contract["enumDefinitions"]):
+        contract.pop("enumDefinitions", None)
+    return contract
 
 
 def convert_v2_manifest_to_contract(manifest_dict: dict) -> dict:

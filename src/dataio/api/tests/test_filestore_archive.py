@@ -117,3 +117,42 @@ def test_delete_dataset_version_raises_when_s3_reports_undeleted_keys():
         assert "Could not delete 1 file(s) of CS0007DS0999" in str(exc)
     else:
         raise AssertionError("a partial delete must not look like success")
+
+
+def test_a_shorter_dataset_id_never_touches_a_longer_sibling():
+    # CS0007DS099 is a prefix of CS0007DS0999: without the trailing slash the
+    # listing would pick up the sibling's files, then archive and delete them.
+    short = "filestore/STANDARDISED/CS0007DS099"
+    filestore = _filestore({f"{short}/table.csv": b"short", f"{DATASET}/table.csv": b"sibling"})
+
+    assert filestore.list_dataset_version_files("CS0007DS099", VersionType.STANDARDISED) == ["table.csv"]
+    _, copied = filestore.archive_dataset_version("CS0007DS099", VersionType.STANDARDISED, STAMP)
+    filestore.delete_dataset_version("CS0007DS099", VersionType.STANDARDISED)
+    filestore.delete_dataset("CS0007DS099")
+
+    assert copied == ["table.csv"]
+    assert filestore.bucket.store[f"{DATASET}/table.csv"] == b"sibling"
+    assert not any(key.startswith(f"archive/{DATASET}") for key in filestore.bucket.store)
+
+
+def test_restore_keeps_current_files_when_the_expected_archive_is_missing():
+    filestore = _filestore({f"{DATASET}/table.csv": b"new"})
+
+    try:
+        filestore.restore_dataset_version(
+            "CS0007DS0999", VersionType.STANDARDISED, ARCHIVE, ["table.csv"]
+        )
+    except RuntimeError as exc:
+        assert "should hold 1 file(s)" in str(exc)
+    else:
+        raise AssertionError("restoring from a missing archive must not look like success")
+    assert filestore.bucket.store == {f"{DATASET}/table.csv": b"new"}
+
+
+def test_restore_of_a_dataset_that_had_no_files_empties_it():
+    # Nothing was archived because nothing was there: restoring means empty again.
+    filestore = _filestore({f"{DATASET}/table.csv": b"new"})
+
+    filestore.restore_dataset_version("CS0007DS0999", VersionType.STANDARDISED, ARCHIVE, [])
+
+    assert filestore.bucket.store == {}

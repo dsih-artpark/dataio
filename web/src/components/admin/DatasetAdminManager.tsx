@@ -682,6 +682,13 @@ export default function DatasetAdminManager({
     }
   };
 
+  // Apply sends the form's ds_id, so editing it after a replace preview would
+  // replace a dataset nobody previewed.
+  const replaceTargetChanged =
+    importReplaceExisting &&
+    !!importPreview?.replace &&
+    createForm.ds_id !== importPreview.replace.dataset_id;
+
   const handlePreviewImport = async (e: Event, useCurrentEdits = false) => {
     e.preventDefault();
     if (!importInfoFile || !importMetadataFile) return;
@@ -694,6 +701,7 @@ export default function DatasetAdminManager({
         csvFiles: importCsvFiles,
         datasetOverride: useCurrentEdits ? buildImportDatasetOverride() : undefined,
         rawDatasetOverride: useCurrentEdits ? rawDatasetForm : undefined,
+        bucketType: STANDARDISED_BUCKET,
         replaceExisting: importReplaceExisting,
       });
       applyImportPreview(preview);
@@ -1802,7 +1810,8 @@ export default function DatasetAdminManager({
                 !importMetadataFile ||
                 importCsvFiles.length === 0 ||
                 importingPackage ||
-                (importReplaceExisting && (!importPreview?.replace || !importReplaceConfirmed))
+                (importReplaceExisting &&
+                  (!importPreview?.replace || !importReplaceConfirmed || replaceTargetChanged))
               }
               class={`w-full rounded-xl px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto ${
                 importReplaceExisting ? 'bg-amber-700' : 'bg-emerald-700'
@@ -1852,6 +1861,12 @@ export default function DatasetAdminManager({
                   />
                   I've checked this list and want to replace this dataset.
                 </label>
+                {replaceTargetChanged ? (
+                  <p class="mt-2 font-medium text-red-700">
+                    The Dataset ID was changed to {createForm.ds_id || '(empty)'} after this preview of{' '}
+                    {importPreview.replace.dataset_id}. Preview again before replacing.
+                  </p>
+                ) : null}
               </div>
             ) : importReplaceExisting ? (
               <p class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">

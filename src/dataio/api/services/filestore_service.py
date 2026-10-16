@@ -75,9 +75,11 @@ class FilestoreService(BaseService):
 
     def _list_dataset_objects(self, dataset_id: str, version_type: VersionType) -> list[str]:
         prefix = self._get_prefix_for_dataset(dataset_id, version_type)
+        # Trailing slash: without it, listing CS0007DS099 would also match
+        # every key under CS0007DS0999/.
         return [
             obj.key
-            for obj in self.bucket.objects.filter(Prefix=prefix)
+            for obj in self.bucket.objects.filter(Prefix=f"{prefix}/")
             if not obj.key.endswith("/")
         ]
 
@@ -408,16 +410,32 @@ class FilestoreService(BaseService):
                 )
 
     def restore_dataset_version(
-        self, dataset_id: str, version_type: VersionType, archive_prefix: str
+        self,
+        dataset_id: str,
+        version_type: VersionType,
+        archive_prefix: str,
+        expected_files: list[str] | None = None,
     ) -> None:
-        """Replaces one dataset version's files with the copies under archive_prefix."""
+        """Replaces one dataset version's files with the copies under archive_prefix.
+
+        expected_files are the names archive_dataset_version copied. If any were
+        copied but none can be found now, nothing is deleted: the current files
+        are better than an empty dataset."""
+        archived = [
+            obj.key
+            for obj in self.bucket.objects.filter(Prefix=f"{archive_prefix}/")
+            if not obj.key.endswith("/")
+        ]
+        if expected_files and not archived:
+            raise RuntimeError(
+                f"Archive {archive_prefix}/ is empty but should hold "
+                f"{len(expected_files)} file(s); current files of {dataset_id} were left in place"
+            )
         self.delete_dataset_version(dataset_id, version_type)
         target_prefix = self._get_prefix_for_dataset(dataset_id, version_type)
-        for obj in self.bucket.objects.filter(Prefix=f"{archive_prefix}/"):
-            if obj.key.endswith("/"):
-                continue
-            name = obj.key[len(archive_prefix) + 1:]
-            self.bucket.copy({"Bucket": self.bucket.name, "Key": obj.key}, f"{target_prefix}/{name}")
+        for key in archived:
+            name = key[len(archive_prefix) + 1:]
+            self.bucket.copy({"Bucket": self.bucket.name, "Key": key}, f"{target_prefix}/{name}")
 
     def delete_dataset(self, dataset_id: str) -> None:
         keys_to_delete = []

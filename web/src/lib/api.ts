@@ -931,6 +931,7 @@ class ApiClient {
     csvFiles?: File[];
     datasetOverride?: Record<string, unknown>;
     rawDatasetOverride?: Record<string, unknown>;
+    bucketType?: string;
     replaceExisting?: boolean;
   }) {
     const formData = new FormData();
@@ -945,6 +946,8 @@ class ApiClient {
     if (params.rawDatasetOverride) {
       formData.append('raw_dataset_override_json', JSON.stringify(params.rawDatasetOverride));
     }
+    // Same default as adminApplyDatasetImport, so the replace plan matches what apply does.
+    formData.append('bucket_type', params.bucketType ?? 'STANDARDISED');
     if (params.replaceExisting) {
       formData.append('replace_existing', 'true');
     }

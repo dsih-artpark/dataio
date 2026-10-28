@@ -247,32 +247,42 @@ for child in children:
 
 **API Endpoint:** `GET /api/v1/regions/{region_id}/children`
 
-### `get_shapefile_list()`
+### `get_shapefile_list(version=None, parent_id=None)`
 
-Get a list of all available shapefiles.
+Get a list of available shapefiles. Shapefiles are versioned (each upload batch, e.g. a new KGIS release, is a version; older versions are kept). Without `version`, each region is listed once, as the newest version that has it.
+
+**Parameters:**
+
+- `version` (str, optional): Only list this version.
+- `parent_id` (str, optional): Only list regions with this parent, e.g. `"state_29"`.
 
 **Returns:**
 
-- `list`: List of shapefile dictionaries containing metadata for each shapefile.
+- `list`: List of shapefile dictionaries: `region_id`, `region_name`, `parent_id`, `version`, `last_modified`.
 
 **Example:**
 
 ```python
-shapefiles = client.get_shapefile_list()
+shapefiles = client.get_shapefile_list(parent_id="state_29")
 
 for shapefile in shapefiles:
     print(f"Region ID: {shapefile['region_id']}")
     print(f"Name: {shapefile['region_name']}")
 ```
 
-### `download_shapefile(region_id, shp_folder="data/GS0012DS0051-Shapefiles_India")`
+### `get_shapefile_versions()`
+
+List the shapefile versions, newest first, with their source, dataset id and number of regions.
+
+### `download_shapefile(region_id, shp_folder=None, version=None)`
 
 Download a shapefile for a specific region.
 
 **Parameters:**
 
 - `region_id` (str): ID of the region to download shapefile for.
-- `shp_folder` (str, optional): Directory to save the shapefile. Defaults to "{data_dir}/GS0012DS0051-Shapefiles_India", where data_dir is derived from the API client.
+- `shp_folder` (str, optional): Folder **inside the client's data_dir** to save the shapefile in (e.g. `"my_shapefiles"` saves to `{data_dir}/my_shapefiles`). Defaults to `GS0012DS0051-Shapefiles_India`, i.e. `{data_dir}/GS0012DS0051-Shapefiles_India`.
+- `version` (str, optional): Shapefile version. Defaults to the newest version that has the region. With a version, the file is saved as `{region_id}_{version}.geojson`.
 
 **Returns:**
 

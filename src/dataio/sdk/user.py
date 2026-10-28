@@ -349,50 +349,66 @@ class DataIOAPI:
         """
         return self._request("GET", f"/regions/{region_id}/children")
 
-    def get_shapefile_list(self):
-        """Get a list of all shapefiles.
+    def get_shapefile_list(self, version: str = None, parent_id: str = None):
+        """Get a list of available shapefiles.
 
-        :returns: A list of shapefiles.
+        :param version: Only list this shapefile version. By default each region
+            is listed once, as the newest version that has it.
+        :type version: str
+        :param parent_id: Only list regions with this parent, e.g. "state_29".
+        :type parent_id: str
+        :returns: A list of shapefiles (region_id, region_name, parent_id, version, last_modified).
         :rtype: list
         """
-        return self._request("GET", "/shapefiles")
+        params = {k: v for k, v in {"version": version, "parent_id": parent_id}.items() if v}
+        return self._request("GET", "/shapefiles", params=params)
 
-    def download_shapefile(self, region_id: str, shp_folder: str = None):
-        """Download a shapefile.
+    def get_shapefile_versions(self):
+        """Get the shapefile versions, newest first.
+
+        :returns: A list of versions (version, source, dataset_id, description, released_at, regions).
+        :rtype: list
+        """
+        return self._request("GET", "/shapefiles/versions")
+
+    def download_shapefile(self, region_id: str, shp_folder: str = None, version: str = None):
+        """Download a shapefile as GeoJSON.
 
         :param region_id: The ID of the region to download the shapefile for.
         :type region_id: str
         :param shp_folder: The folder with the data directory to download the shapefile to. Defaults to "{data_dir}/GS0012DS0051-Shapefiles_India", where data_dir is derived from the API client.
         :type shp_folder: str
-        :param compress: Whether to compress the shapefile. Defaults to True.
-        :type compress: bool
-        :returns: The shapefile.
-        :rtype: bytes
+        :param version: The shapefile version to download. Defaults to the newest
+            version that has the region. With a version, the file is saved as
+            "{region_id}_{version}.geojson".
+        :type version: str
+        :returns: The path the shapefile was saved to.
+        :rtype: str
         """
 
         if shp_folder is None:
             shp_folder = f"{self.data_dir}/GS0012DS0051-Shapefiles_India"
         else:
             shp_folder = f"{self.data_dir}/{shp_folder}"
-        shapefile_list = self.get_shapefile_list()
-        shapefile_exists = any(
-            [
-                True
-                for each_shapefile in shapefile_list
-                if each_shapefile["region_id"] == region_id
-            ]
-        )
-        if not shapefile_exists:
-            raise ValueError(f"Shapefile for region {region_id} not found")
 
         url = f"{self.base_url}/shapefiles/{region_id}"
-        response = self.session.request("GET", url)
+        response = self.session.request(
+            "GET", url, params={"version": version} if version else None
+        )
+        if response.status_code in (400, 404):
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            detail = payload.get("detail") if isinstance(payload, dict) else None
+            raise ValueError(detail or f"Shapefile for region {region_id} not found")
         response.raise_for_status()
         shapefile = response.content
 
         shapefile = json.loads(gzip.decompress(shapefile).decode("utf-8"))
 
-        shp_path = f"{shp_folder}/{region_id}.geojson"
+        file_name = f"{region_id}_{version}" if version else region_id
+        shp_path = f"{shp_folder}/{file_name}.geojson"
         os.makedirs(shp_folder, exist_ok=True)
         with open(shp_path, "w", encoding="utf-8") as f:
             json.dump(shapefile, f, indent=4)

@@ -1,9 +1,10 @@
-from fastapi import HTTPException, Depends, APIRouter, Form, UploadFile
+from fastapi import HTTPException, Depends, APIRouter, Form, Query, UploadFile
 from typing import List
 import logging
 from dataio.api.auth import get_user, admin_required
 from dataio.api.services import AdminUserManagementService, AdminDatasetService, DraftReviewService
 from dataio.api.services.draft_review_service import parse_curator_input_json
+from dataio.api.services.shapefile_service import ShapefileService
 from dataio.api.models import (
     ClassifyColumnsRequest,
     DatasetCreate,
@@ -21,6 +22,7 @@ from dataio.api.models import (
     ResourceGroupCreate,
     ResourceGroupMemberCreate,
     UserPermissionCreate,
+    ShapefileVersionCreate,
 )
 
 logger = logging.getLogger(__name__)
@@ -410,12 +412,26 @@ async def get_collections(
 #### SHAPEFILES
 
 
+@admin_router.post("/shapefile-versions", tags=["admin/shapefiles"])
+@admin_required
+def create_shapefile_version(
+    payload: ShapefileVersionCreate,
+    user: User = Depends(get_user),
+    shapefile_service: ShapefileService = Depends(ShapefileService),
+):
+    """Create a shapefile version (one upload batch, e.g. 'kgis-2026-08')."""
+    return shapefile_service.create_version(payload, user)
+
+
 @admin_router.post("/shapefiles/{region_id}", tags=["admin/shapefiles"])
 @admin_required
-async def post_shapefile(
+def post_shapefile(
     shapefile: UploadFile,
     region_id: str,
+    version: str = Query(..., description="Shapefile version to upload into (create it first)"),
+    overwrite: bool = Query(False, description="Replace this region's file if the version already has one"),
     user: User = Depends(get_user),
-    admin_dataset_service: AdminDatasetService = Depends(AdminDatasetService),
+    shapefile_service: ShapefileService = Depends(ShapefileService),
 ):
-    return admin_dataset_service.upload_shapefile(shapefile, region_id)
+    """Upload one region's boundary GeoJSON (Feature or FeatureCollection) into a version."""
+    return shapefile_service.upload_shapefile(shapefile, region_id, version, overwrite, user)

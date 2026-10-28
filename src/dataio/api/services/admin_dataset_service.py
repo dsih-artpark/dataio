@@ -1,5 +1,4 @@
 import contextlib
-import gzip
 
 import yaml
 from fastapi import HTTPException, UploadFile
@@ -728,18 +727,3 @@ class AdminDatasetService(BaseService):
             ) from e
         finally:
             session.close()
-
-    def upload_shapefile(self, file: UploadFile, region_id: str):
-        """
-        Compress and upload shapefile to S3
-        """
-        try:
-            file_contents = file.file.read()
-            compressed_contents = gzip.compress(file_contents)
-            parent_id = database.get_parentID_of_region(region_id)
-            self.filestore_service.upload_shapefile(
-                compressed_contents, region_id, parent_id
-            )
-        except Exception:
-            self.logger.error("Failed to upload shapefile.")
-            raise HTTPException(status_code=500, detail="Failed to upload shape file.") from None

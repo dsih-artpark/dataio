@@ -194,20 +194,180 @@ def download_shapefile(
     shp_folder: Annotated[
         str,
         typer.Option(
-            "-f", "--shp-folder", help="The folder to download the shapefile to."
+            "-f",
+            "--shp-folder",
+            help="Folder inside the data directory to download the shapefile to "
+            "(default: GS0012DS0051-Shapefiles_India).",
+        ),
+    ] = None,
+    version: Annotated[
+        str,
+        typer.Option(
+            "-v",
+            "--version",
+            help="Shapefile version (default: the newest version that has the region). "
+            "See list-shapefile-versions.",
         ),
     ] = None,
 ):
     """Download a shapefile."""
     client = DataIOAPI()
-    if shp_folder is None:
-        shp_folder = f"{client.data_dir}/GS0012DS0051-Shapefiles_India"
-    else:
-        shp_folder = f"{client.data_dir}/{shp_folder}"
-    args = {k: v for k, v in locals().items() if k != "client"}
-    shp_path = client.download_shapefile(**args)
     console = Console()
+    try:
+        # The SDK puts shp_folder inside the data directory itself.
+        shp_path = client.download_shapefile(region_id, shp_folder=shp_folder, version=version)
+    except ValueError as e:
+        console.print(f"[red]{e}[/]")
+        raise typer.Exit(1)
     console.print(f"Shapefile {region_id} downloaded to {shp_path}")
+
+
+@app.command("list-shapefiles")
+def list_shapefiles(
+    version: Annotated[
+        str,
+        typer.Option("-v", "--version", help="Only this version (default: newest version of each region)."),
+    ] = None,
+    parent_id: Annotated[
+        str,
+        typer.Option("-p", "--parent-id", help="Only regions with this parent, e.g. state_29."),
+    ] = None,
+):
+    """List available shapefiles."""
+    client = DataIOAPI()
+    shapefiles = client.get_shapefile_list(version=version, parent_id=parent_id)
+    table = Table("Region ID", "Name", "Parent", "Version", "Last modified")
+    for s in shapefiles:
+        table.add_row(s["region_id"], s["region_name"], s["parent_id"] or "", s["version"],
+                      (s["last_modified"] or "")[:10])
+    console = Console()
+    console.print(table)
+    console.print(f"{len(shapefiles)} shapefile(s)")
+
+
+@app.command("list-shapefile-versions")
+def list_shapefile_versions():
+    """List shapefile versions, newest first."""
+    client = DataIOAPI()
+    table = Table("Version", "Released", "Regions", "Dataset", "Source")
+    for v in client.get_shapefile_versions():
+        table.add_row(v["version"], (v["released_at"] or "")[:10], str(v["regions"]),
+                      v["dataset_id"] or "", v["source"])
+    Console().print(table)
+
+
+@app.command("create-shapefile-version")
+def create_shapefile_version(
+    version: Annotated[str, typer.Argument(..., help="Version name, e.g. kgis-2026-08.")],
+    source: Annotated[str, typer.Option("-s", "--source", help="Where the boundaries come from.")],
+    dataset_id: Annotated[
+        str, typer.Option("-d", "--dataset-id", help="Catalogue ds_id the boundaries are published as.")
+    ] = None,
+    description: Annotated[str, typer.Option("--description", help="Free-text notes.")] = None,
+    released_at: Annotated[
+        str,
+        typer.Option("--released-at", help="ISO timestamp that orders versions (default: now)."),
+    ] = None,
+):
+    """Create a shapefile version (admin)."""
+    from dataio.sdk.admin import DataIOAdminAPI
+
+    console = Console()
+    try:
+        created = DataIOAdminAPI().create_shapefile_version(
+            version, source, dataset_id=dataset_id, description=description, released_at=released_at
+        )
+    except Exception as e:
+        console.print(f"[red]Failed: {e}[/]")
+        raise typer.Exit(1)
+    console.print(f"[green]Created shapefile version {created['version']}[/] (released {created['released_at']})")
+
+
+@app.command("upload-shapefile")
+def upload_shapefile(
+    region_id: Annotated[str, typer.Argument(..., help="Region id, e.g. state_29.")],
+    geojson_path: Annotated[str, typer.Argument(..., help="Path to the .geojson file.")],
+    version: Annotated[str, typer.Option("-v", "--version", help="Shapefile version to upload into.")],
+    overwrite: Annotated[
+        bool, typer.Option("--overwrite", help="Replace the region's file if the version already has one.")
+    ] = False,
+):
+    """Upload one region's boundary GeoJSON (admin)."""
+    from dataio.sdk.admin import DataIOAdminAPI
+
+    console = Console()
+    try:
+        result = DataIOAdminAPI().upload_shapefile(region_id, geojson_path, version, overwrite=overwrite)
+    except Exception as e:
+        console.print(f"[red]Upload failed: {e}[/]")
+        raise typer.Exit(1)
+    action = "Replaced" if result.get("overwritten") else "Uploaded"
+    console.print(f"[green]{action} {region_id}[/] in version {version}")
+
+
+@app.command("upload-shapefiles")
+def upload_shapefiles(
+    folder_path: Annotated[str, typer.Argument(..., help="Folder of .geojson files, one region per file.")],
+    version: Annotated[str, typer.Option("-v", "--version", help="Shapefile version to upload into.")],
+    overwrite: Annotated[
+        bool, typer.Option("--overwrite", help="Replace files the version already has.")
+    ] = False,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Only map files to region ids; upload nothing.")
+    ] = False,
+    workers: Annotated[int, typer.Option("-w", "--workers", help="Parallel uploads.")] = 4,
+    report: Annotated[
+        str,
+        typer.Option("-r", "--report", help="CSV report path (default: shapefile-upload-<version>.csv)."),
+    ] = None,
+    id_map: Annotated[
+        str,
+        typer.Option(
+            "--id-map",
+            help="CSV with source_id,region_id columns mapping <regionType>_<lgdCode> to the region id "
+            "(e.g. for wards). Files not in the map are skipped.",
+        ),
+    ] = None,
+):
+    """Upload a folder of boundary GeoJSONs into a version (admin).
+
+    Each file's region id is <regionType>_<lgdCode> from its properties, or
+    looked up in --id-map. Already-uploaded regions are skipped, so an
+    interrupted run can be repeated.
+    """
+    import csv
+    from collections import Counter
+
+    from dataio.sdk.admin import DataIOAdminAPI
+
+    console = Console()
+    mapping = None
+    if id_map:
+        with open(id_map, newline="", encoding="utf-8-sig") as f:
+            mapping = {row["source_id"]: row["region_id"] for row in csv.DictReader(f)}
+    try:
+        results = DataIOAdminAPI().upload_shapefile_folder(
+            folder_path, version, overwrite=overwrite, dry_run=dry_run, workers=workers, id_map=mapping
+        )
+    except Exception as e:
+        console.print(f"[red]Upload failed: {e}[/]")
+        raise typer.Exit(1)
+
+    report = report or f"shapefile-upload-{version}.csv"
+    with open(report, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["file", "region_id", "status", "detail"])
+        writer.writeheader()
+        writer.writerows(results)
+
+    counts = Counter(r["status"] for r in results)
+    table = Table("Status", "Files")
+    for status in ("uploaded", "planned", "exists", "skipped", "failed"):
+        if counts[status]:
+            table.add_row(status, str(counts[status]))
+    console.print(table)
+    console.print(f"Report: {report}")
+    if counts["failed"]:
+        raise typer.Exit(1)
 
 
 @app.command("upload-dataset")

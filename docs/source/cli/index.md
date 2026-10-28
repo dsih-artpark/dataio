@@ -191,7 +191,8 @@ uv run dataio download-shapefile REGION_ID [OPTIONS]
 
 **Options:**
 
-- `-f, --shp-folder TEXT`: Folder to download shapefile to (default: "{data_dir}/GS0012DS0051-Shapefiles_India", where data_dir is derived from the API client)
+- `-f, --shp-folder TEXT`: Folder inside the data directory to download the shapefile to (default: "GS0012DS0051-Shapefiles_India")
+- `-v, --version TEXT`: Shapefile version (default: the newest version that has the region). With a version the file is saved as `REGION_ID_VERSION.geojson`.
 - `--help`: Show help message
 
 **Examples:**
@@ -205,6 +206,9 @@ dataio download-shapefile state_29 --shp-folder "my_shapefiles"
 
 # Download district shapefile
 dataio download-shapefile district_560
+
+# Download an older version
+dataio download-shapefile district_527 --version legacy
 ```
 
 **Output:**
@@ -213,6 +217,40 @@ The command shows the download destination:
 ```
 Shapefile state_29 downloaded to data/GS0012DS0051-Shapefiles_India/state_29.geojson
 ```
+
+---
+
+### `list-shapefiles` and `list-shapefile-versions`
+
+Shapefiles are versioned: each upload batch (for example a new KGIS release) is a version, and older versions are kept. Without `--version`, each region is listed once, as the newest version that has it.
+
+```bash
+dataio list-shapefile-versions
+dataio list-shapefiles --parent-id state_29
+dataio list-shapefiles --version kgis-2026-08
+```
+
+---
+
+### Admin: uploading shapefiles
+
+These need an admin API key.
+
+```bash
+# 1. Create a version for the batch
+dataio create-shapefile-version kgis-2026-08 --source "KGIS (KSRSAC), Karnataka" --dataset-id GS0015DS0123
+
+# 2. Upload a folder of GeoJSONs, one region per file. The region id is
+#    <regionType>_<lgdCode> from each file's properties; file names don't matter.
+#    Check the mapping first with --dry-run; re-running skips regions already uploaded.
+dataio upload-shapefiles "Karnataka shape files/separate" --version kgis-2026-08 --dry-run
+dataio upload-shapefiles "Karnataka shape files/separate" --version kgis-2026-08
+
+# 3. Upload a single file when its region id can't be read from it
+dataio upload-shapefile state_29 state_29.geojson --version kgis-2026-08
+```
+
+The server rejects regions missing from the regions table, non-polygon or non-longitude/latitude GeoJSON, and uploads into the read-only `legacy` version. A region already in the version is only replaced with `--overwrite`. `upload-shapefiles` writes a CSV report of every file's outcome.
 
 ---
 

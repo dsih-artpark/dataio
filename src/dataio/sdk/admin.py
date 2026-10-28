@@ -3,6 +3,8 @@
 import json
 import os
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -561,3 +563,220 @@ class DataIOAdminAPI:
                 results.append({"folder": folder.name, "error": str(e)})
 
         return results
+
+    # Shapefiles
+
+    def create_shapefile_version(
+        self,
+        version: str,
+        source: str,
+        dataset_id: Optional[str] = None,
+        description: Optional[str] = None,
+        released_at: Optional[str] = None,
+    ) -> Dict:
+        """Create a shapefile version (one upload batch, e.g. "kgis-2026-08").
+
+        :param version: Version name: lowercase letters, digits, "." or "-"
+        :param source: Where the boundaries come from
+        :param dataset_id: Catalogue ds_id the boundaries are published as
+        :param description: Free-text notes
+        :param released_at: ISO timestamp that orders versions (default: now).
+            Downloads without a version get the newest version.
+        :returns: The created version
+        """
+        payload = {"version": version, "source": source, "dataset_id": dataset_id,
+                   "description": description, "released_at": released_at}
+        response = self.session.post(
+            f"{self.base_url}/admin/shapefile-versions",
+            json={k: v for k, v in payload.items() if v is not None},
+        )
+        _raise_for_status_with_detail(response)
+        return response.json()
+
+    def upload_shapefile(
+        self,
+        region_id: str,
+        geojson_path: str,
+        version: str,
+        overwrite: bool = False,
+    ) -> Dict:
+        """Upload one region's boundary GeoJSON (Feature or FeatureCollection).
+
+        The server checks the region exists and the GeoJSON is a lon/lat
+        Polygon/MultiPolygon, and stores it as a FeatureCollection whose
+        properties start with region_id/name/parent/parent_name.
+
+        :param region_id: Region id, e.g. "subdistrict_5433"
+        :param geojson_path: Path to the .geojson file
+        :param version: Shapefile version to upload into (create it first)
+        :param overwrite: Replace the region's file if the version already has one
+        :returns: Upload response
+        """
+        return self._post_shapefile(self.session, region_id, Path(geojson_path), version, overwrite)
+
+    def _post_shapefile(self, session, region_id: str, path: Path, version: str, overwrite: bool) -> Dict:
+        with open(path, "rb") as f:
+            response = session.post(
+                f"{self.base_url}/admin/shapefiles/{region_id}",
+                params={"version": version, "overwrite": str(overwrite).lower()},
+                files={"shapefile": (path.name, f, "application/geo+json")},
+            )
+        _raise_for_status_with_detail(response)
+        return response.json()
+
+    def upload_shapefile_folder(
+        self,
+        folder_path: str,
+        version: str,
+        overwrite: bool = False,
+        dry_run: bool = False,
+        workers: int = 4,
+        id_map: Optional[Dict[str, str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Upload every *.geojson under a folder, one region per file.
+
+        Each file's region id is "<regionType>_<lgdCode>", read from the
+        feature's properties (the standardised boundary schema), so file names
+        don't matter. Files without regionType/lgdCode, with more than one
+        feature, or mapping to the same region id as another file are skipped.
+        Regions the version already has are skipped unless overwrite is set,
+        so an interrupted upload can simply be re-run.
+
+        :param folder_path: Folder to scan recursively
+        :param version: Shapefile version to upload into (create it first)
+        :param overwrite: Replace files the version already has
+        :param dry_run: Only map files to region ids; upload nothing
+        :param workers: Parallel uploads
+        :param id_map: For levels whose region ids aren't "<regionType>_<lgdCode>"
+            (e.g. wards: ward_<ULB code>-<ward number>), maps that derived id to
+            the region id. Files whose derived id isn't in the map are skipped.
+        :returns: One result per file: file, region_id, status
+            (uploaded / exists / skipped / failed / planned) and detail
+        """
+        folder = Path(folder_path)
+        if not folder.is_dir():
+            raise FileNotFoundError(f"Folder not found: {folder_path}")
+
+        results: List[Dict[str, Any]] = []
+        planned: Dict[str, List[Path]] = {}
+        for path in sorted(folder.rglob("*.geojson")):
+            region_id, reason = _region_id_from_geojson_file(path)
+            if region_id is not None and id_map is not None:
+                if region_id not in id_map:
+                    reason = f"{region_id} not in the id map"
+                region_id = id_map.get(region_id)
+            if region_id is None:
+                results.append({"file": str(path), "region_id": None, "status": "skipped", "detail": reason})
+            else:
+                planned.setdefault(region_id, []).append(path)
+
+        to_upload = []
+        for region_id, paths in planned.items():
+            if len(paths) > 1:
+                for path in paths:
+                    results.append({"file": str(path), "region_id": region_id, "status": "skipped",
+                                    "detail": f"{len(paths)} files map to this region id"})
+            else:
+                to_upload.append((region_id, paths[0]))
+
+        if dry_run:
+            results.extend({"file": str(p), "region_id": r, "status": "planned", "detail": ""}
+                           for r, p in to_upload)
+            return results
+
+        if not overwrite:
+            existing = {s["region_id"] for s in self._request("GET", "/shapefiles", params={"version": version})}
+            remaining = []
+            for region_id, path in to_upload:
+                if region_id in existing:
+                    results.append({"file": str(path), "region_id": region_id, "status": "exists",
+                                    "detail": "already in this version"})
+                else:
+                    remaining.append((region_id, path))
+            to_upload = remaining
+
+        local = threading.local()
+
+        def upload(item):
+            region_id, path = item
+            if not hasattr(local, "session"):
+                local.session = requests.Session()
+                local.session.headers.update(self.session.headers)
+            try:
+                self._post_shapefile(local.session, region_id, path, version, overwrite)
+                return {"file": str(path), "region_id": region_id, "status": "uploaded", "detail": ""}
+            except Exception as e:
+                return {"file": str(path), "region_id": region_id, "status": "failed", "detail": str(e)}
+
+        with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as progress:
+            task = progress.add_task(f"Uploading 0/{len(to_upload)}", total=len(to_upload))
+            with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+                for done, result in enumerate(pool.map(upload, to_upload), start=1):
+                    results.append(result)
+                    progress.update(task, advance=1, description=f"Uploading {done}/{len(to_upload)}")
+
+        return results
+
+
+def _region_id_from_geojson_file(path: Path):
+    """Returns (region_id, None), or (None, why it can't be mapped)."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+        return None, f"not readable JSON ({e})"
+    if not isinstance(data, dict):
+        return None, "not a GeoJSON object"
+    features = data.get("features")
+    if data.get("type") == "Feature":
+        feature = data
+    elif data.get("type") == "FeatureCollection" and isinstance(features, list) and len(features) == 1:
+        feature = features[0]
+    else:
+        return None, "expected one GeoJSON feature per file"
+    if not isinstance(feature, dict):
+        return None, "the feature isn't a GeoJSON object"
+    properties = feature.get("properties")
+    if properties is None:
+        properties = {}
+    if not isinstance(properties, dict):
+        return None, "feature properties aren't an object"
+    region_type = properties.get("regionType")
+    raw_code = properties.get("lgdCode")
+    lgd_code = _integral_lgd_code(raw_code)
+    if not region_type:
+        return None, "no regionType property"
+    if raw_code in (None, "", 0):
+        return None, "no lgdCode property"
+    if lgd_code is None:
+        return None, f"lgdCode {raw_code!r} isn't a whole number"
+    return f"{region_type}_{lgd_code}", None
+
+
+def _integral_lgd_code(value) -> Optional[int]:
+    """A positive whole-number LGD code (int, integral float or digit string), else None.
+    A fractional code like 527.9 must not round down onto another region's id."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    elif isinstance(value, str) and value.strip().isdigit():
+        value = int(value.strip())
+    return value if isinstance(value, int) and value > 0 else None
+
+
+def _error_detail(response: requests.Response):
+    """The API's error detail, or the start of the body when it isn't a JSON object."""
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict) and payload.get("detail") is not None:
+        return payload["detail"]
+    return response.text[:300]
+
+
+def _raise_for_status_with_detail(response: requests.Response) -> None:
+    """raise_for_status, with the API's error detail in the message."""
+    if response.ok:
+        return
+    raise requests.HTTPError(f"{response.status_code}: {_error_detail(response)}", response=response)

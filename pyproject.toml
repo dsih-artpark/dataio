@@ -62,6 +62,7 @@ api = [
 [project.scripts]
 dataio = "dataio.cli.cli:app"
 all-migrations = "dataio.db.migration_runner:main"
+shapefile-backfill = "dataio.api.shapefile_backfill:main"
 
 [build-system]
 requires = ["hatchling"]

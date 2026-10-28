@@ -1,5 +1,5 @@
 -- Rollback Migration 027: Karnataka regions for the KGIS 2026 boundaries
--- Removes only the 79 rows 027 adds (none existed before it). The wards
+-- Removes the 79 rows 027 adds (027 fails if any existed before it). The wards
 -- under the 9 ULBs are left as they were, pointing at a missing parent.
 -- Fails (foreign key) if a dataset's spatial coverage or a shapefile already
 -- uses one of these regions; remove those first.

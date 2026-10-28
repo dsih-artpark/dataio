@@ -397,9 +397,10 @@ class DataIOAPI:
         )
         if response.status_code in (400, 404):
             try:
-                detail = response.json().get("detail")
+                payload = response.json()
             except ValueError:
-                detail = None
+                payload = None
+            detail = payload.get("detail") if isinstance(payload, dict) else None
             raise ValueError(detail or f"Shapefile for region {region_id} not found")
         response.raise_for_status()
         shapefile = response.content

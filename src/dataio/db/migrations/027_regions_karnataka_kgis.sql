@@ -2,7 +2,9 @@
 -- Regions the KGIS (KSRSAC) boundary set needs, and Karnataka regions in the
 -- latest LGD (2026-10-28) that the regions table doesn't have yet. IDs follow
 -- the existing <type>_<LGD code> scheme; names are LGD's English names, as for
--- the existing rows. None of these existed before. Re-running is harmless.
+-- the existing rows. None of them existed when this was written; the insert
+-- fails (unique region_id) if one already does, so the rollback only ever
+-- removes rows this migration added.
 
 BEGIN;
 
@@ -94,8 +96,7 @@ VALUES
     ('village_962362', 'Malligenagalli', 'subdistrict_7076'),
     ('village_962363', 'Sevapura', 'subdistrict_7076'),
     ('village_962364', 'Mariyammanagara', 'subdistrict_7076'),
-    ('village_962365', 'Vijayanagara', 'subdistrict_7076')
-ON CONFLICT (region_id) DO NOTHING;
+    ('village_962365', 'Vijayanagara', 'subdistrict_7076');
 
 SELECT add_migration(27, '027_regions_karnataka_kgis');
 

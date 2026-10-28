@@ -414,7 +414,7 @@ async def get_collections(
 
 @admin_router.post("/shapefile-versions", tags=["admin/shapefiles"])
 @admin_required
-async def create_shapefile_version(
+def create_shapefile_version(
     payload: ShapefileVersionCreate,
     user: User = Depends(get_user),
     shapefile_service: ShapefileService = Depends(ShapefileService),
@@ -425,7 +425,7 @@ async def create_shapefile_version(
 
 @admin_router.post("/shapefiles/{region_id}", tags=["admin/shapefiles"])
 @admin_required
-async def post_shapefile(
+def post_shapefile(
     shapefile: UploadFile,
     region_id: str,
     version: str = Query(..., description="Shapefile version to upload into (create it first)"),

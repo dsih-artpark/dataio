@@ -274,14 +274,14 @@ for shapefile in shapefiles:
 
 List the shapefile versions, newest first, with their source, dataset id and number of regions.
 
-### `download_shapefile(region_id, shp_folder="data/GS0012DS0051-Shapefiles_India", version=None)`
+### `download_shapefile(region_id, shp_folder=None, version=None)`
 
 Download a shapefile for a specific region.
 
 **Parameters:**
 
 - `region_id` (str): ID of the region to download shapefile for.
-- `shp_folder` (str, optional): Directory to save the shapefile. Defaults to "{data_dir}/GS0012DS0051-Shapefiles_India", where data_dir is derived from the API client.
+- `shp_folder` (str, optional): Folder **inside the client's data_dir** to save the shapefile in (e.g. `"my_shapefiles"` saves to `{data_dir}/my_shapefiles`). Defaults to `GS0012DS0051-Shapefiles_India`, i.e. `{data_dir}/GS0012DS0051-Shapefiles_India`.
 - `version` (str, optional): Shapefile version. Defaults to the newest version that has the region. With a version, the file is saved as `{region_id}_{version}.geojson`.
 
 **Returns:**

@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
-from dataio.sdk.admin import DataIOAdminAPI, _region_id_from_geojson_file
+import pytest
+import requests
+
+from dataio.sdk.admin import DataIOAdminAPI, _raise_for_status_with_detail, _region_id_from_geojson_file
+from dataio.sdk.user import DataIOAPI
 
 GEOMETRY = {"type": "Polygon", "coordinates": [[[74.5, 16.4], [74.6, 16.4], [74.5, 16.4]]]}
 
@@ -35,6 +40,62 @@ def test_files_that_cannot_be_mapped_say_why(tmp_path):
     assert _region_id_from_geojson_file(no_lgd) == (None, "no lgdCode property")
     assert _region_id_from_geojson_file(no_type) == (None, "no regionType property")
     assert _region_id_from_geojson_file(bad)[1].startswith("not readable JSON")
+
+
+@pytest.mark.parametrize(
+    ("lgd_code", "expected"),
+    [(524, "district_524"), (524.0, "district_524"), ("524", "district_524"),
+     (527.9, None), (True, None), (-5, None), ("52a", None)],
+)
+def test_only_whole_number_lgd_codes_make_a_region_id(tmp_path, lgd_code, expected):
+    path = _write(tmp_path / "d.geojson", {"regionType": "district", "lgdCode": lgd_code})
+
+    region_id, reason = _region_id_from_geojson_file(path)
+
+    assert region_id == expected
+    if expected is None:
+        assert "isn't a whole number" in reason
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"type": "FeatureCollection", "features": [1]},
+        {"type": "FeatureCollection", "features": {"a": 1}},
+        {"type": "Feature", "properties": "x", "geometry": GEOMETRY},
+    ],
+)
+def test_malformed_features_are_skipped_not_fatal(tmp_path, data):
+    path = tmp_path / "bad.geojson"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    region_id, reason = _region_id_from_geojson_file(path)
+
+    assert region_id is None and reason
+
+
+def _response(status, body: bytes):
+    response = requests.Response()
+    response.status_code = status
+    response._content = body
+    return response
+
+
+def test_error_bodies_that_are_not_json_objects_still_raise_http_error():
+    with pytest.raises(requests.HTTPError, match=r"^500: \[\]"):
+        _raise_for_status_with_detail(_response(500, b"[]"))
+    with pytest.raises(requests.HTTPError, match="^409: exists"):
+        _raise_for_status_with_detail(_response(409, b'{"detail": "exists"}'))
+
+
+def test_download_not_found_with_a_non_object_body_is_a_value_error(tmp_path):
+    client = object.__new__(DataIOAPI)
+    client.base_url = "http://test"
+    client.data_dir = str(tmp_path)
+    client.session = SimpleNamespace(request=lambda *a, **k: _response(404, b"[]"))
+
+    with pytest.raises(ValueError, match="Shapefile for region district_527 not found"):
+        client.download_shapefile("district_527")
 
 
 def test_folder_dry_run_plans_uploads_and_skips_duplicates_without_calling_the_api(tmp_path):

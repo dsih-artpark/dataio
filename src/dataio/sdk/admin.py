@@ -726,32 +726,57 @@ def _region_id_from_geojson_file(path: Path):
         return None, f"not readable JSON ({e})"
     if not isinstance(data, dict):
         return None, "not a GeoJSON object"
+    features = data.get("features")
     if data.get("type") == "Feature":
         feature = data
-    elif data.get("type") == "FeatureCollection" and len(data.get("features") or []) == 1:
-        feature = data["features"][0]
+    elif data.get("type") == "FeatureCollection" and isinstance(features, list) and len(features) == 1:
+        feature = features[0]
     else:
         return None, "expected one GeoJSON feature per file"
-    properties = (feature or {}).get("properties") or {}
+    if not isinstance(feature, dict):
+        return None, "the feature isn't a GeoJSON object"
+    properties = feature.get("properties")
+    if properties is None:
+        properties = {}
+    if not isinstance(properties, dict):
+        return None, "feature properties aren't an object"
     region_type = properties.get("regionType")
-    lgd_code = properties.get("lgdCode")
+    raw_code = properties.get("lgdCode")
+    lgd_code = _integral_lgd_code(raw_code)
     if not region_type:
         return None, "no regionType property"
-    if lgd_code in (None, "", 0):
+    if raw_code in (None, "", 0):
         return None, "no lgdCode property"
-    try:
-        lgd_code = int(lgd_code)
-    except (TypeError, ValueError):
-        return None, f"lgdCode {lgd_code!r} isn't a number"
+    if lgd_code is None:
+        return None, f"lgdCode {raw_code!r} isn't a whole number"
     return f"{region_type}_{lgd_code}", None
+
+
+def _integral_lgd_code(value) -> Optional[int]:
+    """A positive whole-number LGD code (int, integral float or digit string), else None.
+    A fractional code like 527.9 must not round down onto another region's id."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    elif isinstance(value, str) and value.strip().isdigit():
+        value = int(value.strip())
+    return value if isinstance(value, int) and value > 0 else None
+
+
+def _error_detail(response: requests.Response):
+    """The API's error detail, or the start of the body when it isn't a JSON object."""
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict) and payload.get("detail") is not None:
+        return payload["detail"]
+    return response.text[:300]
 
 
 def _raise_for_status_with_detail(response: requests.Response) -> None:
     """raise_for_status, with the API's error detail in the message."""
     if response.ok:
         return
-    try:
-        detail = response.json().get("detail")
-    except ValueError:
-        detail = response.text[:300]
-    raise requests.HTTPError(f"{response.status_code}: {detail}", response=response)
+    raise requests.HTTPError(f"{response.status_code}: {_error_detail(response)}", response=response)

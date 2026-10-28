@@ -78,6 +78,7 @@ def test_feature_collection_keeps_every_feature():
         (_bytes({"type": "FeatureCollection", "features": []}), "no features"),
         (_bytes({**KGIS_FEATURE, "geometry": {"type": "Point", "coordinates": [74.5, 16.4]}}), "Polygon or MultiPolygon"),
         (_bytes({**KGIS_FEATURE, "geometry": {"type": "Polygon", "coordinates": []}}), "no coordinates"),
+        (_bytes({**KGIS_FEATURE, "properties": [1]}), "properties must be an object"),
         # Projected metres (e.g. UTM) instead of longitude/latitude.
         (_bytes({**KGIS_FEATURE, "geometry": {"type": "Polygon", "coordinates": [[[512000.0, 1815000.0]]]}}), "EPSG:4326"),
     ],

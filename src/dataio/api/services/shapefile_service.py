@@ -78,7 +78,11 @@ def normalise_geojson(content: bytes, region, parent) -> dict:
                 f"feature {i} coordinates {position[:2]} aren't longitude/latitude "
                 "(GeoJSON must be EPSG:4326)"
             )
-        properties = feature.get("properties") or {}
+        properties = feature.get("properties")
+        if properties is None:
+            properties = {}
+        if not isinstance(properties, dict):
+            raise ValueError(f"feature {i} properties must be an object")
         normalised.append({
             "type": "Feature",
             "properties": {**standard, **{k: v for k, v in properties.items() if k not in standard}},

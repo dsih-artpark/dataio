@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, List, Optional, Dict
 from pydantic import BaseModel, Field
 from dataio.api.database.enums import (
@@ -212,6 +213,16 @@ class RegionResponse(BaseModel):
     region_id: str
     region_name: str
     parent_region_id: Optional[str] = None
+
+
+class ShapefileVersionCreate(BaseModel):
+    version: str = Field(..., description="Version name, e.g. 'kgis-2026-08' (lowercase letters, digits, '.', '-')")
+    source: str = Field(..., description="Where the boundaries come from, e.g. 'KGIS (KSRSAC), Karnataka'")
+    dataset_id: Optional[str] = Field(None, description="Catalogue ds_id these boundaries are published as")
+    description: Optional[str] = None
+    released_at: Optional[datetime] = Field(
+        None, description="Orders versions; defaults to now. The newest version is served by default."
+    )
 
 
 # Weather Data Models

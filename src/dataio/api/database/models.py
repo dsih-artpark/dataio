@@ -1,4 +1,5 @@
 from sqlalchemy import (
+    BigInteger,
     Column,
     Integer,
     String,
@@ -474,4 +475,31 @@ class DatasetDownload(Base):
 
     # Relationship
     user = relationship("User", backref=backref("downloads", passive_deletes=True))
+
+
+class ShapefileVersion(Base):
+    """One batch of shapefiles (migration 026). released_at orders versions:
+    a download without a version gets the newest one that has the region."""
+
+    __tablename__ = "shapefile_versions"
+
+    version = Column(Text, primary_key=True)
+    source = Column(Text, nullable=False)
+    dataset_id = Column(Text, nullable=True)
+    description = Column(Text, nullable=True)
+    released_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_by = Column(Text, ForeignKey("users.email", ondelete="SET NULL"), nullable=True)
+
+
+class Shapefile(Base):
+    """Index of shapefile objects in S3: one row per (region, version)."""
+
+    __tablename__ = "shapefiles"
+
+    region_id = Column(Text, ForeignKey("regions.region_id"), primary_key=True)
+    version = Column(Text, ForeignKey("shapefile_versions.version"), primary_key=True)
+    s3_key = Column(Text, nullable=False, unique=True)
+    size_bytes = Column(BigInteger, nullable=True)
+    uploaded_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    uploaded_by = Column(Text, ForeignKey("users.email", ondelete="SET NULL"), nullable=True)
 

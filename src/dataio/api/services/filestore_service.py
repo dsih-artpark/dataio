@@ -459,50 +459,48 @@ class FilestoreService(BaseService):
         )
         return download_link
 
-    def upload_shapefile(self, file: bytes, region_id: str, parent_id: str):
-        """
-        Upload shapefile to S3
-        """
-        self.bucket.put_object(
-            Body=file,
-            Key=f"shapefiles/{parent_id}/{region_id}.geojson.gz",
-        )
+    @staticmethod
+    def shapefile_key(version: str, parent_id: str, region_id: str) -> str:
+        """S3 key of a shapefile. Legacy files (from before versioning) keep
+        their original shapefiles/<parent_id>/<region_id>.geojson.gz key."""
+        if version == "legacy":
+            return f"shapefiles/{parent_id}/{region_id}.geojson.gz"
+        return f"shapefiles/{version}/{parent_id}/{region_id}.geojson.gz"
 
-    def get_shapefile(self, region_id: str, parent_id: str):
+    def upload_shapefile(self, file: bytes, key: str):
         """
-        Get shapefile from S3
+        Upload a gzipped shapefile to S3
         """
-        return (
-            self.bucket.Object(f"shapefiles/{parent_id}/{region_id}.geojson.gz")
-            .get()["Body"]
-            .read()
-        )
+        self.bucket.put_object(Body=file, Key=key)
 
-    def list_shapefiles(self):
+    def get_shapefile(self, key: str):
         """
-        List all available shapefiles from S3 shapefiles/ prefix.
-        Returns organized data with parent_id and region_id information.
+        Get a gzipped shapefile from S3
+        """
+        return self.bucket.Object(key).get()["Body"].read()
+
+    def list_legacy_shapefiles(self):
+        """
+        List the shapefiles uploaded before versioning, i.e. keys of the form
+        shapefiles/{parent_id}/{region_id}.geojson.gz. Versioned keys
+        (shapefiles/{version}/{parent_id}/...) are left out.
         """
         try:
             shapefiles_list = []
 
             for obj in self.bucket.objects.filter(Prefix="shapefiles/"):
                 if obj.key.endswith(".geojson.gz"):
-                    # Parse the key structure: shapefiles/{parent_id}/{region_id}.geojson.gz
                     key_parts = obj.key.split("/")
-                    if len(key_parts) >= 3:
-                        parent_id = key_parts[1]
-                        region_filename = key_parts[2]
-                        region_id = region_filename.replace(".geojson.gz", "")
-
-                        shapefile_info = {
-                            "region_id": region_id,
-                            "parent_id": parent_id,
-                            "last_modified": obj.last_modified.isoformat()
-                            if obj.last_modified
-                            else None,
-                        }
-                        shapefiles_list.append(shapefile_info)
+                    if len(key_parts) == 3:
+                        shapefiles_list.append(
+                            {
+                                "key": obj.key,
+                                "region_id": key_parts[2].replace(".geojson.gz", ""),
+                                "parent_id": key_parts[1],
+                                "size": obj.size,
+                                "last_modified": obj.last_modified,
+                            }
+                        )
 
             return shapefiles_list
         except Exception as e:

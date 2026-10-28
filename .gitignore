@@ -179,3 +179,6 @@ ARTPARK Data Catalogue.xlsx
 # Local docs and drafts (untracked)
 Data_Standardisation_Docs/
 prod_datasets_by_team_contact.md
+# Local notes and design drafts (untracked)
+/notes/
+/DESIGN.md

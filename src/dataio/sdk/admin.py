@@ -603,8 +603,10 @@ class DataIOAdminAPI:
         """Upload one region's boundary GeoJSON (Feature or FeatureCollection).
 
         The server checks the region exists and the GeoJSON is a lon/lat
-        Polygon/MultiPolygon, and stores it as a FeatureCollection whose
-        properties start with region_id/name/parent/parent_name.
+        Polygon/MultiPolygon, and stores it in the ARTPARK GeoJSON spec format:
+        a FeatureCollection whose features have id = region_id and properties
+        starting with regionName/regionType/parentID/parentName. A missing
+        lastUpdated is filled in from the version's release date.
 
         :param region_id: Region id, e.g. "subdistrict_5433"
         :param geojson_path: Path to the .geojson file

@@ -217,15 +217,17 @@ async def download_weather_data(
     start_str = start_date_obj.strftime("%Y%m%d")
     end_str = end_date_obj.strftime("%Y%m%d")
 
-    # Extract region_id from geojson properties if available
+    # Extract region_id from the feature id (spec-format shapefiles) or from
+    # properties.region_id (legacy shapefiles) if available
     region_id = None
-    if "properties" in request.geojson:
-        region_id = request.geojson["properties"].get("region_id")
-    elif request.geojson.get("type") == "FeatureCollection" and request.geojson.get("features"):
+    feature = request.geojson
+    if request.geojson.get("type") == "FeatureCollection" and request.geojson.get("features"):
         # Check first feature
-        first_feature = request.geojson["features"][0]
-        if "properties" in first_feature:
-            region_id = first_feature["properties"].get("region_id")
+        feature = request.geojson["features"][0]
+    if isinstance(feature, dict):
+        region_id = feature.get("id")
+        if region_id is None and isinstance(feature.get("properties"), dict):
+            region_id = feature["properties"].get("region_id")
 
     # Construct filename
     filename_parts = [dataset_name, variables_str, start_str, end_str]

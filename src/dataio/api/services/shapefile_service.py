@@ -33,6 +33,8 @@ RESERVED_VERSIONS = {
 }
 DATASET_ID_PATTERN = re.compile(r"^[A-Z]{2}\d{4}DS\d{4}$")
 GEOMETRY_TYPES = {"Polygon", "MultiPolygon"}
+# A date, optionally followed by an RFC 3339 time.
+LAST_UPDATED_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}(T.*)?$")
 
 
 def _first_position(coordinates):
@@ -43,9 +45,11 @@ def _first_position(coordinates):
 
 def normalise_geojson(content: bytes, region, parent) -> dict:
     """Parses an uploaded GeoJSON Feature or FeatureCollection and returns it as
-    a FeatureCollection, the layout the pre-versioning files use. Each feature's
-    properties start with region_id/name/parent/parent_name from the regions
-    table, followed by the source's own properties unchanged.
+    a FeatureCollection following the ARTPARK GeoJSON spec: every feature's id
+    is the region id, and its properties start with regionName/regionType/
+    parentID/parentName from the regions table (names in capitals), followed by
+    the source's other properties unchanged. lastUpdated is required, since
+    the spec needs every feature to carry a year.
 
     Raises ValueError when the content isn't usable boundary GeoJSON."""
     try:
@@ -64,10 +68,10 @@ def normalise_geojson(content: bytes, region, parent) -> dict:
         raise ValueError("the FeatureCollection has no features")
 
     standard = {
-        "region_id": region.region_id,
-        "name": region.region_name,
-        "parent": region.parent_region_id,
-        "parent_name": parent.region_name if parent is not None else None,
+        "regionName": region.region_name.upper(),
+        "regionType": region.region_id.split("_", 1)[0],
+        "parentID": region.parent_region_id,
+        "parentName": parent.region_name.upper() if parent is not None else None,
     }
     normalised = []
     for i, feature in enumerate(features):
@@ -89,8 +93,12 @@ def normalise_geojson(content: bytes, region, parent) -> dict:
             properties = {}
         if not isinstance(properties, dict):
             raise ValueError(f"feature {i} properties must be an object")
+        last_updated = properties.get("lastUpdated")
+        if not (isinstance(last_updated, str) and LAST_UPDATED_PATTERN.match(last_updated)):
+            raise ValueError(f"feature {i} needs a lastUpdated date (YYYY-MM-DD)")
         normalised.append({
             "type": "Feature",
+            "id": region.region_id,
             "properties": {**standard, **{k: v for k, v in properties.items() if k not in standard}},
             "geometry": geometry,
         })

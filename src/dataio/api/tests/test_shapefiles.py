@@ -31,7 +31,9 @@ PARENT = SimpleNamespace(region_id="district_527", region_name="Belagavi", paren
 POLYGON = {"type": "Polygon", "coordinates": [[[74.5, 16.4], [74.6, 16.4], [74.6, 16.5], [74.5, 16.4]]]}
 KGIS_FEATURE = {
     "type": "Feature",
-    "properties": {"regionName": "CHIKKODI", "regionType": "subdistrict", "lgdCode": 5433, "parentID": "district_1"},
+    "id": "subdistrict_1",
+    "properties": {"regionName": "Chikkodi Taluk", "regionType": "taluk", "lgdCode": 5433,
+                   "parentID": "district_1", "lastUpdated": "2026-08-04"},
     "geometry": POLYGON,
 }
 USER = SimpleNamespace(email="admin@example.com")
@@ -44,19 +46,22 @@ def _bytes(obj) -> bytes:
 # normalise_geojson
 
 
-def test_feature_becomes_feature_collection_with_region_properties_first():
+def test_feature_becomes_feature_collection_following_the_geojson_spec():
     result = svc.normalise_geojson(_bytes(KGIS_FEATURE), REGION, PARENT)
 
     assert result["type"] == "FeatureCollection"
     [feature] = result["features"]
-    assert list(feature["properties"])[:4] == ["region_id", "name", "parent", "parent_name"]
-    assert feature["properties"]["region_id"] == "subdistrict_5433"
-    assert feature["properties"]["name"] == "Chikkodi"
-    assert feature["properties"]["parent"] == "district_527"
-    assert feature["properties"]["parent_name"] == "Belagavi"
-    # The source's own properties are kept unchanged.
+    # The region id replaces the source's id; region fields come from the regions table.
+    assert feature["id"] == "subdistrict_5433"
+    assert list(feature["properties"])[:4] == ["regionName", "regionType", "parentID", "parentName"]
     assert feature["properties"]["regionName"] == "CHIKKODI"
-    assert feature["properties"]["parentID"] == "district_1"
+    assert feature["properties"]["regionType"] == "subdistrict"
+    assert feature["properties"]["parentID"] == "district_527"
+    assert feature["properties"]["parentName"] == "BELAGAVI"
+    # The source's other properties are kept unchanged.
+    assert feature["properties"]["lgdCode"] == 5433
+    assert feature["properties"]["lastUpdated"] == "2026-08-04"
+    assert not {"region_id", "name", "parent", "parent_name"} & set(feature["properties"])
     assert feature["geometry"] == POLYGON
 
 
@@ -66,7 +71,16 @@ def test_feature_collection_keeps_every_feature():
     result = svc.normalise_geojson(_bytes(collection), REGION, None)
 
     assert len(result["features"]) == 2
-    assert result["features"][0]["properties"]["parent_name"] is None
+    assert [f["id"] for f in result["features"]] == ["subdistrict_5433", "subdistrict_5433"]
+    assert result["features"][0]["properties"]["parentName"] is None
+
+
+def test_last_updated_may_carry_a_time():
+    feature = {**KGIS_FEATURE, "properties": {**KGIS_FEATURE["properties"], "lastUpdated": "2026-01-21T11:43:48+05:30"}}
+
+    [result] = svc.normalise_geojson(_bytes(feature), REGION, PARENT)["features"]
+
+    assert result["properties"]["lastUpdated"] == "2026-01-21T11:43:48+05:30"
 
 
 @pytest.mark.parametrize(
@@ -79,6 +93,8 @@ def test_feature_collection_keeps_every_feature():
         (_bytes({**KGIS_FEATURE, "geometry": {"type": "Point", "coordinates": [74.5, 16.4]}}), "Polygon or MultiPolygon"),
         (_bytes({**KGIS_FEATURE, "geometry": {"type": "Polygon", "coordinates": []}}), "no coordinates"),
         (_bytes({**KGIS_FEATURE, "properties": [1]}), "properties must be an object"),
+        (_bytes({**KGIS_FEATURE, "properties": {"lgdCode": 5433}}), "needs a lastUpdated"),
+        (_bytes({**KGIS_FEATURE, "properties": {"lastUpdated": "2026"}}), "needs a lastUpdated"),
         # Projected metres (e.g. UTM) instead of longitude/latitude.
         (_bytes({**KGIS_FEATURE, "geometry": {"type": "Polygon", "coordinates": [[[512000.0, 1815000.0]]]}}), "EPSG:4326"),
     ],
@@ -188,7 +204,7 @@ def test_upload_stores_normalised_gzipped_geojson_under_the_version(db):
 
     key = "shapefiles/kgis-2026-08/subdistrict/subdistrict_5433/subdistrict_5433-boundary.geojson.gz"
     stored = json.loads(gzip.decompress(filestore.objects[key]))
-    assert stored["features"][0]["properties"]["region_id"] == "subdistrict_5433"
+    assert stored["features"][0]["id"] == "subdistrict_5433"
     assert db.saved == [("subdistrict_5433", "kgis-2026-08", key, len(filestore.objects[key]), USER.email)]
     assert result == {"region_id": "subdistrict_5433", "version": "kgis-2026-08",
                       "size_bytes": len(filestore.objects[key]), "overwritten": False}

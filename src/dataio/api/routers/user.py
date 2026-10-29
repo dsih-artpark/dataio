@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from fastapi import HTTPException, Query, Depends, APIRouter
 from fastapi.responses import Response
 import logging
@@ -16,6 +16,7 @@ from dataio.api.auth import (
     user_has_weather_data_download_access,
 )
 from dataio.api.services import UserService
+from dataio.api.services.shapefile_service import ShapefileService
 from dataio.api.services.weather_service import WeatherService
 from dataio.api.auth.exceptions import AuthenticationError
 
@@ -72,29 +73,47 @@ async def get_dataset_manifest(
 
 @user_router.get("/shapefiles")
 async def get_shapefiles_list(
-    user: User = Depends(get_user), user_service: UserService = Depends(UserService)
+    version: Optional[str] = Query(None, description="Only this version (default: newest version of each region)"),
+    parent_id: Optional[str] = Query(None, description="Only regions with this parent, e.g. state_29"),
+    user: User = Depends(get_user),
+    shapefile_service: ShapefileService = Depends(ShapefileService),
 ):
     """
-    Get list of shapefiles available on S3.
+    Get list of available shapefiles.
 
     Returns:
-    - List of available shapefiles with metadata
+    - List of available shapefiles with metadata. Without a version, each
+      region appears once, as the newest version that has it.
     """
-    logger.info(f"SHAPEFILE_LIST_REQUEST: {user.email}")
-    return user_service.get_shapefiles_list(user)
+    logger.info(f"SHAPEFILE_LIST_REQUEST: {user.email} version={version} parent_id={parent_id}")
+    return shapefile_service.list_shapefiles(version=version, parent_id=parent_id)
+
+
+# Declared before /shapefiles/{region_id} so "versions" isn't taken as a region id.
+@user_router.get("/shapefiles/versions")
+async def get_shapefile_versions(
+    user: User = Depends(get_user),
+    shapefile_service: ShapefileService = Depends(ShapefileService),
+):
+    """List shapefile versions, newest first."""
+    logger.info(f"SHAPEFILE_VERSIONS_REQUEST: {user.email}")
+    return shapefile_service.list_versions()
 
 
 @user_router.get("/shapefiles/{region_id}")
 async def get_shapefile(
     region_id: str,
+    version: Optional[str] = Query(None, description="Shapefile version (default: newest that has the region)"),
     user: User = Depends(get_user),
-    user_service: UserService = Depends(UserService),
+    shapefile_service: ShapefileService = Depends(ShapefileService),
 ):
-    logger.info(f"SHAPEFILE_DOWNLOAD_REQUEST: {user.email} for region {region_id}")
+    logger.info(f"SHAPEFILE_DOWNLOAD_REQUEST: {user.email} for region {region_id} version={version}")
+    content, served_version = shapefile_service.get_shapefile(region_id, user.email, version)
     return Response(
-        content=user_service.get_shapefile(region_id, user.email),
+        content=content,
         headers={
-            "Content-Disposition": f'attachment; filename="{region_id}.geojson.gz"'
+            "Content-Disposition": f'attachment; filename="{region_id}.geojson.gz"',
+            "X-Shapefile-Version": served_version,
         },
         media_type="application/gzip",
     )
@@ -198,15 +217,17 @@ async def download_weather_data(
     start_str = start_date_obj.strftime("%Y%m%d")
     end_str = end_date_obj.strftime("%Y%m%d")
 
-    # Extract region_id from geojson properties if available
+    # Extract region_id from the feature id (spec-format shapefiles) or from
+    # properties.region_id (legacy shapefiles) if available
     region_id = None
-    if "properties" in request.geojson:
-        region_id = request.geojson["properties"].get("region_id")
-    elif request.geojson.get("type") == "FeatureCollection" and request.geojson.get("features"):
+    feature = request.geojson
+    if request.geojson.get("type") == "FeatureCollection" and request.geojson.get("features"):
         # Check first feature
-        first_feature = request.geojson["features"][0]
-        if "properties" in first_feature:
-            region_id = first_feature["properties"].get("region_id")
+        feature = request.geojson["features"][0]
+    if isinstance(feature, dict):
+        region_id = feature.get("id")
+        if region_id is None and isinstance(feature.get("properties"), dict):
+            region_id = feature["properties"].get("region_id")
 
     # Construct filename
     filename_parts = [dataset_name, variables_str, start_str, end_str]

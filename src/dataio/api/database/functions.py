@@ -7,8 +7,9 @@ from sqlalchemy.orm import joinedload
 import bcrypt
 import secrets
 import dateutil
-from sqlalchemy import or_, select, text
-from datetime import datetime, timedelta
+from sqlalchemy import func, or_, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from datetime import datetime, timedelta, timezone
 
 from dataio.api.database.config import Session, engine
 from dataio.api.database.enums import ResourceType, DatasetManifestDraftStatus
@@ -32,6 +33,8 @@ from dataio.api.database.models import (
     Region,
     RateLimit,
     DatasetManifestDraft,
+    Shapefile,
+    ShapefileVersion,
 )
 from dataio.api.auth.permissions import determine_highest_permission
 from dataio.api.models import (
@@ -1586,42 +1589,6 @@ def delete_raw_dataset(rds_id: str):
         session.close()
 
 
-def get_parentID_of_region(region_id: str):
-    session = Session()
-    try:
-        region = session.query(Region).filter(Region.region_id == region_id).first()
-        if region is None:
-            return None
-        parent_id = region.parent_region_id
-        return parent_id
-    except Exception as e:
-        logger.error(f"Error fetching parent id from DB: {str(e)}")
-        raise
-    finally:
-        session.close()
-
-
-def get_regions_by_ids(region_ids: List[str]):
-    """
-    Get region names by their region_ids.
-
-    Args:
-        region_ids: List of region_id strings
-
-    Returns:
-        Dict mapping region_id to region_name
-    """
-    session = Session()
-    try:
-        regions = session.query(Region).filter(Region.region_id.in_(region_ids)).all()
-        return {region.region_id: region.region_name for region in regions}
-    except Exception as e:
-        logger.error(f"Error fetching regions from DB: {str(e)}")
-        raise
-    finally:
-        session.close()
-
-
 def check_rate_limit_exceeded(user_email: str, access_point: str):
     session = Session()
     try:
@@ -1673,8 +1640,8 @@ def update_shapefile_rate_limit(user_email: str):
         rate_limit = (
             session.query(RateLimit)
             .filter(
-                RateLimit.user_email == user_email
-                and RateLimit.access_point == "shapefile"
+                RateLimit.user_email == user_email,
+                RateLimit.access_point == "shapefile",
             )
             .first()
         )
@@ -1692,6 +1659,199 @@ def update_shapefile_rate_limit(user_email: str):
             session.refresh(rate_limit)
     except Exception as e:
         logger.error(f"Error updating shapefile download count: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def get_region(region_id: str):
+    """Returns the Region row for region_id, or None if it isn't in the table."""
+    session = Session()
+    try:
+        return session.query(Region).filter(Region.region_id == region_id).first()
+    except Exception as e:
+        logger.error(f"Error fetching region from DB: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def get_shapefile_version(version: str):
+    session = Session()
+    try:
+        return session.get(ShapefileVersion, version)
+    except Exception as e:
+        logger.error(f"Error fetching shapefile version from DB: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def list_shapefile_versions():
+    """Every shapefile version, newest first, with how many regions each has."""
+    session = Session()
+    try:
+        rows = (
+            session.query(ShapefileVersion, func.count(Shapefile.region_id))
+            .outerjoin(Shapefile, Shapefile.version == ShapefileVersion.version)
+            .group_by(ShapefileVersion.version)
+            .order_by(ShapefileVersion.released_at.desc())
+            .all()
+        )
+        return [
+            {
+                "version": v.version,
+                "source": v.source,
+                "dataset_id": v.dataset_id,
+                "description": v.description,
+                "released_at": v.released_at.isoformat() if v.released_at else None,
+                "regions": count,
+            }
+            for v, count in rows
+        ]
+    except Exception as e:
+        logger.error(f"Error listing shapefile versions from DB: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def create_shapefile_version(
+    version: str,
+    source: str,
+    dataset_id: Optional[str],
+    description: Optional[str],
+    released_at: Optional[datetime],
+    created_by: Optional[str],
+):
+    session = Session()
+    try:
+        row = ShapefileVersion(
+            version=version,
+            source=source,
+            dataset_id=dataset_id,
+            description=description,
+            created_by=created_by,
+        )
+        if released_at is not None:
+            row.released_at = released_at
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return row
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error creating shapefile version: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def get_shapefile_record(region_id: str, version: Optional[str] = None):
+    """The indexed shapefile for region_id: of that version, or else of the
+    newest version that has the region. None if there isn't one."""
+    session = Session()
+    try:
+        query = (
+            session.query(Shapefile)
+            .join(ShapefileVersion, ShapefileVersion.version == Shapefile.version)
+            .filter(Shapefile.region_id == region_id)
+        )
+        if version is not None:
+            query = query.filter(Shapefile.version == version)
+        return query.order_by(ShapefileVersion.released_at.desc()).first()
+    except Exception as e:
+        logger.error(f"Error fetching shapefile record from DB: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def list_shapefile_records(version: Optional[str] = None, parent_id: Optional[str] = None):
+    """Indexed shapefiles with region names, ordered by region_id. Without a
+    version, each region appears once, as its newest version."""
+    session = Session()
+    try:
+        query = (
+            session.query(
+                Shapefile.region_id,
+                Region.region_name,
+                Region.parent_region_id,
+                Shapefile.version,
+                Shapefile.uploaded_at,
+            )
+            .join(Region, Region.region_id == Shapefile.region_id)
+            .join(ShapefileVersion, ShapefileVersion.version == Shapefile.version)
+        )
+        if parent_id is not None:
+            query = query.filter(Region.parent_region_id == parent_id)
+        if version is not None:
+            query = query.filter(Shapefile.version == version).order_by(Shapefile.region_id)
+        else:
+            query = query.distinct(Shapefile.region_id).order_by(
+                Shapefile.region_id, ShapefileVersion.released_at.desc()
+            )
+        return [
+            {
+                "region_id": row.region_id,
+                "region_name": row.region_name,
+                "parent_id": row.parent_region_id,
+                "version": row.version,
+                "last_modified": row.uploaded_at.isoformat() if row.uploaded_at else None,
+            }
+            for row in query.all()
+        ]
+    except Exception as e:
+        logger.error(f"Error listing shapefile records from DB: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def save_shapefile_record(
+    region_id: str,
+    version: str,
+    s3_key: str,
+    size_bytes: int,
+    uploaded_by: Optional[str],
+):
+    """Adds the index row for an uploaded shapefile, or updates it on overwrite."""
+    session = Session()
+    try:
+        row = session.get(Shapefile, (region_id, version))
+        if row is None:
+            row = Shapefile(region_id=region_id, version=version)
+            session.add(row)
+        row.s3_key = s3_key
+        row.size_bytes = size_bytes
+        row.uploaded_by = uploaded_by
+        row.uploaded_at = datetime.now(timezone.utc)
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error saving shapefile record: {str(e)}")
+        raise
+    finally:
+        session.close()
+
+
+def add_shapefile_records(rows: List[dict]) -> int:
+    """Inserts index rows (region_id, version, s3_key, size_bytes, uploaded_at),
+    skipping any (region, version) already indexed. Returns how many were added."""
+    if not rows:
+        return 0
+    session = Session()
+    try:
+        result = session.execute(
+            pg_insert(Shapefile).values(rows).on_conflict_do_nothing(
+                index_elements=[Shapefile.region_id, Shapefile.version]
+            )
+        )
+        session.commit()
+        return result.rowcount
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error adding shapefile records: {str(e)}")
         raise
     finally:
         session.close()

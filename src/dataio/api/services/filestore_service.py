@@ -462,10 +462,15 @@ class FilestoreService(BaseService):
     @staticmethod
     def shapefile_key(version: str, parent_id: str, region_id: str) -> str:
         """S3 key of a shapefile. Legacy files (from before versioning) keep
-        their original shapefiles/<parent_id>/<region_id>.geojson.gz key."""
+        their original shapefiles/<parent_id>/<region_id>.geojson.gz key.
+        Versioned files are grouped by region type, not parent, so a key
+        doesn't change when a region moves to another parent:
+        shapefiles/<version>/<type>/<region_id>/<region_id>-boundary.geojson.gz
+        (the region folder leaves room for combined child layers later)."""
         if version == "legacy":
             return f"shapefiles/{parent_id}/{region_id}.geojson.gz"
-        return f"shapefiles/{version}/{parent_id}/{region_id}.geojson.gz"
+        region_type = region_id.split("_", 1)[0]
+        return f"shapefiles/{version}/{region_type}/{region_id}/{region_id}-boundary.geojson.gz"
 
     def upload_shapefile(self, file: bytes, key: str):
         """
@@ -482,8 +487,8 @@ class FilestoreService(BaseService):
     def list_legacy_shapefiles(self):
         """
         List the shapefiles uploaded before versioning, i.e. keys of the form
-        shapefiles/{parent_id}/{region_id}.geojson.gz. Versioned keys
-        (shapefiles/{version}/{parent_id}/...) are left out.
+        shapefiles/{parent_id}/{region_id}.geojson.gz. Deeper keys (versioned
+        shapefiles/{version}/{type}/... and other layouts) are left out.
         """
         try:
             shapefiles_list = []

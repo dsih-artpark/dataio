@@ -95,9 +95,21 @@ def test_legacy_key_keeps_the_pre_versioning_layout():
     assert FilestoreService.shapefile_key("legacy", "district_527", "subdistrict_5433") == (
         "shapefiles/district_527/subdistrict_5433.geojson.gz"
     )
-    assert FilestoreService.shapefile_key("kgis-2026-08", "district_527", "subdistrict_5433") == (
-        "shapefiles/kgis-2026-08/district_527/subdistrict_5433.geojson.gz"
-    )
+
+
+@pytest.mark.parametrize(
+    ("parent_id", "region_id", "key"),
+    [
+        ("district_527", "subdistrict_5433",
+         "shapefiles/kgis-2026-08/subdistrict/subdistrict_5433/subdistrict_5433-boundary.geojson.gz"),
+        ("ulb_272000", "ward_272000-16",
+         "shapefiles/kgis-2026-08/ward/ward_272000-16/ward_272000-16-boundary.geojson.gz"),
+        (None, "country_IN", "shapefiles/kgis-2026-08/country/country_IN/country_IN-boundary.geojson.gz"),
+    ],
+)
+def test_versioned_key_groups_by_region_type_not_parent(parent_id, region_id, key):
+    assert FilestoreService.shapefile_key("kgis-2026-08", parent_id, region_id) == key
+    assert FilestoreService.shapefile_key("kgis-2026-08", "state_29", region_id) == key
 
 
 def test_list_legacy_shapefiles_leaves_out_versioned_keys():
@@ -106,6 +118,8 @@ def test_list_legacy_shapefiles_leaves_out_versioned_keys():
         "shapefiles/country_IN/state_29.geojson.gz",
         "shapefiles/country_IN/state_36",  # stray object without the extension
         "shapefiles/kgis-2026-08/state_29/district_527.geojson.gz",
+        "shapefiles/kgis-2026-08/district/district_527/district_527-boundary.geojson.gz",
+        "shapefiles/state/state_29/state_29-boundary.geojson.gz",
     ]
     filestore = object.__new__(FilestoreService)
     filestore.bucket = SimpleNamespace(objects=SimpleNamespace(filter=lambda Prefix: [
@@ -172,7 +186,7 @@ def test_upload_stores_normalised_gzipped_geojson_under_the_version(db):
 
     result = _service(filestore).upload_shapefile(_upload(), "subdistrict_5433", "kgis-2026-08", False, USER)
 
-    key = "shapefiles/kgis-2026-08/district_527/subdistrict_5433.geojson.gz"
+    key = "shapefiles/kgis-2026-08/subdistrict/subdistrict_5433/subdistrict_5433-boundary.geojson.gz"
     stored = json.loads(gzip.decompress(filestore.objects[key]))
     assert stored["features"][0]["properties"]["region_id"] == "subdistrict_5433"
     assert db.saved == [("subdistrict_5433", "kgis-2026-08", key, len(filestore.objects[key]), USER.email)]
@@ -260,6 +274,8 @@ def test_download_respects_the_rate_limit(db):
         ("KGIS 2026", None, 400),
         ("kgis-2026-08", "DS0123", 400),
         ("legacy", None, 409),
+        ("state", None, 400),
+        ("village", None, 400),
     ],
 )
 def test_create_version_validates_names_and_rejects_duplicates(db, version, dataset_id, status):

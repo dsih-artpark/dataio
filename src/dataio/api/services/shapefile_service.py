@@ -12,6 +12,7 @@ from __future__ import annotations
 import gzip
 import json
 import re
+from datetime import datetime
 
 from botocore.exceptions import ClientError
 from fastapi import HTTPException, UploadFile
@@ -33,8 +34,19 @@ RESERVED_VERSIONS = {
 }
 DATASET_ID_PATTERN = re.compile(r"^[A-Z]{2}\d{4}DS\d{4}$")
 GEOMETRY_TYPES = {"Polygon", "MultiPolygon"}
-# A date, optionally followed by an RFC 3339 time.
-LAST_UPDATED_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}(T.*)?$")
+# Property names written before the spec format; dropped from re-uploaded files.
+OLD_PROPERTIES = {"region_id", "name", "parent", "parent_name"}
+
+
+def _is_iso_date(value) -> bool:
+    """True for a YYYY-MM-DD date, optionally followed by a time."""
+    if not isinstance(value, str) or not re.match(r"\d{4}-\d{2}-\d{2}", value):
+        return False
+    try:
+        datetime.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _first_position(coordinates):
@@ -43,13 +55,14 @@ def _first_position(coordinates):
     return coordinates
 
 
-def normalise_geojson(content: bytes, region, parent) -> dict:
+def normalise_geojson(content: bytes, region, parent, released_at=None) -> dict:
     """Parses an uploaded GeoJSON Feature or FeatureCollection and returns it as
     a FeatureCollection following the ARTPARK GeoJSON spec: every feature's id
     is the region id, and its properties start with regionName/regionType/
     parentID/parentName from the regions table (names in capitals), followed by
-    the source's other properties unchanged. lastUpdated is required, since
-    the spec needs every feature to carry a year.
+    the source's other properties unchanged. The spec needs every feature to
+    carry a year, so a missing lastUpdated is filled in from the version's
+    released_at date; an invalid one is rejected.
 
     Raises ValueError when the content isn't usable boundary GeoJSON."""
     try:
@@ -93,13 +106,15 @@ def normalise_geojson(content: bytes, region, parent) -> dict:
             properties = {}
         if not isinstance(properties, dict):
             raise ValueError(f"feature {i} properties must be an object")
-        last_updated = properties.get("lastUpdated")
-        if not (isinstance(last_updated, str) and LAST_UPDATED_PATTERN.match(last_updated)):
-            raise ValueError(f"feature {i} needs a lastUpdated date (YYYY-MM-DD)")
+        extra = {k: v for k, v in properties.items() if k not in standard and k not in OLD_PROPERTIES}
+        if extra.get("lastUpdated") in (None, "") and released_at is not None:
+            extra["lastUpdated"] = released_at.date().isoformat()
+        if not _is_iso_date(extra.get("lastUpdated")):
+            raise ValueError(f"feature {i} needs a lastUpdated date (YYYY-MM-DD, optionally with a time)")
         normalised.append({
             "type": "Feature",
             "id": region.region_id,
-            "properties": {**standard, **{k: v for k, v in properties.items() if k not in standard}},
+            "properties": {**standard, **extra},
             "geometry": geometry,
         })
     return {"type": "FeatureCollection", "features": normalised}
@@ -247,7 +262,7 @@ class ShapefileService(BaseService):
                     status_code=400,
                     detail="The legacy version is read-only. Create a new version and upload to it.",
                 )
-            self._require_version(version)
+            version_row = self._require_version(version)
             region = database.get_region(region_id)
             if region is None:
                 raise HTTPException(
@@ -263,7 +278,7 @@ class ShapefileService(BaseService):
                 )
             parent = database.get_region(region.parent_region_id) if region.parent_region_id else None
             try:
-                geojson = normalise_geojson(file.file.read(), region, parent)
+                geojson = normalise_geojson(file.file.read(), region, parent, version_row.released_at)
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=f"Invalid GeoJSON: {e}") from None
 

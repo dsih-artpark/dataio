@@ -83,6 +83,31 @@ def test_last_updated_may_carry_a_time():
     assert result["properties"]["lastUpdated"] == "2026-01-21T11:43:48+05:30"
 
 
+def test_missing_last_updated_is_filled_in_from_the_version_release_date():
+    feature = {**KGIS_FEATURE, "properties": {"lgdCode": 5433}}
+
+    [result] = svc.normalise_geojson(_bytes(feature), REGION, PARENT, datetime(2026, 8, 4, tzinfo=timezone.utc))["features"]
+
+    assert result["properties"]["lastUpdated"] == "2026-08-04"
+
+
+def test_invalid_last_updated_is_rejected_even_with_a_release_date():
+    feature = {**KGIS_FEATURE, "properties": {"lastUpdated": "2026-13-45"}}
+
+    with pytest.raises(ValueError, match="needs a lastUpdated"):
+        svc.normalise_geojson(_bytes(feature), REGION, PARENT, datetime(2026, 8, 4, tzinfo=timezone.utc))
+
+
+def test_properties_from_before_the_spec_format_are_dropped():
+    old = {"region_id": "subdistrict_5433", "name": "Chikkodi", "parent": "district_1", "parent_name": "Old"}
+    feature = {**KGIS_FEATURE, "properties": {**KGIS_FEATURE["properties"], **old}}
+
+    [result] = svc.normalise_geojson(_bytes(feature), REGION, PARENT)["features"]
+
+    assert not set(old) & set(result["properties"])
+    assert result["properties"]["parentID"] == "district_527"
+
+
 @pytest.mark.parametrize(
     ("content", "message"),
     [
@@ -95,6 +120,8 @@ def test_last_updated_may_carry_a_time():
         (_bytes({**KGIS_FEATURE, "properties": [1]}), "properties must be an object"),
         (_bytes({**KGIS_FEATURE, "properties": {"lgdCode": 5433}}), "needs a lastUpdated"),
         (_bytes({**KGIS_FEATURE, "properties": {"lastUpdated": "2026"}}), "needs a lastUpdated"),
+        (_bytes({**KGIS_FEATURE, "properties": {"lastUpdated": "2026-13-45"}}), "needs a lastUpdated"),
+        (_bytes({**KGIS_FEATURE, "properties": {"lastUpdated": "2026-01-01Tgarbage"}}), "needs a lastUpdated"),
         # Projected metres (e.g. UTM) instead of longitude/latitude.
         (_bytes({**KGIS_FEATURE, "geometry": {"type": "Polygon", "coordinates": [[[512000.0, 1815000.0]]]}}), "EPSG:4326"),
     ],
@@ -174,7 +201,9 @@ def db(monkeypatch):
         rate_limited=False,
     )
     fake = {
-        "get_shapefile_version": lambda v: SimpleNamespace(version=v) if v in state.versions else None,
+        "get_shapefile_version": lambda v: (
+            SimpleNamespace(version=v, released_at=datetime(2026, 8, 4, tzinfo=timezone.utc)) if v in state.versions else None
+        ),
         "get_region": lambda rid: state.regions.get(rid),
         "get_shapefile_record": lambda rid, v=None: state.records.get((rid, v)),
         "save_shapefile_record": lambda *args: state.saved.append(args),
@@ -404,3 +433,33 @@ def test_backfill_dry_run_writes_nothing():
               "parent_id": "state_29", "size": 1, "last_modified": None}]
 
     assert shapefile_backfill.main(["--dry-run"], filestore=SimpleNamespace(list_legacy_shapefiles=lambda: files), db=db) == 0
+
+
+@pytest.mark.parametrize(
+    "feature",
+    [
+        {"type": "Feature", "id": "subdistrict_5433", "properties": {"regionName": "CHIKKODI"}},
+        {"type": "Feature", "properties": {"region_id": "subdistrict_5433"}},  # legacy shapefile
+    ],
+)
+def test_weather_download_names_the_file_after_the_shapefile_region(monkeypatch, feature):
+    user_routes = importlib.import_module("dataio.api.routers.user")
+    weather_service = importlib.import_module("dataio.api.services.weather_service")
+    monkeypatch.setattr(user_routes, "determine_user_permissions", lambda user: [])
+    monkeypatch.setattr(user_routes, "user_has_weather_data_download_access", lambda permissions: True)
+    app.dependency_overrides[get_user] = lambda: UserModel(email="user@example.com", is_group=False, is_admin=False)
+    app.dependency_overrides[weather_service.WeatherService] = lambda: SimpleNamespace(
+        get_weather_data=lambda name, request: b"nc"
+    )
+    try:
+        response = client.post("/api/v1/weather/datasets/era5_sfc/download", json={
+            "variables": ["t2m"], "start_date": "2026-01-01", "end_date": "2026-01-31",
+            "geojson": {"type": "FeatureCollection", "features": [{**feature, "geometry": POLYGON}]},
+        })
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.headers["content-disposition"] == (
+        'attachment; filename="era5_sfc_t2m_20260101_20260131_subdistrict_5433.nc"'
+    )

@@ -25,6 +25,12 @@ LEGACY_VERSION = "legacy"
 # Lowercase so a version folder can't be mistaken for a region id
 # (shapefiles/<version>/... next to the legacy shapefiles/<parent_id>/...).
 VERSION_PATTERN = re.compile(r"^[a-z0-9][a-z0-9.-]{0,63}$")
+# Region types can't be version names: the staging bucket already holds files
+# at shapefiles/<type>/<region_id>/..., which a version folder would mix with.
+RESERVED_VERSIONS = {
+    "country", "state", "ut", "district", "subdistrict", "taluk", "village",
+    "ward", "ulb", "prabhag", "citycorporation", "zone", "gulb",
+}
 DATASET_ID_PATTERN = re.compile(r"^[A-Z]{2}\d{4}DS\d{4}$")
 GEOMETRY_TYPES = {"Polygon", "MultiPolygon"}
 
@@ -180,6 +186,11 @@ class ShapefileService(BaseService):
             raise HTTPException(
                 status_code=400,
                 detail="Version must be lowercase letters, digits, '.' or '-' (e.g. 'kgis-2026-08')",
+            )
+        if payload.version in RESERVED_VERSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{payload.version}' is a region type and can't be a version name",
             )
         if not payload.source.strip():
             raise HTTPException(status_code=400, detail="Source is required")

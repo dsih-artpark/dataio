@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 0.4.0b17
+
+- Shapefiles: `list-shapefiles`, `list-shapefile-versions`, `download-shapefile`;
+  versioned shapefiles in the ARTPARK GeoJSON format.
+- Admin: `create-shapefile-version`, `upload-shapefile`, `upload-shapefiles`;
+  safer dataset import (failed imports undone, reserved-ID check, Excel CSVs).
+- `validate`: check manifests and data files locally; every column needs
+  `description` and `nullable`.
+- `draft`: internal tool for LLM-drafted metadata.yaml (needs the server code).
+
 ## 0.4.0b13
 
 - Ensure uv.lock is updated.

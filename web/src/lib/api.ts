@@ -34,6 +34,13 @@ import {
   type CatalogueFilters,
   type CatalogueSearchResponse,
   type CatalogueStats,
+  type AccessRequestInput,
+  type AccessRequestRecord,
+  type AccessRequestStatus,
+  type CataloguePreview,
+  type OpenDownloadConsent,
+  type OpenDownloadUrls,
+  type RegionOption,
 } from './catalogue';
 
 const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000/api/v1';
@@ -550,6 +557,50 @@ class ApiClient {
     return this.request<CatalogueStats>('/public/stats', {}, false);
   }
 
+  async getCataloguePreview(datasetId: string): Promise<CataloguePreview> {
+    return this.request<CataloguePreview>(`/public/datasets/${encodeURIComponent(datasetId)}/preview`, {}, false);
+  }
+
+  /** Presigned links for an Open download dataset; no sign-in. */
+  /** POST so the visitor's email stays out of URLs and server logs. 428 = show the email pop-up. */
+  async getOpenDownloadUrls(datasetId: string, consent: OpenDownloadConsent): Promise<OpenDownloadUrls> {
+    return this.request<OpenDownloadUrls>(
+      `/public/datasets/${encodeURIComponent(datasetId)}/download-urls`,
+      { method: 'POST', body: JSON.stringify(consent) },
+      false
+    );
+  }
+
+  async getPublicRegions(parentId: string): Promise<{ parent_id: string; regions: RegionOption[] }> {
+    return this.request(`/public/regions?parent_id=${encodeURIComponent(parentId)}`, {}, false);
+  }
+
+  async submitAccessRequest(input: AccessRequestInput): Promise<{ submitted: boolean; id: string }> {
+    return this.request(
+      '/public/access-requests',
+      { method: 'POST', body: JSON.stringify(input) },
+      false
+    );
+  }
+
+  // Admin: access requests
+  async getAccessRequests(
+    status?: AccessRequestStatus
+  ): Promise<{ requests: AccessRequestRecord[]; total: number; pending: number }> {
+    return this.request(`/admin/access-requests${status ? `?status=${status}` : ''}`);
+  }
+
+  async reviewAccessRequest(
+    requestId: string,
+    decision: 'approve' | 'reject',
+    note?: string
+  ): Promise<AccessRequestRecord & { invited: boolean }> {
+    return this.request(`/admin/access-requests/${encodeURIComponent(requestId)}/${decision}`, {
+      method: 'POST',
+      body: JSON.stringify({ note: note || null }),
+    });
+  }
+
   async getPublicCollections(): Promise<CollectionsResponse> {
     return this.request<CollectionsResponse>('/public/collections', {}, false);
   }
@@ -767,16 +818,21 @@ class ApiClient {
         total_downloads: number;
         unique_users: number;
         unique_datasets: number;
+        unique_visitors?: number;
       };
       downloads: {
         id: string;
-        user_email: string;
+        /** null for signed-out downloads (channel PUBLIC) */
+        user_email: string | null;
         dataset_id: string;
         dataset_title: string;
         access_channel: string;
         device_info?: string;
         ip_address: string | null;
         user_agent: string | null;
+        visitor_email?: string | null;
+        visitor_id?: string | null;
+        terms_accepted_at?: string | null;
         downloaded_at: string | null;
       }[];
       total: number;

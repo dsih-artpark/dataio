@@ -22,12 +22,27 @@ interface DataChatProps {
   initialMessage?: string;
   provider?: AIProvider;
   showProviderSelector?: boolean;
+  /** Example questions shown before the first message. */
+  suggestions?: string[];
+  /** Leave out the built-in header (the floating assistant has its own). */
+  hideHeader?: boolean;
+  autoFocus?: boolean;
 }
+
+const DEFAULT_SUGGESTIONS = [
+  'What datasets do you have about weather?',
+  'Show me satellite imagery datasets',
+  'List all categories',
+  'Find datasets from ISRO',
+];
 
 export default function DataChat({
   initialMessage,
   provider: initialProvider,
-  showProviderSelector = false
+  showProviderSelector = false,
+  suggestions = DEFAULT_SUGGESTIONS,
+  hideHeader = false,
+  autoFocus = true,
 }: DataChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState(initialMessage || '');
@@ -45,7 +60,7 @@ export default function DataChat({
 
   // Focus input on load
   useEffect(() => {
-    inputRef.current?.focus();
+    if (autoFocus) inputRef.current?.focus();
   }, []);
 
   const generateId = () => Math.random().toString(36).substring(7);
@@ -81,24 +96,26 @@ export default function DataChat({
     ]);
 
     try {
+      // Signed-out visitors use the public assistant (rate-limited per IP,
+      // Open datasets only); signed-in users get answers for their access.
       const accessToken = api.getAccessToken();
-      if (!accessToken) {
-        throw new Error('Not authenticated');
-      }
-
       const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000/api/v1';
-      const response = await fetch(`${API_URL}/web/chat/stream`, {
+      const response = await fetch(`${API_URL}/web/${accessToken ? 'chat/stream' : 'public/chat/stream'}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         },
         body: JSON.stringify({
           message: trimmedInput,
           history: buildHistoryForAPI().slice(0, -1), // Exclude the message we just added
-          provider: selectedProvider,
+          ...(accessToken ? { provider: selectedProvider } : {}),
         }),
       });
+
+      if (response.status === 429) {
+        throw new Error('You’ve reached today’s limit for the assistant. Please try again tomorrow, or sign in.');
+      }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -212,17 +229,10 @@ export default function DataChat({
     }
   };
 
-  const suggestedQueries = [
-    'What datasets do you have about weather?',
-    'Show me satellite imagery datasets',
-    'List all categories',
-    'Find datasets from ISRO',
-  ];
-
   return (
     <div class="flex flex-col h-full bg-white rounded-lg shadow-sm border">
       {/* Header */}
-      <div class="px-4 py-3 border-b bg-gray-50 rounded-t-lg">
+      {!hideHeader && <div class="px-4 py-3 border-b bg-gray-50 rounded-t-lg">
         <div class="flex items-center justify-between">
           <div>
             <h2 class="font-semibold text-gray-900">Data Assistant</h2>
@@ -244,7 +254,7 @@ export default function DataChat({
             </div>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* Messages area */}
       <div class="flex-1 overflow-y-auto p-4 space-y-2">
@@ -262,7 +272,7 @@ export default function DataChat({
             </div>
             <p class="text-gray-500 mb-4">Start a conversation to explore datasets</p>
             <div class="flex flex-wrap justify-center gap-2">
-              {suggestedQueries.map((query) => (
+              {suggestions.map((query) => (
                 <button
                   key={query}
                   onClick={() => setInput(query)}

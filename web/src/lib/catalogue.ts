@@ -26,6 +26,8 @@ export interface CatalogueDataset {
   dataset_kind: DatasetKind;
   tags: string[];
   has_data_dictionary: boolean;
+  /** Tables the catalogue describes; 0 means no data files yet. */
+  table_count: number;
   updated_at: string | null;
 }
 
@@ -73,12 +75,80 @@ export interface CatalogueStats {
   };
 }
 
+export interface CataloguePreview {
+  /** real = Open download; synthetic = View only; none = Restricted; unavailable = no CSV table. */
+  mode: 'real' | 'synthetic' | 'none' | 'unavailable';
+  table: string | null;
+  columns: string[];
+  rows: string[][];
+}
+
+export interface OpenDownloadUrls {
+  dataset_id: string;
+  title: string;
+  tables: { table_name: string; download_url: string; metadata: Record<string, unknown> }[];
+  /** Random ID for the dataio_visitor cookie, so the next download doesn't ask again. */
+  visitor_id: string;
+}
+
+/** Signed-out download: email + terms the first time, then only the visitor ID. */
+export interface OpenDownloadConsent {
+  email?: string;
+  visitor_id?: string;
+  accept_terms?: boolean;
+}
+
+export interface RegionOption {
+  region_id: string;
+  region_name: string;
+}
+
+export const ORGANISATION_TYPES = [
+  'NGO / non-profit',
+  'University or research institute',
+  'Government',
+  'Philanthropy / foundation',
+  'Private company',
+  'Other',
+] as const;
+
+export interface AccessRequestInput {
+  dataset_id: string;
+  full_name: string;
+  email: string;
+  organisation: string;
+  organisation_type: string;
+  organisation_type_other?: string | null;
+  purpose: string;
+  consent: boolean;
+}
+
+export type AccessRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface AccessRequestRecord {
+  id: string;
+  dataset_id: string;
+  dataset_title: string | null;
+  full_name: string;
+  email: string;
+  organisation: string;
+  organisation_type: string;
+  organisation_type_other: string | null;
+  purpose: string;
+  status: AccessRequestStatus;
+  created_at: string | null;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  review_note: string | null;
+}
+
 /** Filters for /public/datasets. The same keys are used in the /datasets page address. */
 export interface CatalogueFilters {
   search?: string;
   category_id?: string[];
   collection_id?: number[];
-  region_id?: string;
+  /** States, districts or country_IN; a dataset in any of them matches. */
+  region_id?: string[];
   spatial_resolution?: string[];
   temporal_resolution?: string[];
   year_from?: number;
@@ -95,6 +165,7 @@ export interface CatalogueFilters {
 const LIST_KEYS = [
   'category_id',
   'collection_id',
+  'region_id',
   'spatial_resolution',
   'temporal_resolution',
   'access_level',
@@ -112,7 +183,6 @@ export function catalogueQuery(filters: CatalogueFilters): URLSearchParams {
     const values = filters[key] as (string | number)[] | undefined;
     if (values && values.length) params.set(key, values.join(','));
   }
-  if (filters.region_id) params.set('region_id', filters.region_id);
   if (filters.year_from != null) params.set('year_from', String(filters.year_from));
   if (filters.year_to != null) params.set('year_to', String(filters.year_to));
   if (filters.sort && filters.sort !== 'relevance') params.set('sort', filters.sort);
@@ -136,8 +206,6 @@ export function parseCatalogueQuery(params: URLSearchParams): CatalogueFilters {
     const values = NUMBER_LIST_KEYS.has(key) ? parts.map(Number).filter((n) => Number.isInteger(n)) : parts;
     if (values.length) (filters as Record<string, unknown>)[key] = values;
   }
-  const region = params.get('region_id');
-  if (region) filters.region_id = region;
   for (const key of ['year_from', 'year_to', 'limit', 'offset'] as const) {
     const raw = params.get(key);
     if (raw && /^\d+$/.test(raw)) filters[key] = Number(raw);
@@ -203,6 +271,13 @@ export const TEMPORAL_RESOLUTION_LABELS: Record<string, string> = {
 };
 
 export const LICENCE_NOT_SPECIFIED = 'Not yet specified';
+export const NO_TABLES = 'Not yet available';
+export const NO_FILES_MESSAGE = 'The data files for this dataset haven’t been published yet.';
+
+/** Value for the "Tables" chip: the count, or null when there are none (chip shows NO_TABLES). */
+export function tableCountLabel(count: number): string | null {
+  return count > 0 ? String(count) : null;
+}
 
 export function labelFor(labels: Record<string, string>, value: string | null | undefined): string | null {
   if (!value) return null;
@@ -233,6 +308,14 @@ export function formatMonthYear(iso: string | null | undefined): string | null {
   return date.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
 }
 
+/**
+ * Address of a dataset's page. The site is static files, so the ID goes in the
+ * query string; a clean /datasets/<id> needs a rewrite rule on the web server.
+ */
 export function datasetPath(dsId: string): string {
-  return `/datasets/${encodeURIComponent(dsId)}`;
+  return `/dataset?id=${encodeURIComponent(dsId)}`;
+}
+
+export function requestAccessPath(dsId: string): string {
+  return `/request-access?dataset=${encodeURIComponent(dsId)}`;
 }

@@ -3,13 +3,18 @@ import { api } from '../../lib/api';
 
 interface DownloadItem {
   id: string;
-  user_email: string;
+  /** null for signed-out downloads of Open datasets (channel PUBLIC) */
+  user_email: string | null;
   dataset_id: string;
   dataset_title: string;
   access_channel: string;
   device_info?: string;
   ip_address: string | null;
   user_agent: string | null;
+  /** Signed-out downloads: email from the download pop-up, cookie visitor ID, terms acceptance (migration 031) */
+  visitor_email?: string | null;
+  visitor_id?: string | null;
+  terms_accepted_at?: string | null;
   downloaded_at: string | null;
 }
 
@@ -17,6 +22,8 @@ interface SummaryData {
   total_downloads: number;
   unique_users: number;
   unique_datasets: number;
+  /** Distinct signed-out visitors (one per browser cookie) */
+  unique_visitors?: number;
 }
 
 export function DownloadMetricsManager() {
@@ -112,6 +119,8 @@ export function DownloadMetricsManager() {
         return 'bg-purple-50 text-purple-700 border-purple-200';
       case 'MCP':
         return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+      case 'PUBLIC':
+        return 'bg-amber-50 text-amber-800 border-amber-200';
       case 'WEB':
       default:
         return 'bg-blue-50 text-blue-700 border-blue-200';
@@ -148,16 +157,22 @@ export function DownloadMetricsManager() {
         'Device Info',
         'IP Address',
         'User Agent',
+        'Visitor Email',
+        'Visitor ID',
+        'Terms Accepted At',
       ];
       const rows = items.map((item) => [
         item.downloaded_at ?? '',
-        item.user_email,
+        item.user_email ?? 'Signed-out visitor',
         item.dataset_id,
         item.dataset_title,
         item.access_channel,
         item.device_info ?? '',
         item.ip_address ?? '',
         item.user_agent ?? '',
+        item.visitor_email ?? '',
+        item.visitor_id ?? '',
+        item.terms_accepted_at ?? '',
       ]);
       // Leading BOM so Excel (unlike this table's own CSV *uploads*, this is
       // an export we control end to end) opens non-ASCII dataset titles /
@@ -220,7 +235,7 @@ export function DownloadMetricsManager() {
       </div>
 
       {/* Metric Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-5 bg-white rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Downloads</span>
@@ -265,6 +280,21 @@ export function DownloadMetricsManager() {
           </div>
           <p className="text-xs text-slate-500 mt-1">Distinct datasets accessed</p>
         </div>
+
+        <div className="p-5 bg-white rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Signed-out Visitors</span>
+            <div className="p-2.5 bg-amber-50 text-amber-600 rounded-lg">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+            </div>
+          </div>
+          <div className="text-3xl font-extrabold text-slate-900 mt-2">
+            {(summary.unique_visitors ?? 0).toLocaleString()}
+          </div>
+          <p className="text-xs text-slate-500 mt-1">Distinct browsers that downloaded without an account</p>
+        </div>
       </div>
 
       {/* Search & Filter Bar */}
@@ -273,7 +303,7 @@ export function DownloadMetricsManager() {
           <div className="relative flex-1">
             <input
               type="text"
-              placeholder="Search by user email or dataset ID..."
+              placeholder="Search by email or dataset ID..."
               value={search}
               onInput={(e) => setSearch((e.target as HTMLInputElement).value)}
               className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-slate-900 focus:border-slate-900"
@@ -295,6 +325,7 @@ export function DownloadMetricsManager() {
             <option value="WEB">Web Platform (WEB)</option>
             <option value="SDK">Python SDK (SDK)</option>
             <option value="MCP">AI Assistant (MCP)</option>
+            <option value="PUBLIC">Public site, signed out (PUBLIC)</option>
           </select>
 
           <button
@@ -352,7 +383,15 @@ export function DownloadMetricsManager() {
                       {formatDate(item.downloaded_at)}
                     </td>
                     <td className="px-5 py-3.5 font-medium text-slate-900">
-                      {item.user_email}
+                      {item.user_email ??
+                        (item.visitor_email ? (
+                          <>
+                            {item.visitor_email}
+                            <div className="text-xs font-normal text-slate-500">Signed out</div>
+                          </>
+                        ) : (
+                          <span className="font-normal text-slate-500">Signed-out visitor</span>
+                        ))}
                     </td>
                     <td className="px-5 py-3.5">
                       <div className="font-semibold text-slate-900">{item.dataset_id}</div>

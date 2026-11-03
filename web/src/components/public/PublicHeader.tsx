@@ -39,7 +39,7 @@ export default function PublicHeader({ current }: PublicHeaderProps) {
   const account = loading ? (
     <div class="w-8 h-8 rounded-full bg-gray-100 animate-pulse" aria-hidden="true" />
   ) : user ? (
-    <UserMenu user={user} showAssistant />
+    <UserMenu user={user} />
   ) : (
     <a
       href="/login"
@@ -53,12 +53,6 @@ export default function PublicHeader({ current }: PublicHeaderProps) {
     <header class="bg-white border-b border-gray-200">
       <nav aria-label="Main" class="max-w-page mx-auto px-4 sm:px-6 py-3 flex items-center gap-4 lg:gap-8">
         <a href="/" class="flex items-center gap-2.5 text-gray-900 min-w-0">
-          <span
-            class="w-8 h-8 shrink-0 rounded-lg bg-primary-600 text-white flex items-center justify-center font-bold text-[13px]"
-            aria-hidden="true"
-          >
-            AP
-          </span>
           <span class="font-bold text-base leading-tight">{PLATFORM_NAME}</span>
         </a>
 

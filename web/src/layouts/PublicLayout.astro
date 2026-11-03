@@ -1,10 +1,11 @@
 ---
 // Layout for the public site: skip link, header, footer, optional
-// back-to-top. Pages with full-bleed sections (the landing page) pass
+// back-to-top, floating data assistant. Pages with full-bleed sections (the landing page) pass
 // width="full" and size their own sections; others get the 1200px column.
 import PublicHeader, { type PublicNavKey } from '../components/public/PublicHeader';
 import PublicFooter from '../components/public/PublicFooter.astro';
 import BackToTop from '../components/public/BackToTop';
+import AssistantLauncher from '../components/public/AssistantLauncher';
 import { PLATFORM_NAME } from '../lib/site';
 
 interface Props {
@@ -15,6 +16,10 @@ interface Props {
   width?: 'contained' | 'full';
   background?: 'white' | 'gray';
   backToTop?: boolean;
+  /** Floating "Ask the assistant" button (bottom right). */
+  assistant?: boolean;
+  /** Keep the page out of search engines (e.g. legal pages while still drafts). */
+  noindex?: boolean;
 }
 
 const {
@@ -24,6 +29,8 @@ const {
   width = 'contained',
   background = 'gray',
   backToTop = false,
+  assistant = true,
+  noindex = false,
 } = Astro.props;
 
 const pageTitle = title === PLATFORM_NAME ? title : `${title} | ${PLATFORM_NAME}`;
@@ -37,6 +44,7 @@ const mainClass =
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content={description} />
+    {noindex && <meta name="robots" content="noindex" />}
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>{pageTitle}</title>
   </head>
@@ -58,6 +66,7 @@ const mainClass =
     <PublicFooter />
 
     {backToTop && <BackToTop client:idle />}
+    {assistant && <AssistantLauncher client:idle />}
   </body>
 </html>
 

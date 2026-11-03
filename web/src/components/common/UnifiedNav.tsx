@@ -1,6 +1,7 @@
 import { useEffect } from 'preact/hooks';
 import { currentUser, initAuth, isLoading as authLoading } from '../../lib/auth';
 import UserMenu from './UserMenu';
+import { PLATFORM_NAME } from '../../lib/site';
 
 interface UnifiedNavProps {
   variant?: 'default' | 'transparent';
@@ -29,11 +30,7 @@ export default function UnifiedNav({ variant = 'default' }: UnifiedNavProps) {
           {/* Logo */}
           <div class="flex items-center space-x-2">
             <a href="/" class="flex items-center space-x-2">
-              <div class="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
-                <span class="text-white font-bold text-sm">AP</span>
-              </div>
-              <span class="text-lg font-bold text-gray-900 hidden sm:block">ARTPARK Data Platform</span>
-              <span class="text-lg font-bold text-gray-900 sm:hidden">DataIO</span>
+              <span class="text-base font-bold leading-tight text-gray-900">{PLATFORM_NAME}</span>
             </a>
           </div>
 
@@ -42,16 +39,6 @@ export default function UnifiedNav({ variant = 'default' }: UnifiedNavProps) {
             <a href="/datasets" class="text-gray-600 hover:text-gray-900 text-sm font-medium">
               Datasets
             </a>
-
-            {/* Data Assistant - show for authenticated users */}
-            {isAuthenticated && (
-              <a href="/chat" class="text-gray-600 hover:text-gray-900 text-sm font-medium flex items-center gap-1.5">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                </svg>
-                <span class="hidden sm:inline">Assistant</span>
-              </a>
-            )}
 
             {/* Resources dropdown - always show */}
             <div class="relative hidden sm:block group">

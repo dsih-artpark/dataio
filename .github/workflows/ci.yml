@@ -26,6 +26,7 @@ jobs:
               - '.github/workflows/ci.yml'
             web:
               - 'web/**'
+              - 'docs/legal/**'
               - '.github/workflows/ci.yml'
 
   deploy_api:

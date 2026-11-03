@@ -3,12 +3,10 @@ import { logout, type User } from '../../lib/auth';
 
 interface UserMenuProps {
   user: User;
-  /** Show an "Assistant" item (the /chat page) in the menu. */
-  showAssistant?: boolean;
 }
 
 /** Signed-in avatar button with the account / admin / sign-out menu. */
-export default function UserMenu({ user, showAssistant = false }: UserMenuProps) {
+export default function UserMenu({ user }: UserMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   const handleLogout = async () => {
@@ -54,29 +52,6 @@ export default function UserMenu({ user, showAssistant = false }: UserMenuProps)
               <p class="text-xs text-gray-500 truncate">{user.email}</p>
             </div>
             <div class="py-1">
-              {showAssistant && (
-                <a
-                  href="/chat"
-                  role="menuitem"
-                  class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                >
-                  <svg
-                    class="w-4 h-4 mr-3 text-gray-400"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                    />
-                  </svg>
-                  Data assistant
-                </a>
-              )}
               <a
                 href="/account"
                 role="menuitem"

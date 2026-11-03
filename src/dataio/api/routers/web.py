@@ -33,6 +33,7 @@ from pydantic import BaseModel, EmailStr
 from dataio.api.database.enums import VersionType
 from dataio.api.database.models import User
 from dataio.api.auth.jwt import REFRESH_COOKIE_NAME, get_current_web_user
+from dataio.api.auth.security import get_client_ip
 from dataio.api.models import (
     ClassifyColumnsRequest,
     DatasetCreate,
@@ -48,6 +49,7 @@ from dataio.api.models import (
 )
 from dataio.api.services.draft_review_service import parse_curator_input_json
 from dataio.api.services.web_auth_service import WebAuthService
+from dataio.api.services.public_catalogue_service import PublicCatalogueService
 from dataio.api.services.web_admin_service import WebAdminService
 from dataio.api.services.web_user_service import WebUserService
 from dataio.validate import DatasetKind
@@ -182,20 +184,7 @@ class SessionInfoResponse(BaseModel):
 
 def get_client_info(request: Request) -> tuple[Optional[str], Optional[str]]:
     """Extract user agent and IP address from request."""
-    user_agent = request.headers.get("user-agent")
-    ip_address = request.client.host if request.client else None
-
-    if os.getenv("TRUST_PROXY_HEADERS", "false").lower() == "true":
-        forwarded_for = request.headers.get("x-forwarded-for")
-        real_ip = request.headers.get("x-real-ip")
-        cf_ip = request.headers.get("cf-connecting-ip")
-        if cf_ip:
-            ip_address = cf_ip.strip()
-        elif real_ip:
-            ip_address = real_ip.strip()
-        elif forwarded_for:
-            ip_address = forwarded_for.split(",")[0].strip()
-    return user_agent, ip_address
+    return request.headers.get("user-agent"), get_client_ip(request)
 
 
 def set_refresh_cookie(response: Response, refresh_token: str) -> None:
@@ -786,44 +775,81 @@ async def revoke_api_key(
 @web_router.get("/public/datasets", tags=["public"])
 async def get_public_datasets(
     search: Optional[str] = None,
-    collection_id: Optional[int] = None,
-    data_owner_id: Optional[int] = None,
-    limit: int = 100,
+    collection_id: Optional[List[str]] = Query(None),
+    category_id: Optional[List[str]] = Query(None),
+    region_id: Optional[str] = None,
+    spatial_resolution: Optional[List[str]] = Query(None),
+    temporal_resolution: Optional[List[str]] = Query(None),
+    year_from: Optional[int] = Query(None, ge=1800, le=2200),
+    year_to: Optional[int] = Query(None, ge=1800, le=2200),
+    access_level: Optional[List[str]] = Query(None),
+    data_owner_id: Optional[List[str]] = Query(None),
+    dataset_kind: Optional[List[str]] = Query(None),
+    licence: Optional[List[str]] = Query(None),
+    sort: str = "relevance",
+    limit: int = 20,
     offset: int = 0,
-    user_service: WebUserService = Depends(WebUserService),
+    catalogue: PublicCatalogueService = Depends(PublicCatalogueService),
 ):
     """
-    Get publicly accessible datasets.
+    Search and filter the public catalogue.
 
-    Returns datasets with VIEW or DOWNLOAD access level.
-    No authentication required.
+    Lists every dataset as metadata whatever its access level (DOWNLOAD,
+    VIEW or NONE); never includes download links. No authentication required.
 
-    Note: To download datasets, users must register and authenticate.
+    List filters accept repeated parameters or comma-separated values
+    (``?access_level=DOWNLOAD,VIEW``). ``region_id`` matches that region and
+    every region inside it. ``search`` must match every word (ignoring words
+    like "data" or "for") in the title, description, ID, collection, theme,
+    source, coverage area, tags or column names; a year such as 2015 also
+    matches datasets covering that year. ``sort`` is one of relevance,
+    updated, newest, span or title.
     """
-    return user_service.get_public_datasets(
+    return catalogue.list_datasets(
         search=search,
-        collection_id=collection_id,
-        data_owner_id=data_owner_id,
+        collection_ids=collection_id,
+        category_ids=category_id,
+        region_id=region_id,
+        spatial_resolutions=spatial_resolution,
+        temporal_resolutions=temporal_resolution,
+        year_from=year_from,
+        year_to=year_to,
+        access_levels=access_level,
+        data_owner_ids=data_owner_id,
+        dataset_kinds=dataset_kind,
+        licences=licence,
+        sort=sort,
         limit=limit,
         offset=offset,
     )
 
 
+@web_router.get("/public/stats", tags=["public"])
+async def get_public_stats(
+    catalogue: PublicCatalogueService = Depends(PublicCatalogueService),
+):
+    """
+    Live catalogue counts for the public site: totals, sources, year range,
+    datasets per theme, access level and data type, and per state/UT.
+
+    No authentication required.
+    """
+    return catalogue.get_stats()
+
+
 @web_router.get("/public/datasets/{dataset_id}", tags=["public"])
 async def get_public_dataset(
     dataset_id: str,
-    user_service: WebUserService = Depends(WebUserService),
+    catalogue: PublicCatalogueService = Depends(PublicCatalogueService),
 ):
     """
-    Get details for a specific public dataset.
+    Get the public page data for one dataset.
 
-    Only returns datasets with VIEW or DOWNLOAD access level.
-    No authentication required.
-
-    Note: Download links are not included. Users must register and
-    authenticate to download datasets.
+    Includes tables and column names at every access level. README,
+    manifest and data dictionary files are left out for Restricted (NONE)
+    datasets. Never includes download links. No authentication required.
     """
-    return user_service.get_public_dataset(dataset_id)
+    return catalogue.get_dataset(dataset_id)
 
 
 @web_router.get("/public/collections", tags=["public"])

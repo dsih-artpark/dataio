@@ -28,6 +28,13 @@ import type {
   ManifestDraftDetail,
   ManifestDraftSummary,
 } from './types';
+import {
+  catalogueQuery,
+  type CatalogueDatasetDetail,
+  type CatalogueFilters,
+  type CatalogueSearchResponse,
+  type CatalogueStats,
+} from './catalogue';
 
 const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
@@ -527,6 +534,20 @@ class ApiClient {
 
   async getPublicDataset(datasetId: string): Promise<DatasetDetail> {
     return this.request<DatasetDetail>(`/public/datasets/${datasetId}`, {}, false);
+  }
+
+  // Public catalogue (no sign-in): search with filters, one dataset, live counts
+  async searchCatalogue(filters: CatalogueFilters = {}): Promise<CatalogueSearchResponse> {
+    const query = catalogueQuery(filters).toString();
+    return this.request<CatalogueSearchResponse>(`/public/datasets${query ? `?${query}` : ''}`, {}, false);
+  }
+
+  async getCatalogueDataset(datasetId: string): Promise<CatalogueDatasetDetail> {
+    return this.request<CatalogueDatasetDetail>(`/public/datasets/${encodeURIComponent(datasetId)}`, {}, false);
+  }
+
+  async getCatalogueStats(): Promise<CatalogueStats> {
+    return this.request<CatalogueStats>('/public/stats', {}, false);
   }
 
   async getPublicCollections(): Promise<CollectionsResponse> {

@@ -1,12 +1,34 @@
 ---
-import UnifiedNav from '../components/common/UnifiedNav';
+// Layout for the public site: skip link, header, footer, optional
+// back-to-top. Pages with full-bleed sections (the landing page) pass
+// width="full" and size their own sections; others get the 1200px column.
+import PublicHeader, { type PublicNavKey } from '../components/public/PublicHeader';
+import PublicFooter from '../components/public/PublicFooter.astro';
+import BackToTop from '../components/public/BackToTop';
+import { PLATFORM_NAME } from '../lib/site';
 
 interface Props {
   title: string;
   description?: string;
+  /** Highlights this header link. */
+  current?: PublicNavKey;
+  width?: 'contained' | 'full';
+  background?: 'white' | 'gray';
+  backToTop?: boolean;
 }
 
-const { title, description = 'ARTPARK Data Platform - Dataset Management System' } = Astro.props;
+const {
+  title,
+  description = 'Human and animal health, population, livestock and weather datasets for India, documented and standardised at ARTPARK, IISc.',
+  current,
+  width = 'contained',
+  background = 'gray',
+  backToTop = false,
+} = Astro.props;
+
+const pageTitle = title === PLATFORM_NAME ? title : `${title} | ${PLATFORM_NAME}`;
+const mainClass =
+  width === 'full' ? 'flex-1 focus:outline-none' : 'flex-1 w-full max-w-page mx-auto px-4 sm:px-6 py-8 focus:outline-none';
 ---
 
 <!doctype html>
@@ -16,32 +38,26 @@ const { title, description = 'ARTPARK Data Platform - Dataset Management System'
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content={description} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>{title} | ARTPARK Data Platform</title>
+    <title>{pageTitle}</title>
   </head>
-  <body class="min-h-screen bg-gray-50 flex flex-col">
-    <!-- Unified Navigation -->
-    <UnifiedNav client:load />
+  <body class={`min-h-screen flex flex-col text-gray-900 ${background === 'white' ? 'bg-white' : 'bg-gray-50'}`}>
+    <div id="top" tabindex="-1" class="focus:outline-none"></div>
+    <a
+      href="#main"
+      class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded-lg focus:bg-white focus:px-4 focus:py-3 focus:text-sm focus:font-semibold focus:text-primary-700 focus:shadow-lg"
+    >
+      Skip to content
+    </a>
 
-    <!-- Main content -->
-    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <PublicHeader client:load current={current} />
+
+    <main id="main" tabindex="-1" class={mainClass}>
       <slot />
     </main>
 
-    <!-- Footer -->
-    <footer class="bg-white border-t border-gray-200">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <p class="text-sm text-gray-500">
-            &copy; {new Date().getFullYear()} ARTPARK. Licensed under AGPL-3.0.
-          </p>
-          <nav class="flex flex-wrap gap-x-6 gap-y-2 text-sm text-gray-500">
-            <a href="https://dataio.artpark.ai/docs" target="_blank" rel="noopener noreferrer" class="hover:text-gray-900">Docs</a>
-            <a href="https://github.com/dsih-artpark/dataio" target="_blank" rel="noopener noreferrer" class="hover:text-gray-900">GitHub</a>
-            <a href="https://artpark.in" target="_blank" rel="noopener noreferrer" class="hover:text-gray-900">ARTPARK</a>
-          </nav>
-        </div>
-      </div>
-    </footer>
+    <PublicFooter />
+
+    {backToTop && <BackToTop client:idle />}
   </body>
 </html>
 

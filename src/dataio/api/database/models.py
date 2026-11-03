@@ -86,6 +86,7 @@ class Dataset(Base):
     temporal_coverage_end_date = Column(Date)
     temporal_resolution = Column(SQLEnum(TemporalResolution), nullable=False)
     access_level = Column(SQLEnum(AccessLevel), nullable=False)
+    licence = Column(Text, nullable=True)  # migration 029; NULL = not yet specified
     additional_metadata = Column(JSONB)
 
     # Documentation caching fields (synced from file server)

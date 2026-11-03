@@ -874,6 +874,7 @@ class ApiClient {
     temporal_coverage_end_date?: string | null;
     temporal_resolution?: string | null;
     access_level?: string;
+    licence?: string | null;
     additional_metadata?: Record<string, unknown> | null;
     tags?: string[];
     raw_dataset_ids: string[];
@@ -898,6 +899,7 @@ class ApiClient {
       temporal_coverage_end_date?: string | null;
       temporal_resolution?: string | null;
       access_level?: string | null;
+      licence?: string | null;
       additional_metadata?: Record<string, unknown> | null;
       tags?: string[] | null;
       raw_dataset_ids?: string[] | null;

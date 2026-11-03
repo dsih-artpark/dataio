@@ -977,6 +977,7 @@ def create_dataset(dataset_create: DatasetCreate):
             temporal_coverage_end_date=tc_end_date,
             temporal_resolution=dataset_create.temporal_resolution,
             access_level=dataset_create.access_level,
+            licence=(dataset_create.licence or "").strip() or None,
             additional_metadata=dataset_create.additional_metadata,
         )
 
@@ -1092,6 +1093,8 @@ def update_dataset(dataset_id: str, dataset_update: DatasetUpdate):
             dataset.temporal_resolution = dataset_update.temporal_resolution
         if "access_level" in dataset_update.model_fields_set:
             dataset.access_level = dataset_update.access_level
+        if "licence" in dataset_update.model_fields_set:
+            dataset.licence = (dataset_update.licence or "").strip() or None
         if "additional_metadata" in dataset_update.model_fields_set:
             dataset.additional_metadata = dataset_update.additional_metadata
         if "temporal_coverage_start_date" in dataset_update.model_fields_set:

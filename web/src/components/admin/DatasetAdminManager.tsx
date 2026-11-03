@@ -33,6 +33,7 @@ type DatasetFormState = {
   temporal_coverage_end_date: string;
   temporal_resolution: string;
   access_level: string;
+  licence: string;
   additional_metadata: string;
   tags: string;
   raw_dataset_ids: string[];
@@ -51,6 +52,7 @@ function emptyDatasetForm(): DatasetFormState {
     temporal_coverage_end_date: '',
     temporal_resolution: '',
     access_level: 'NONE',
+    licence: '',
     additional_metadata: '{}',
     tags: '',
     raw_dataset_ids: [],
@@ -70,6 +72,7 @@ function datasetDetailToForm(detail: AdminDatasetDetail): DatasetFormState {
     temporal_coverage_end_date: detail.temporal_coverage_end_date ?? '',
     temporal_resolution: detail.temporal_resolution ?? '',
     access_level: detail.access_level ?? 'NONE',
+    licence: detail.licence ?? '',
     additional_metadata: JSON.stringify(detail.additional_metadata ?? {}, null, 2),
     tags: (detail.tags ?? []).join(', '),
     raw_dataset_ids: detail.raw_dataset_ids ?? [],
@@ -471,6 +474,7 @@ export default function DatasetAdminManager({
     temporal_coverage_end_date: form.temporal_coverage_end_date || null,
     temporal_resolution: form.temporal_resolution || null,
     access_level: form.access_level || 'NONE',
+    licence: form.licence.trim() || null,
     additional_metadata: parseJsonObject(form.additional_metadata),
     tags: csvToList(form.tags),
     raw_dataset_ids: form.raw_dataset_ids,
@@ -541,6 +545,7 @@ export default function DatasetAdminManager({
       temporal_coverage_end_date: preview.dataset.temporal_coverage_end_date ?? '',
       temporal_resolution: preview.dataset.temporal_resolution ?? '',
       access_level: preview.dataset.access_level ?? 'NONE',
+      licence: '',
       additional_metadata: JSON.stringify(preview.dataset.additional_metadata ?? {}, null, 2),
       tags: (preview.dataset.tags ?? []).join(', '),
       raw_dataset_ids: preview.dataset.raw_dataset_ids ?? [],
@@ -793,6 +798,7 @@ export default function DatasetAdminManager({
         temporal_coverage_end_date: payload.temporal_coverage_end_date,
         temporal_resolution: payload.temporal_resolution,
         access_level: payload.access_level,
+        licence: payload.licence,
         additional_metadata: payload.additional_metadata,
         tags: payload.tags,
         raw_dataset_ids: payload.raw_dataset_ids,
@@ -1172,6 +1178,16 @@ export default function DatasetAdminManager({
             <option value="VIEW">VIEW</option>
             <option value="DOWNLOAD">DOWNLOAD</option>
           </select>
+        </label>
+
+        <label class="block">
+          <span class="mb-2 block text-sm font-medium text-slate-700">Licence</span>
+          <input
+            value={form.licence}
+            onInput={(e) => updateForm('licence', (e.currentTarget as HTMLInputElement).value)}
+            placeholder="e.g. CC BY 4.0 (blank = not yet specified)"
+            class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm"
+          />
         </label>
 
         <label class="block">

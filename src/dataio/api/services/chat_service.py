@@ -42,7 +42,8 @@ MAX_TOOL_ITERATIONS = int(os.getenv("CHAT_MAX_TOOL_ITERATIONS", "10"))
 
 # Bedrock configuration
 BEDROCK_REGION = os.getenv("AWS_BEDROCK_REGION", "us-east-1")
-BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")
+# US cross-region inference profile; Claude 3.5 Sonnet v2 reached end of life on Bedrock.
+BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-haiku-5-5")
 
 # OpenRouter configuration
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")

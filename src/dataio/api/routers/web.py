@@ -28,7 +28,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 from dataio.api.database.enums import VersionType
 from dataio.api.database.models import User
@@ -777,7 +777,7 @@ async def get_public_datasets(
     search: Optional[str] = None,
     collection_id: Optional[List[str]] = Query(None),
     category_id: Optional[List[str]] = Query(None),
-    region_id: Optional[str] = None,
+    region_id: Optional[List[str]] = Query(None),
     spatial_resolution: Optional[List[str]] = Query(None),
     temporal_resolution: Optional[List[str]] = Query(None),
     year_from: Optional[int] = Query(None, ge=1800, le=2200),
@@ -798,8 +798,8 @@ async def get_public_datasets(
     VIEW or NONE); never includes download links. No authentication required.
 
     List filters accept repeated parameters or comma-separated values
-    (``?access_level=DOWNLOAD,VIEW``). ``region_id`` matches that region and
-    every region inside it. ``search`` must match every word (ignoring words
+    (``?access_level=DOWNLOAD,VIEW``). ``region_id`` matches those regions and
+    every region inside them (``country_IN`` matches all-India datasets only). ``search`` must match every word (ignoring words
     like "data" or "for") in the title, description, ID, collection, theme,
     source, coverage area, tags or column names; a year such as 2015 also
     matches datasets covering that year. ``sort`` is one of relevance,
@@ -874,6 +874,205 @@ async def get_public_data_owners(
     No authentication required.
     """
     return user_service.get_data_owners()
+
+
+@web_router.get("/public/regions", tags=["public"])
+async def get_public_regions(
+    parent_id: str = Query(..., min_length=1, max_length=64, description="e.g. country_IN or state_29"),
+    catalogue: PublicCatalogueService = Depends(PublicCatalogueService),
+):
+    """
+    Regions directly inside a parent region, A–Z (states of India, districts
+    of a state). For the place pickers on the public site. No authentication.
+    """
+    return catalogue.list_child_regions(parent_id)
+
+
+# Per-IP limits for signed-out actions (decisions 2, 3 and 8 in the redesign plan).
+PUBLIC_DOWNLOADS_PER_HOUR = int(os.getenv("PUBLIC_DOWNLOADS_PER_HOUR", "30"))
+PUBLIC_PREVIEWS_PER_HOUR = int(os.getenv("PUBLIC_PREVIEWS_PER_HOUR", "120"))
+PUBLIC_ACCESS_REQUESTS_PER_HOUR = int(os.getenv("PUBLIC_ACCESS_REQUESTS_PER_HOUR", "5"))
+PUBLIC_CHAT_MESSAGES_PER_DAY = int(os.getenv("PUBLIC_CHAT_MESSAGES_PER_DAY", "30"))
+
+
+class PublicDownloadRequest(BaseModel):
+    # First download from this browser: email + accept_terms. Later ones: the
+    # visitor_id from the dataio_visitor cookie is enough.
+    email: Optional[EmailStr] = None
+    visitor_id: Optional[str] = Field(None, max_length=64)
+    accept_terms: bool = False
+
+
+@web_router.post("/public/datasets/{dataset_id}/download-urls", tags=["public"])
+async def get_public_download_urls(dataset_id: str, body: PublicDownloadRequest, request: Request):
+    """
+    Presigned download links for an Open download dataset, without signing in.
+
+    Only for datasets with access level DOWNLOAD (403 otherwise). The visitor
+    gives an email and accepts the terms (or sends the visitor ID they got the
+    first time); otherwise 428. POST so the email stays out of URLs and logs.
+    Links are short-lived. Rate-limited per IP; each download is logged with
+    the email, visitor ID and IP (access channel PUBLIC).
+    """
+    from dataio.api.auth.security import enforce_ip_rate_limit
+    from dataio.api.services.public_access_service import PublicAccessService
+
+    enforce_ip_rate_limit(request, "download", PUBLIC_DOWNLOADS_PER_HOUR, 3600)
+    user_agent, ip_address = get_client_info(request)
+    return PublicAccessService().get_open_download_urls(
+        dataset_id,
+        ip_address,
+        user_agent,
+        email=str(body.email) if body.email else None,
+        visitor_id=body.visitor_id,
+        accept_terms=body.accept_terms,
+    )
+
+
+@web_router.get("/public/datasets/{dataset_id}/preview", tags=["public"])
+async def get_public_dataset_preview(dataset_id: str, request: Request):
+    """
+    First rows of the dataset's first table for the dataset page.
+
+    ``mode`` is ``real`` (Open download), ``synthetic`` (View only: place
+    names, codes and dates are real, numbers random, other text hidden),
+    ``none`` (Restricted) or ``unavailable`` (no CSV table found).
+    """
+    from dataio.api.auth.security import enforce_ip_rate_limit
+    from dataio.api.services.public_access_service import PublicAccessService
+
+    enforce_ip_rate_limit(request, "preview", PUBLIC_PREVIEWS_PER_HOUR, 3600)
+    return PublicAccessService().get_preview(dataset_id)
+
+
+class AccessRequestCreate(BaseModel):
+    dataset_id: str = Field(..., min_length=1, max_length=64)
+    full_name: str = Field(..., min_length=1, max_length=200)
+    email: EmailStr
+    organisation: str = Field(..., min_length=1, max_length=300)
+    organisation_type: str = Field(..., min_length=1, max_length=100)
+    organisation_type_other: Optional[str] = Field(None, max_length=200)
+    purpose: str = Field(..., min_length=1, max_length=4000)
+    consent: bool
+
+
+@web_router.post("/public/access-requests", tags=["public"])
+async def create_access_request(body: AccessRequestCreate, request: Request):
+    """
+    "Request access" form for View only and Restricted datasets.
+
+    Saves the request for review in the admin panel, emails the team and
+    sends the requester a receipt. Rate-limited per IP. No sign-in needed.
+    """
+    from dataio.api.auth.security import enforce_ip_rate_limit
+    from dataio.api.services.public_access_service import PublicAccessService
+
+    enforce_ip_rate_limit(request, "access-request", PUBLIC_ACCESS_REQUESTS_PER_HOUR, 3600)
+    user_agent, ip_address = get_client_info(request)
+    return PublicAccessService().submit_access_request(
+        dataset_id=body.dataset_id,
+        full_name=body.full_name,
+        email=str(body.email),
+        organisation=body.organisation,
+        organisation_type=body.organisation_type,
+        organisation_type_other=body.organisation_type_other,
+        purpose=body.purpose,
+        consent=body.consent,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+
+
+class PublicChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+    history: Optional[List[dict]] = Field(None, max_length=20)
+
+
+# Not a real account (no "@"), so the assistant's tools treat the visitor as a
+# user with no grants: Open datasets only, and never any download links.
+ANONYMOUS_CHAT_USER = "anonymous-visitor"
+
+
+@web_router.post("/public/chat/stream", tags=["public"])
+async def public_chat_stream(body: PublicChatRequest, request: Request):
+    """
+    The data assistant for signed-out visitors (floating button on the public site).
+
+    Same Server-Sent Events as /chat/stream, on the server's default model,
+    nothing saved. Rate-limited per IP per day.
+    """
+    from fastapi.responses import StreamingResponse
+    from dataio.api.auth.security import enforce_ip_rate_limit
+    from dataio.api.services.chat_service import ChatService
+
+    enforce_ip_rate_limit(request, "chat", PUBLIC_CHAT_MESSAGES_PER_DAY, 86400)
+    chat_service = ChatService()
+
+    async def generate():
+        try:
+            async for event in chat_service.chat_stream(
+                user_message=body.message,
+                conversation_history=body.history or [],
+                user_email=ANONYMOUS_CHAT_USER,
+            ):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception:
+            logger.exception("Error in public chat stream")
+            yield f"data: {json.dumps({'type': 'error', 'message': 'The assistant is unavailable right now.'})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
+# =============================================================================
+# Admin: access requests
+# =============================================================================
+
+
+class AccessRequestReview(BaseModel):
+    note: Optional[str] = Field(None, max_length=2000)
+
+
+@web_router.get("/admin/access-requests", tags=["web-admin/access-requests"])
+async def admin_list_access_requests(
+    status: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    user: User = Depends(get_current_web_user),
+):
+    """List "Request access" submissions, newest first. Admin only."""
+    from dataio.api.services.public_access_service import PublicAccessService
+
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return PublicAccessService().list_access_requests(status=status, limit=limit, offset=offset)
+
+
+@web_router.post("/admin/access-requests/{request_id}/approve", tags=["web-admin/access-requests"])
+async def admin_approve_access_request(
+    request_id: str,
+    body: AccessRequestReview,
+    user: User = Depends(get_current_web_user),
+):
+    """Approve: give the requester DOWNLOAD on the dataset (inviting them if they have no account)."""
+    from dataio.api.services.public_access_service import PublicAccessService
+
+    return PublicAccessService().review_access_request(user, request_id, approve=True, note=body.note)
+
+
+@web_router.post("/admin/access-requests/{request_id}/reject", tags=["web-admin/access-requests"])
+async def admin_reject_access_request(
+    request_id: str,
+    body: AccessRequestReview,
+    user: User = Depends(get_current_web_user),
+):
+    """Reject a request; the requester gets a short email (with the note, if any)."""
+    from dataio.api.services.public_access_service import PublicAccessService
+
+    return PublicAccessService().review_access_request(user, request_id, approve=False, note=body.note)
 
 
 # =============================================================================

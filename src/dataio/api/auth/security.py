@@ -153,21 +153,24 @@ def enforce_rate_limit(
 def get_client_ip(request: Request) -> Optional[str]:
     """The caller's IP address.
 
-    Proxy headers (Cloudflare, X-Real-IP, X-Forwarded-For) are only trusted
-    when TRUST_PROXY_HEADERS=true, i.e. when the API sits behind a proxy that
-    sets them; otherwise anyone could pick their own address.
+    Proxy headers are only trusted when TRUST_PROXY_HEADERS=true, i.e. when
+    the API is reachable only through our nginx proxy; otherwise anyone could
+    pick their own address. Only headers nginx writes itself are used:
+    X-Real-IP (nginx sets it to the connecting address, replacing anything
+    the visitor sent), else the LAST X-Forwarded-For entry (the one nginx
+    appended; earlier entries come from the visitor). CF-Connecting-IP is
+    deliberately ignored: there is no Cloudflare in front, and nginx passes
+    that header through unchanged, so a visitor could set it to any IP.
     """
     ip_address = request.client.host if request.client else None
     if os.getenv("TRUST_PROXY_HEADERS", "false").lower() == "true":
-        cf_ip = request.headers.get("cf-connecting-ip")
-        real_ip = request.headers.get("x-real-ip")
-        forwarded_for = request.headers.get("x-forwarded-for")
-        if cf_ip:
-            ip_address = cf_ip.strip()
-        elif real_ip:
-            ip_address = real_ip.strip()
+        real_ip = (request.headers.get("x-real-ip") or "").strip()
+        forwarded_for = [part.strip() for part in request.headers.get("x-forwarded-for", "").split(",")]
+        forwarded_for = [part for part in forwarded_for if part]
+        if real_ip:
+            ip_address = real_ip
         elif forwarded_for:
-            ip_address = forwarded_for.split(",")[0].strip()
+            ip_address = forwarded_for[-1]
     return ip_address
 
 

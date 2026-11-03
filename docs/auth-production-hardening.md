@@ -82,7 +82,9 @@ These are still recommended follow-ups after this branch:
 
 ## Environment knobs
 
-- `TRUST_PROXY_HEADERS`
+- `TRUST_PROXY_HEADERS` — set `true` only when the API is reachable solely through the nginx proxy (block ports
+  8000/3000 from everywhere else). Then the client IP comes from `X-Real-IP`, else the last `X-Forwarded-For` entry;
+  `CF-Connecting-IP` is ignored (no Cloudflare in front, and nginx passes it through from the visitor).
 - `AUTH_RATE_LIMIT_WINDOW_SECONDS`
 - `AUTH_RATE_LIMIT_BLOCK_SECONDS`
 - `OTP_SECRET_KEY`

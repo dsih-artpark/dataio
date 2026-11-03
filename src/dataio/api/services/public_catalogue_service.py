@@ -215,6 +215,21 @@ def _manifest_tables(dataset: Dataset) -> dict | None:
     return tables if isinstance(tables, dict) else None
 
 
+def table_count(dataset: Dataset) -> int:
+    """Number of tables the catalogue describes, from the same sources as public_columns."""
+    manifest_tables = _manifest_tables(dataset)
+    if manifest_tables:
+        return len(manifest_tables)
+    if not dataset.data_dictionary_json:
+        return 0
+    try:
+        parsed = json.loads(dataset.data_dictionary_json)
+    except (TypeError, ValueError):
+        return 0
+    tables = (parsed or {}).get("tables") if isinstance(parsed, dict) else None
+    return len(tables) if isinstance(tables, dict) else 0
+
+
 def _updated_at(dataset: Dataset) -> str | None:
     value = dataset.manifest_updated_at or dataset.documentation_synced_at
     return value.isoformat() if value else None
@@ -245,6 +260,7 @@ def _summary(dataset: Dataset) -> dict:
         "dataset_kind": dataset_kind(dataset),
         "tags": sorted(tag.tag_name for tag in (dataset.tags or [])),
         "has_data_dictionary": bool(dataset.manifest_json or dataset.data_dictionary_json),
+        "table_count": table_count(dataset),
         "updated_at": _updated_at(dataset),
     }
 
@@ -262,7 +278,7 @@ class PublicCatalogueService:
         search: str | None = None,
         collection_ids: Iterable[Any] | None = None,
         category_ids: Iterable[str] | None = None,
-        region_id: str | None = None,
+        region_id: str | Iterable[str] | None = None,
         spatial_resolutions: Iterable[str] | None = None,
         temporal_resolutions: Iterable[str] | None = None,
         year_from: int | None = None,
@@ -297,6 +313,8 @@ class PublicCatalogueService:
         owner_id_list = _parse_int_list(data_owner_ids, "data_owner_id")
         category_list = _split_csv(category_ids)
         licence_list = _split_csv(licences)
+        # One region or several (a dataset matches if it is in any of them).
+        region_list = _split_csv([region_id] if isinstance(region_id, str) else region_id)
         terms = search_terms(search)
 
         session = DBSession()
@@ -330,10 +348,17 @@ class PublicCatalogueService:
             if kinds:
                 kind_expr = func.coalesce(Dataset.manifest_json["datasetKind"].astext, "tabular")
                 query = query.filter(kind_expr.in_(kinds))
-            if region_id:
-                query = query.filter(
-                    Dataset.spatial_coverage_region_id.in_(self._region_and_descendants(region_id))
-                )
+            if region_list:
+                # India means the all-India datasets themselves, not every state inside it.
+                places = [r for r in region_list if r != INDIA_REGION_ID]
+                region_conditions = []
+                if INDIA_REGION_ID in region_list:
+                    region_conditions.append(Dataset.spatial_coverage_region_id == INDIA_REGION_ID)
+                if places:
+                    region_conditions.append(
+                        Dataset.spatial_coverage_region_id.in_(self._region_and_descendants(places))
+                    )
+                query = query.filter(or_(*region_conditions))
             if year_from is not None:
                 query = query.filter(
                     Dataset.temporal_coverage_start_date.isnot(None),
@@ -370,10 +395,10 @@ class PublicCatalogueService:
             session.close()
 
     @staticmethod
-    def _region_and_descendants(region_id: str):
+    def _region_and_descendants(region_ids: list[str]):
         base = (
             select(Region.region_id)
-            .where(Region.region_id == region_id)
+            .where(Region.region_id.in_(region_ids))
             .cte("region_tree", recursive=True)
         )
         child = aliased(Region)
@@ -494,6 +519,27 @@ class PublicCatalogueService:
             session.close()
 
     # ----------------------------------------------------------------- stats
+
+    def list_child_regions(self, parent_id: str) -> dict:
+        """Regions directly inside ``parent_id`` (e.g. the districts of state_29), A–Z.
+
+        For the state and district pickers on the public site.
+        """
+        session = DBSession()
+        try:
+            rows = (
+                session.query(Region.region_id, Region.region_name)
+                .filter(Region.parent_region_id == parent_id)
+                .order_by(Region.region_name)
+                .limit(2000)
+                .all()
+            )
+            return {
+                "parent_id": parent_id,
+                "regions": [{"region_id": rid, "region_name": name} for rid, name in rows],
+            }
+        finally:
+            session.close()
 
     def get_stats(self) -> dict:
         """Live counts for the landing page: totals, themes, access, coverage."""

@@ -273,7 +273,15 @@ def test_list_items_carry_the_card_fields():
     assert dengue["dataset_kind"] == "tabular"
     assert dengue["tags"] == ["dengue", "vector borne"]
     assert dengue["has_data_dictionary"] is True
+    assert dengue["table_count"] == 1
     assert dengue["updated_at"].startswith("2026-10-01")
+
+
+def test_table_count_reads_manifest_then_data_dictionary():
+    by_id = {d["ds_id"]: d for d in service.list_datasets(limit=50)["datasets"]}
+    assert by_id["EP0001DS0001"]["table_count"] == 1  # manifest datasetTables
+    assert by_id["CS0002DS0003"]["table_count"] == 1  # data dictionary only
+    assert by_id["GS0001DS0004"]["table_count"] == 0  # manifest without tables
 
 
 def test_list_never_includes_documents_or_download_links():
@@ -294,6 +302,25 @@ def test_region_filter_includes_regions_inside_it():
     assert set(ids(service.list_datasets(region_id="state_29"))) == {"EP0001DS0001", "CS0002DS0003"}
     assert ids(service.list_datasets(region_id="district_525")) == ["CS0002DS0003"]
     assert ids(service.list_datasets(region_id="state_27")) == []
+
+
+def test_region_filter_matches_any_of_several_regions():
+    assert set(ids(service.list_datasets(region_id=["district_525", "state_21"]))) == {
+        "CS0002DS0003",
+        "WE0001DS0005",
+    }
+    response = client.get(
+        "/api/v1/web/public/datasets", params=[("region_id", "district_525"), ("region_id", "state_21")]
+    )
+    assert set(ids(response.json())) == {"CS0002DS0003", "WE0001DS0005"}
+
+
+def test_india_region_means_all_india_datasets_only():
+    assert ids(service.list_datasets(region_id="country_IN")) == ["CS0001DS0002"]
+    assert set(ids(service.list_datasets(region_id=["country_IN", "state_21"]))) == {
+        "CS0001DS0002",
+        "WE0001DS0005",
+    }
 
 
 @pytest.mark.parametrize(
@@ -544,3 +571,11 @@ def test_stats_and_detail_routes():
     assert client.get("/api/v1/web/public/stats").json()["total_datasets"] == 5
     assert client.get("/api/v1/web/public/datasets/CS0002DS0003").json()["readme_md"] is None
     assert client.get("/api/v1/web/public/datasets/XX0000DS0000").status_code == 404
+
+
+def test_regions_route_lists_children_a_to_z():
+    states = client.get("/api/v1/web/public/regions", params={"parent_id": "country_IN"}).json()
+    assert [r["region_name"] for r in states["regions"]] == ["Karnataka", "Maharashtra", "Odisha"]
+    districts = client.get("/api/v1/web/public/regions", params={"parent_id": "state_29"}).json()
+    assert districts["regions"] == [{"region_id": "district_525", "region_name": "Bengaluru Urban"}]
+    assert client.get("/api/v1/web/public/regions").status_code == 422

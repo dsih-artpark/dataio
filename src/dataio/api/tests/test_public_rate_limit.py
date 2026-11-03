@@ -47,9 +47,14 @@ def test_proxy_headers_are_ignored_unless_trusted(monkeypatch):
 @pytest.mark.parametrize(
     "headers, expected",
     [
-        ({"CF-Connecting-IP": "198.51.100.1", "X-Real-IP": "198.51.100.2"}, "198.51.100.1"),
         ({"X-Real-IP": " 198.51.100.2 ", "X-Forwarded-For": "198.51.100.3"}, "198.51.100.2"),
-        ({"X-Forwarded-For": "198.51.100.3, 10.0.0.1"}, "198.51.100.3"),
+        # nginx appends the real address last; earlier entries are the visitor's own claim
+        ({"X-Forwarded-For": "6.6.6.6, 198.51.100.3"}, "198.51.100.3"),
+        ({"X-Forwarded-For": "198.51.100.3, "}, "198.51.100.3"),
+        # Not behind Cloudflare: nginx passes this through from the visitor, so it is never trusted
+        ({"CF-Connecting-IP": "6.6.6.6", "X-Real-IP": "198.51.100.2"}, "198.51.100.2"),
+        ({"CF-Connecting-IP": "6.6.6.6"}, "203.0.113.7"),
+        ({"X-Real-IP": "  "}, "203.0.113.7"),
         ({}, "203.0.113.7"),
     ],
 )

@@ -465,17 +465,46 @@ class DatasetDownload(Base):
     __tablename__ = "dataset_downloads"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_email = Column(Text, ForeignKey("users.email", ondelete="CASCADE"), nullable=False)
+    # NULL for signed-out downloads of Open datasets (migration 030)
+    user_email = Column(Text, ForeignKey("users.email", ondelete="CASCADE"), nullable=True)
     dataset_id = Column(Text, nullable=False)
-    access_channel = Column(Text, nullable=False, default="WEB")  # 'WEB', 'SDK', 'MCP'
+    access_channel = Column(Text, nullable=False, default="WEB")  # 'WEB', 'SDK', 'MCP', 'PUBLIC'
     ip_address = Column(Text, nullable=True)
     user_agent = Column(Text, nullable=True)
+    # Signed-out download pop-up (migration 031): email given, the random ID in
+    # the dataio_visitor cookie, and when the visitor accepted the terms.
+    visitor_email = Column(Text, nullable=True)
+    visitor_id = Column(UUID(as_uuid=True), nullable=True)
+    terms_accepted_at = Column(DateTime(timezone=True), nullable=True)
     # TIMESTAMPTZ in migration 022: write an aware UTC value so the stored
     # instant doesn't depend on the database session's TimeZone
     downloaded_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Relationship
     user = relationship("User", backref=backref("downloads", passive_deletes=True))
+
+
+class AccessRequest(Base):
+    """'Request access' form submission from the public site (migration 030)."""
+
+    __tablename__ = "access_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    dataset_id = Column(Text, nullable=False)
+    full_name = Column(Text, nullable=False)
+    email = Column(Text, nullable=False)
+    organisation = Column(Text, nullable=False)
+    organisation_type = Column(Text, nullable=False)
+    organisation_type_other = Column(Text, nullable=True)
+    purpose = Column(Text, nullable=False)
+    consent = Column(Boolean, nullable=False)
+    status = Column(Text, nullable=False, default="PENDING")  # PENDING, APPROVED, REJECTED
+    ip_address = Column(Text, nullable=True)
+    user_agent = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    reviewed_by = Column(Text, ForeignKey("users.email", ondelete="SET NULL"), nullable=True)
+    review_note = Column(Text, nullable=True)
 
 
 class ShapefileVersion(Base):

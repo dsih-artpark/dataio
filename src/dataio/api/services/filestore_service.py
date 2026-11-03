@@ -265,6 +265,49 @@ class FilestoreService(BaseService):
             )
         return table_sources
 
+    def read_table_head(
+        self,
+        dataset_id: str,
+        version_type: VersionType,
+        max_rows: int = 5,
+        max_bytes: int = 65536,
+    ) -> dict | None:
+        """First rows of the dataset's first CSV table (by file name).
+
+        Reads at most ``max_bytes`` with a ranged GET, so a preview never pulls
+        a whole file. Returns {"table": name, "columns": [...], "rows": [[...]]}
+        or None when the version has no CSV table.
+        """
+        import csv
+        import io
+
+        csv_keys = sorted(
+            key
+            for key in self._list_dataset_objects(dataset_id, version_type)
+            if Path(key).suffix.lower() == ".csv"
+        )
+        if not csv_keys:
+            return None
+        key = csv_keys[0]
+        body = self.bucket.Object(key).get(Range=f"bytes=0-{max_bytes - 1}")["Body"].read()
+        text = body.decode("utf-8-sig", errors="replace")
+        lines = text.splitlines()
+        # A ranged read usually ends mid-row: drop the cut-off last line.
+        if len(body) >= max_bytes and lines:
+            lines = lines[:-1]
+        reader = csv.reader(io.StringIO("\n".join(lines)))
+        header = next(reader, None)
+        if not header:
+            return None
+        rows = []
+        for row in reader:
+            if len(rows) >= max_rows:
+                break
+            if not any(cell.strip() for cell in row):
+                continue
+            rows.append((row + [""] * len(header))[: len(header)])
+        return {"table": Path(key).stem, "columns": header, "rows": rows}
+
     def get_geojson_validation_source(
         self,
         dataset_id: str,

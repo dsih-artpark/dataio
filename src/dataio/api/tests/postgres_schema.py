@@ -19,7 +19,11 @@ TEST_DATABASE_URL = os.getenv("DATAIO_TEST_DATABASE_URL")
 DB_DIR = Path(__file__).resolve().parents[2] / "db"
 # Migrations that schema.sql (regenerated from 001-024) doesn't include yet
 # and that tests depend on.
-MIGRATIONS_AFTER_SCHEMA = ["029_dataset_licence.sql"]
+MIGRATIONS_AFTER_SCHEMA = [
+    "029_dataset_licence.sql",
+    "030_access_requests.sql",
+    "031_public_download_consent.sql",
+]
 
 requires_postgres = pytest.mark.skipif(
     not TEST_DATABASE_URL,

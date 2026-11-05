@@ -1,4 +1,6 @@
 ---
+import { PLATFORM_NAME } from '../lib/site';
+
 interface Props {
   title: string;
   description?: string;
@@ -14,7 +16,7 @@ const { title, description = 'DataIO - Dataset Management System' } = Astro.prop
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content={description} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>{title} | DataIO</title>
+    <title>{`${title} | ${PLATFORM_NAME}`}</title>
   </head>
   <body class="min-h-screen">
     <slot />

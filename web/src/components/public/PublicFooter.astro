@@ -1,0 +1,97 @@
+---
+// Public site footer: closing line + call to action, link columns, the
+// ARTPARK credit and the code vs. data licence line.
+import { CONTACT_EMAIL } from '../../lib/site';
+
+const year = new Date().getFullYear();
+
+const columns = [
+  {
+    heading: 'Platform',
+    links: [
+      { label: 'Datasets', href: '/datasets' },
+      { label: 'Our approach', href: '/#approach' },
+      { label: 'How we check quality', href: '/quality' },
+      {
+        label: 'Data standards',
+        href: 'https://engg.artpark.ai/data_standardisation/workflow.html',
+        external: true,
+      },
+    ],
+  },
+  {
+    heading: 'Developers',
+    links: [
+      { label: 'Documentation', href: 'https://dataio.artpark.ai/docs', external: true },
+      { label: 'GitHub', href: 'https://github.com/dsih-artpark/dataio', external: true },
+      { label: 'PyPI', href: 'https://pypi.org/project/dataio-artpark/', external: true },
+    ],
+  },
+];
+---
+
+<footer class="bg-primary-600 text-white pt-16 sm:pt-[72px]">
+  <div class="max-w-page mx-auto px-4 sm:px-6 flex flex-col gap-10">
+    <div class="flex flex-wrap items-end justify-between gap-6">
+      <p class="m-0 max-w-[720px] text-3xl sm:text-[40px] leading-tight font-bold">
+        Better public data, shared openly, for decisions that reach people.
+      </p>
+      <a
+        href="/datasets"
+        class="inline-flex items-center min-h-[44px] px-6 rounded-full bg-white text-primary-900 font-bold text-[15px] hover:bg-primary-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-primary-600"
+      >
+        Explore datasets
+      </a>
+    </div>
+
+    <div class="flex flex-wrap gap-x-12 gap-y-8 text-[15px]">
+      {
+        columns.map((column) => (
+          <div class="flex-[1_1_160px] flex flex-col gap-2.5">
+            <h2 class="m-0 text-[15px] font-bold">{column.heading}</h2>
+            {column.links.map((link) => (
+              <a
+                href={link.href}
+                class="text-primary-50 hover:text-white hover:underline"
+                {...(link.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+              >
+                {link.label}
+              </a>
+            ))}
+          </div>
+        ))
+      }
+      <div id="contact" class="flex-[1_1_220px] flex flex-col gap-2.5">
+        <h2 class="m-0 text-[15px] font-bold">ARTPARK</h2>
+        <span class="text-primary-50">AI &amp; Robotics Technology Park, IISc Bengaluru</span>
+        <a href={`mailto:${CONTACT_EMAIL}`} class="text-primary-50 hover:text-white hover:underline">
+          {CONTACT_EMAIL}
+        </a>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-x-6 gap-y-4 p-6 rounded-[14px] bg-white">
+      <img
+        src="/artpark_logo.svg"
+        alt="ARTPARK, AI & Robotics Technology Park, I-Hub @ IISc"
+        class="h-14 w-auto max-w-full"
+        width="254"
+        height="56"
+      />
+      <p class="m-0 flex-[1_1_260px] text-base leading-normal text-primary-900">
+        <strong>Built at ARTPARK, IISc Bengaluru.</strong>
+      </p>
+    </div>
+
+    <div class="flex flex-wrap justify-between gap-3 pt-5 pb-8 border-t border-primary-400 text-[13px] text-primary-50">
+      <span>
+        &copy; {year} ARTPARK. Platform code licensed under AGPL-3.0. Each dataset shows its own source and data
+        licence.
+      </span>
+      <span class="flex gap-5">
+        <a href="/terms" class="text-primary-50 hover:text-white hover:underline">Terms of Use</a>
+        <a href="/privacy" class="text-primary-50 hover:text-white hover:underline">Privacy Policy</a>
+      </span>
+    </div>
+  </div>
+</footer>

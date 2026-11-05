@@ -1,0 +1,13 @@
+---
+// Terms of Use, from docs/legal/terms-of-use.md (draft, under review: not indexed).
+import PublicLayout from '../layouts/PublicLayout.astro';
+import { legalDocHtml } from '../lib/legal';
+
+const html = legalDocHtml('terms-of-use.md');
+---
+
+<PublicLayout title="Terms of Use" description="Terms for using the platform and its datasets." noindex>
+  <article class="max-w-[820px] mx-auto bg-white border border-gray-200 rounded-2xl p-5 sm:p-8">
+    <div class="readme-content" set:html={html} />
+  </article>
+</PublicLayout>

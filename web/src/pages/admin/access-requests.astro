@@ -1,0 +1,24 @@
+---
+import DashboardLayout from '../../layouts/DashboardLayout.astro';
+import AccessRequestManager from '../../components/admin/AccessRequestManager';
+---
+
+<DashboardLayout title="Access requests">
+  <div class="space-y-6">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">Access requests</h1>
+      <p class="mt-1 text-gray-600">
+        “Request access” submissions from the public site. Approving gives the person download access to that dataset
+        (and invites them first if they have no account); they are emailed either way.
+      </p>
+    </div>
+
+    <AccessRequestManager client:load />
+  </div>
+</DashboardLayout>
+
+<script>
+  import { requireAuthenticatedPage } from '../../lib/auth';
+
+  requireAuthenticatedPage({ adminOnly: true });
+</script>

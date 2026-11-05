@@ -46,6 +46,9 @@ class DatasetCreate(BaseModel):
     access_level: AccessLevel = Field(
         default=AccessLevel.NONE, description="Public access level for the dataset"
     )
+    licence: Optional[str] = Field(
+        None, description="Licence the data is shared under, e.g. CC BY 4.0"
+    )
     additional_metadata: Optional[dict] = Field(None, description="Additional metadata")
     tags: Optional[List[str]] = Field(None, description="Tags for the dataset")
     raw_dataset_ids: List[str] = Field(
@@ -77,6 +80,9 @@ class DatasetUpdate(BaseModel):
     )
     access_level: Optional[AccessLevel] = Field(
         default=None, description="Public access level for the dataset"
+    )
+    licence: Optional[str] = Field(
+        None, description="Licence the data is shared under, e.g. CC BY 4.0"
     )
     additional_metadata: Optional[dict] = Field(None, description="Additional metadata")
     tags: Optional[List[str]] = Field(None, description="Tags for the dataset")

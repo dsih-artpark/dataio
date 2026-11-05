@@ -7,7 +7,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from dataio.api.database.config import Session as DBSession
 from dataio.api.database.models import AuthAuditLog, AuthRateLimit, User
@@ -148,3 +148,53 @@ def enforce_rate_limit(
         logger.warning("Failed to enforce rate limit %s/%s: %s", action, subject, exc)
     finally:
         session.close()
+
+
+def get_client_ip(request: Request) -> Optional[str]:
+    """The caller's IP address.
+
+    Proxy headers are only trusted when TRUST_PROXY_HEADERS=true, i.e. when
+    the API is reachable only through our nginx proxy; otherwise anyone could
+    pick their own address. Only headers nginx writes itself are used:
+    X-Real-IP (nginx sets it to the connecting address, replacing anything
+    the visitor sent), else the LAST X-Forwarded-For entry (the one nginx
+    appended; earlier entries come from the visitor). CF-Connecting-IP is
+    deliberately ignored: there is no Cloudflare in front, and nginx passes
+    that header through unchanged, so a visitor could set it to any IP.
+    """
+    ip_address = request.client.host if request.client else None
+    if os.getenv("TRUST_PROXY_HEADERS", "false").lower() == "true":
+        real_ip = (request.headers.get("x-real-ip") or "").strip()
+        forwarded_for = [part.strip() for part in request.headers.get("x-forwarded-for", "").split(",")]
+        forwarded_for = [part for part in forwarded_for if part]
+        if real_ip:
+            ip_address = real_ip
+        elif forwarded_for:
+            ip_address = forwarded_for[-1]
+    return ip_address
+
+
+def enforce_ip_rate_limit(
+    request: Request,
+    action: str,
+    limit: int,
+    window_seconds: int,
+    block_seconds: Optional[int] = None,
+) -> None:
+    """Per-IP limit for public (signed-out) actions such as open downloads,
+    the assistant and request forms.
+
+    Allows ``limit`` calls per ``window_seconds`` from one IP address, then
+    answers 429 for ``block_seconds`` (default: one window). Counters share
+    the auth_rate_limits table under the action ``public:<action>``. Like
+    enforce_rate_limit, it lets the call through if the counter can't be
+    read or written.
+    """
+    ip_address = get_client_ip(request) or "unknown"
+    enforce_rate_limit(
+        action=f"public:{action}",
+        subject=f"ip:{ip_address}",
+        limit=limit,
+        window_seconds=window_seconds,
+        block_seconds=block_seconds if block_seconds is not None else window_seconds,
+    )

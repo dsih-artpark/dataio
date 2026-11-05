@@ -1,1492 +1,586 @@
 ---
-// Public landing page - the main website entry point
-import UnifiedNav from '../components/common/UnifiedNav';
+// Public landing page (redesign wireframe v2, "Landing"). Static sections are
+// rendered here; live numbers and lists come from islands that call
+// /public/stats and /public/datasets in the browser.
+import PublicLayout from '../layouts/PublicLayout.astro';
+import HeroStats from '../components/public/landing/HeroStats';
+import ThemeGrid from '../components/public/landing/ThemeGrid';
+import CoverageMap from '../components/public/landing/CoverageMap';
+import RecentlyUpdated from '../components/public/landing/RecentlyUpdated';
+import CodeTabs from '../components/public/landing/CodeTabs';
+import { ACCESS_DESCRIPTIONS } from '../lib/catalogue';
+import { COMING_SOON_THEME, POPULAR_SEARCHES, THEMES, datasetsHref } from '../lib/landing';
+import { CONTACT_EMAIL, PLATFORM_NAME } from '../lib/site';
+
+const STANDARDS_URL = 'https://engg.artpark.ai/data_standardisation/workflow.html';
+
+// Hero theme shortcuts: the six themes the wireframe shows.
+const heroThemes = THEMES.filter((theme) => ['EP', 'CS', 'GS', 'MW', 'ET'].includes(theme.id));
+
+const audiences = [
+  {
+    title: 'NGOs & programme teams',
+    text: 'District- and village-level figures for planning, targeting and reporting. No data team needed to clean them.',
+    points: [
+      'Find data for your state or district',
+      'Plain-language descriptions of every column',
+      'Download as a spreadsheet-friendly file',
+    ],
+    link: { label: 'Find data for your region', href: '#coverage' },
+    icon: '<path d="M12 21s-7-4.5-7-11a7 7 0 0 1 14 0c0 6.5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>',
+  },
+  {
+    title: 'Researchers',
+    text: 'Standardised, versioned datasets with full data dictionaries and sources, so your analysis is reproducible and citable.',
+    points: ['Units, methods and sources documented', 'Versions you can cite and come back to', 'Python SDK, CLI and REST API'],
+    link: { label: 'Browse the catalogue', href: '/datasets' },
+    icon: '<path d="M9 3h6"/><path d="M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3"/>',
+  },
+  {
+    title: 'Philanthropy',
+    text: 'See what evidence exists for a region or issue, where the gaps are, and how shared data infrastructure multiplies the impact of your grants.',
+    points: ['Coverage by theme, place and time', 'Data your grantees can reuse', 'Open, public-interest infrastructure'],
+    link: { label: 'Support or partner with us', href: '#partner' },
+    icon: '<path d="M3 20h18"/><path d="M6 16v-5"/><path d="M11 16V7"/><path d="M16 16v-3"/><path d="M20 16V5"/>',
+  },
+  {
+    title: 'Government',
+    text: 'State and district figures from many departments that line up with each other, for planning, monitoring and reporting.',
+    points: [
+      'Data by state, district and village',
+      'Official LGD codes, so datasets join up',
+      'Share your department’s data with us',
+    ],
+    link: { label: 'Find or share data', href: '#partner' },
+    icon: '<path d="M3 21h18"/><path d="M5 21V10"/><path d="M9 21V10"/><path d="M15 21V10"/><path d="M19 21V10"/><path d="M12 3 3 8h18z"/>',
+  },
+];
+
+const steps: { title: string; text: string; link?: { label: string; href: string } }[] = [
+  {
+    title: 'Collect',
+    text: 'From government sources, published studies and partner organisations, always with the original source recorded.',
+  },
+  { title: 'Standardise', text: 'Common place names and codes, dates and units, so datasets line up with each other.' },
+  {
+    title: 'Check & document',
+    text: 'Quality checks on every release, a description for every column, and a version history.',
+    link: { label: 'How we check quality', href: '/quality' },
+  },
+  {
+    title: 'Share responsibly',
+    text: 'Open where possible, protected where needed. Sensitive data stays restricted and is shared on request.',
+  },
+];
+
+// Logos from the "Partners and Research Collaborators" deck, in public/logos/
+// (trimmed, 2x display height, WebP).
+interface Logo {
+  name: string;
+  file: string;
+}
+const logo = (name: string, file: string): Logo => ({ name, file: `/logos/${file}.webp` });
+const dataSources = [
+  logo('Government of Karnataka', 'gov-karnataka'),
+  logo('NVBDCP', 'nvbdcp'),
+  logo('India Meteorological Department', 'imd'),
+  logo('Indian Institute of Tropical Meteorology', 'iitm'),
+  logo('ICMR National Institute of Virology', 'icmr-niv'),
+];
+const collaborators = [
+  logo('Google Research', 'google-research'),
+  logo('National Disease Modelling Consortium', 'ndmc'),
+  logo('Indian Institute of Science', 'iisc'),
+  logo('International Centre for Theoretical Sciences', 'icts'),
+  logo('The Institute of Mathematical Sciences', 'imsc'),
+  logo('BITS Pilani', 'bits-pilani'),
+  logo('Ashoka University', 'ashoka-university'),
+  logo('Yale School of Public Health', 'yale-public-health'),
+  logo('MAPSolve AI', 'mapsolve-ai'),
+];
+const supporters = [
+  logo('India Health Fund', 'india-health-fund'),
+  logo('Clinton Foundation', 'clinton-foundation'),
+  logo('Asian Venture Philanthropy Network', 'avpn'),
+  logo('Centre for Health Research and Innovation', 'chri'),
+  logo('Khushi Baby', 'khushi-baby'),
+];
+
+const stories = [
+  {
+    tag: 'Government',
+    title: 'Dengue forecasts for state health departments',
+    text: 'Short-term dengue forecasts built on case, weather and climate data, now live in Karnataka, Andhra Pradesh and Odisha and used in state health dashboards.',
+    href: 'https://www.artpark.in/health-initiatives/dengue-dashboard',
+    placeholder: false,
+  },
+  {
+    tag: 'Research',
+    title: 'Datalab: livestock [story title]',
+    text: '[One or two lines on the livestock study or model]',
+    href: null,
+    placeholder: true,
+  },
+  {
+    tag: 'Research',
+    title: 'APSI / Dharini [story title]',
+    text: '[One or two lines on what the APSI / Dharini programme did with the data, and the outcome]',
+    href: 'https://www.artpark.in/health-initiatives/environmental-survelliance',
+    placeholder: true,
+  },
+];
+
+const mailto = (subject: string, body: string) =>
+  `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+const contributeHref = mailto(
+  'Data contribution',
+  'Hi,\r\n\r\nI would like to contribute data.\r\n\r\nDataset name:\r\nOrganisation:\r\nShort description:\r\nFormat (CSV, Excel, PDF, other):\r\nLink to the data (if any):\r\nHow it should be shared (open, view only or restricted):\r\n',
+);
+const requestHref = mailto(
+  'Dataset request',
+  'Hi,\r\n\r\nI could not find a dataset I need.\r\n\r\nWhat data:\r\nWhich place (state, district or other):\r\nWhich years:\r\nWhat you will use it for:\r\nYour organisation:\r\n',
+);
+const partnerHref = mailto('Partnership', 'Hi,\r\n\r\nWe would like to talk about supporting or partnering with the One Health data commons.\r\n\r\nOrganisation:\r\n');
+
+const eyebrow = 'm-0 text-[13px] font-semibold uppercase tracking-[0.08em] text-primary-700';
+const h2 = 'm-0 text-[28px] sm:text-4xl leading-tight font-bold text-gray-900';
+const intro = 'm-0 text-[17px] leading-relaxed text-gray-600 max-w-[680px]';
+const textLink = 'font-semibold text-primary-700 hover:text-primary-900';
+const logoImg = 'block w-auto object-contain';
 ---
 
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta
-      name="description"
-      content="ARTPARK Data Platform - Discover, access, and manage epidemiological, administrative, weather, geospatial datasets. Built at ARTPARK, IISc Bangalore."
-    />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>ARTPARK Data Platform</title>
-  </head>
-  <body class="min-h-screen bg-white">
-    <!-- Navigation -->
-    <UnifiedNav client:load variant="transparent" />
+<PublicLayout title={PLATFORM_NAME} width="full" background="white" backToTop>
+  <!-- HERO -->
+  <section aria-labelledby="hero-heading" class="bg-gradient-to-b from-primary-50 to-white px-4 sm:px-6 pt-14 sm:pt-[72px] pb-16">
+    <div class="max-w-[920px] mx-auto text-center flex flex-col items-center gap-5">
+      <p class={eyebrow}>ARTPARK · IISc Bengaluru</p>
+      <h1 id="hero-heading" class="m-0 text-4xl sm:text-[52px] leading-[1.12] font-bold tracking-[-0.01em] text-gray-900">
+        One Health data for India
+      </h1>
+      <p class="m-0 max-w-[720px] text-[17px] sm:text-[19px] leading-relaxed text-gray-600">
+        Human and animal disease records, population and livestock censuses, and weather data, linked by state,
+        district and village.
+      </p>
 
-    <main>
-      <!-- Hero Section -->
-      <section
-        class="pt-12 sm:pt-16 pb-16 sm:pb-24 px-4 sm:px-6 lg:px-8 bg-gradient-to-b from-primary-50 to-white"
+      <form
+        role="search"
+        action="/datasets"
+        method="get"
+        class="mt-3 w-full max-w-[720px] flex flex-wrap gap-2 bg-white border border-gray-300 rounded-xl p-2 shadow-sm focus-within:ring-2 focus-within:ring-primary-500 focus-within:border-primary-500"
       >
-        <div class="max-w-6xl mx-auto">
-          <!-- Hero Content -->
-          <div class="text-center relative z-10 mb-12 sm:mb-16">
-            <h1
-              class="hero-title text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold text-gray-900 leading-tight opacity-0"
+        <label for="hero-search" class="sr-only">Search datasets</label>
+        <input
+          id="hero-search"
+          name="search"
+          type="search"
+          placeholder="Search datasets by name, topic or place, e.g. “dengue Karnataka”"
+          class="flex-[1_1_280px] min-w-0 border-0 bg-transparent px-3 py-3 text-base text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-0"
+        />
+        <button
+          type="submit"
+          class="flex-[1_1_auto] sm:flex-none min-h-[44px] px-[22px] rounded-lg bg-primary-600 text-white text-[15px] font-semibold hover:bg-primary-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2"
+        >
+          Search datasets
+        </button>
+      </form>
+
+      <div class="flex flex-wrap justify-center items-center gap-x-2.5 gap-y-2 text-sm text-gray-600">
+        <span>Popular searches:</span>
+        {
+          POPULAR_SEARCHES.map((term) => (
+            <a
+              href={datasetsHref({ search: term })}
+              class="inline-flex items-center min-h-[36px] px-3 rounded-full border border-gray-300 bg-white text-gray-700 hover:border-primary-300 hover:text-primary-900"
             >
-              <span class="text-primary-600">Research Grade Datasets.</span><br
-                class="hidden sm:block"
-              />
-              Analysis Ready. Curated over 4 years. <br /> Now available at your fingertips.
-            </h1>
-            <p
-              class="hero-subtitle mt-6 text-base sm:text-lg md:text-xl text-gray-600 max-w-3xl mx-auto px-4 opacity-0"
-            >
-              Assembled and Standardised at ARTPARK. <br /> Epi data, weather records,
-              administrative censuses and surveys, shapefiles, and more — all following
-              common standards.
-            </p>
-            <div
-              class="hero-cta mt-8 sm:mt-10 flex flex-col sm:flex-row gap-4 justify-center px-4 opacity-0"
-            >
+              “{term}”
+            </a>
+          ))
+        }
+      </div>
+
+      <ul aria-label="Browse by theme" class="m-0 mt-2 p-0 list-none flex flex-wrap justify-center gap-2">
+        {
+          heroThemes.map((theme) => (
+            <li>
               <a
-                href="/datasets"
-                class="btn-primary px-6 sm:px-8 py-3 text-base justify-center"
+                href={datasetsHref({ category_id: [theme.id] })}
+                class={`inline-flex items-center min-h-[36px] px-3.5 rounded-full border text-sm font-medium hover:brightness-95 ${theme.chip}`}
               >
-                Explore Datasets
+                {theme.label}
+              </a>
+            </li>
+          ))
+        }
+        <li>
+          <span
+            class={`inline-flex items-center min-h-[36px] px-3.5 rounded-full border border-dashed text-sm font-medium opacity-80 ${COMING_SOON_THEME.chip}`}
+          >
+            {COMING_SOON_THEME.label} <span class="ml-1 text-xs">(coming soon)</span>
+          </span>
+        </li>
+      </ul>
+
+      <HeroStats client:load />
+    </div>
+  </section>
+
+  <!-- WHO IT'S FOR -->
+  <section id="audiences" aria-labelledby="audiences-heading" class="py-16 sm:py-20 bg-white scroll-mt-4">
+    <div class="max-w-page mx-auto px-4 sm:px-6">
+      <p class={`${eyebrow} mb-2`}>Who it’s for</p>
+      <h2 id="audiences-heading" class={`${h2} mb-3`}>One place to start, whatever your role</h2>
+      <p class={`${intro} mb-10`}>
+        Every dataset is cleaned, documented and described the same way, so you spend less time finding and fixing data
+        and more time using it.
+      </p>
+      <div class="grid gap-6 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
+        {
+          audiences.map((audience) => (
+            <article class="border border-gray-200 rounded-2xl p-7 flex flex-col gap-3.5 bg-white">
+              <div aria-hidden="true" class="w-12 h-12 rounded-xl bg-primary-100 flex items-center justify-center">
                 <svg
-                  class="w-5 h-5 ml-2"
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
-                </svg>
-              </a>
-              <a
-                href="#developers"
-                class="btn-secondary px-6 sm:px-8 py-3 text-base justify-center"
-              >
-                Developer Quick Start
-              </a>
-            </div>
-          </div>
-
-          <!-- Floating Data Type Bubbles -->
-          <div
-            class="flex flex-wrap justify-center gap-2 sm:gap-3"
-            aria-label="Available data types"
-          >
-            <div
-              class="bubble bubble-1 px-3 py-1.5 bg-red-100 text-red-700 rounded-full text-xs sm:text-sm font-medium shadow-sm border border-red-200"
-            >
-              Dengue
-            </div>
-            <div
-              class="bubble bubble-2 px-3 py-1.5 bg-orange-100 text-orange-700 rounded-full text-xs sm:text-sm font-medium shadow-sm border border-orange-200"
-            >
-              Foot-and-mouth Disease
-            </div>
-            <div
-              class="bubble bubble-3 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-full text-xs sm:text-sm font-medium shadow-sm border border-blue-200"
-            >
-              Human Census
-            </div>
-            <div
-              class="bubble bubble-4 px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-full text-xs sm:text-sm font-medium shadow-sm border border-indigo-200"
-            >
-              Livestock Census
-            </div>
-            <div
-              class="bubble bubble-5 px-3 py-1.5 bg-purple-100 text-purple-700 rounded-full text-xs sm:text-sm font-medium shadow-sm border border-purple-200"
-            >
-              Population Surveys
-            </div>
-            <div
-              class="bubble bubble-6 px-3 py-1.5 bg-cyan-100 text-cyan-700 rounded-full text-xs sm:text-sm font-medium shadow-sm border border-cyan-200"
-            >
-              ERA5 Reanalysis
-            </div>
-            <div
-              class="bubble bubble-7 px-3 py-1.5 bg-green-100 text-green-700 rounded-full text-xs sm:text-sm font-medium shadow-sm border border-green-200"
-            >
-              State • District • City • Ward Shapefiles
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- For Researchers Section -->
-      <section
-        id="researchers"
-        class="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 bg-white"
-      >
-        <div class="max-w-7xl mx-auto">
-          <div class="grid lg:grid-cols-2 gap-8 lg:gap-12 items-center">
-            <div>
-              <h2
-                class="text-xl sm:text-2xl font-semibold text-primary-600 mb-3"
-              >
-                For Researchers & Scientists
-              </h2>
-              <h3
-                class="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900 mb-6"
-              >
-                Find the data you need,<br class="hidden sm:block" />
-                without the hassle
-              </h3>
-              <p class="text-base sm:text-lg text-gray-600 mb-8">
-                Browse through datasets curated over four years at ARTPARK. Each
-                dataset comes with comprehensive data dictionaries, standardised
-                formats, and clear documentation.
-              </p>
-              <ul class="space-y-4">
-                <li class="flex items-start">
-                  <div
-                    class="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0"
-                  >
-                    <svg
-                      class="w-4 h-4 text-green-600"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M5 13l4 4L19 7"></path>
-                    </svg>
-                  </div>
-                  <div>
-                    <p class="font-medium text-gray-900">Data Dictionaries</p>
-                    <p class="text-gray-600 text-sm">
-                      Every dataset includes detailed field descriptions, units,
-                      and methodology documentation
-                    </p>
-                  </div>
-                </li>
-                <li class="flex items-start">
-                  <div
-                    class="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0"
-                  >
-                    <svg
-                      class="w-4 h-4 text-green-600"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M5 13l4 4L19 7"></path>
-                    </svg>
-                  </div>
-                  <div>
-                    <p class="font-medium text-gray-900">Multiple Data Types</p>
-                    <p class="text-gray-600 text-sm">
-                      Tabular datasets, weather station records, and geospatial
-                      shapefiles in standard formats
-                    </p>
-                  </div>
-                </li>
-                <li class="flex items-start">
-                  <div
-                    class="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0"
-                  >
-                    <svg
-                      class="w-4 h-4 text-green-600"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M5 13l4 4L19 7"></path>
-                    </svg>
-                  </div>
-                  <div>
-                    <p class="font-medium text-gray-900">
-                      Consistent Structure
-                    </p>
-                    <p class="text-gray-600 text-sm">
-                      All datasets follow the same schema conventions — easy to
-                      read and compare across sources
-                    </p>
-                  </div>
-                </li>
-                <li class="flex items-start">
-                  <div
-                    class="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0"
-                  >
-                    <svg
-                      class="w-4 h-4 text-green-600"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M5 13l4 4L19 7"></path>
-                    </svg>
-                  </div>
-                  <div>
-                    <p class="font-medium text-gray-900">Versioned Datasets</p>
-                    <p class="text-gray-600 text-sm">
-                      Track changes and access historical versions for
-                      reproducible research
-                    </p>
-                  </div>
-                </li>
-              </ul>
-              <div class="mt-8">
-                <a
-                  href="/datasets"
-                  class="btn-primary px-6 py-2.5 text-sm font-medium inline-flex items-center"
-                >
-                  <svg
-                    class="w-4 h-4 mr-2"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"
-                    ></path>
-                  </svg>
-                  Browse Datasets
-                  <svg
-                    class="w-4 h-4 ml-2"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
-                  </svg>
-                </a>
-              </div>
-            </div>
-            <div
-              class="bg-gray-50 rounded-2xl p-4 sm:p-8 border border-gray-200"
-            >
-              <div
-                class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden"
-              >
-                <div class="px-4 py-3 border-b border-gray-200 bg-gray-50">
-                  <div class="flex items-center space-x-2">
-                    <div class="w-3 h-3 rounded-full bg-red-400"></div>
-                    <div class="w-3 h-3 rounded-full bg-yellow-400"></div>
-                    <div class="w-3 h-3 rounded-full bg-green-400"></div>
-                  </div>
-                </div>
-                <div class="p-4 space-y-3">
-                  <div class="flex items-center space-x-2">
-                    <div class="h-8 bg-gray-100 rounded flex-1"></div>
-                    <div class="h-8 w-20 sm:w-24 bg-primary-100 rounded"></div>
-                  </div>
-                  <div
-                    class="border border-gray-200 rounded-lg overflow-x-auto"
-                  >
-                    <table class="w-full text-xs">
-                      <thead class="bg-gray-50 text-gray-600 font-medium">
-                        <tr>
-                          <th class="px-3 py-2 text-left">Dataset</th>
-                          <th class="px-3 py-2 text-left hidden sm:table-cell"
-                            >Type</th
-                          >
-                          <th class="px-3 py-2 text-left">Coverage</th>
-                          <th class="px-3 py-2 text-left">Access</th>
-                        </tr>
-                      </thead>
-                      <tbody class="divide-y divide-gray-200">
-                        <tr>
-                          <td class="px-3 py-2 text-gray-900"
-                            >IMD Weather Stations</td
-                          >
-                          <td
-                            class="px-3 py-2 text-gray-600 hidden sm:table-cell"
-                            >Tabular</td
-                          >
-                          <td class="px-3 py-2 text-gray-600">2020-2024</td>
-                          <td class="px-3 py-2"
-                            ><span
-                              class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs"
-                              >Open</span
-                            ></td
-                          >
-                        </tr>
-                        <tr>
-                          <td class="px-3 py-2 text-gray-900"
-                            >Karnataka Districts</td
-                          >
-                          <td
-                            class="px-3 py-2 text-gray-600 hidden sm:table-cell"
-                            >Shapefile</td
-                          >
-                          <td class="px-3 py-2 text-gray-600">2023</td>
-                          <td class="px-3 py-2"
-                            ><span
-                              class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs"
-                              >Open</span
-                            ></td
-                          >
-                        </tr>
-                        <tr>
-                          <td class="px-3 py-2 text-gray-900"
-                            >Crop Yield Records</td
-                          >
-                          <td
-                            class="px-3 py-2 text-gray-600 hidden sm:table-cell"
-                            >Tabular</td
-                          >
-                          <td class="px-3 py-2 text-gray-600">2015-2023</td>
-                          <td class="px-3 py-2"
-                            ><span
-                              class="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs"
-                              >Request</span
-                            ></td
-                          >
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- For Developers Section -->
-      <section
-        id="developers"
-        class="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 bg-gray-900"
-      >
-        <div class="max-w-7xl mx-auto">
-          <div class="grid lg:grid-cols-2 gap-8 lg:gap-12 items-start">
-            <div class="order-2 lg:order-1">
-              <!-- Quick Start heading -->
-              <h4 class="text-lg font-semibold text-primary-400 mb-4 lg:hidden">
-                Quick Start
-              </h4>
-              <!-- Code Example Tabs -->
-              <div
-                class="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden"
-              >
-                <div class="flex border-b border-gray-700">
-                  <button
-                    id="tab-cli"
-                    class="code-tab active flex-1 px-3 sm:px-4 py-3 text-xs sm:text-sm font-medium text-white bg-gray-700 border-b-2 border-primary-500"
-                    onclick="switchTab('cli')"
-                  >
-                    CLI
-                  </button>
-                  <button
-                    id="tab-python"
-                    class="code-tab flex-1 px-3 sm:px-4 py-3 text-xs sm:text-sm font-medium text-gray-400 hover:text-white"
-                    onclick="switchTab('python')"
-                  >
-                    Python SDK
-                  </button>
-                  <button
-                    id="tab-api"
-                    class="code-tab flex-1 px-3 sm:px-4 py-3 text-xs sm:text-sm font-medium text-gray-400 hover:text-white"
-                    onclick="switchTab('api')"
-                  >
-                    REST API
-                  </button>
-                </div>
-                <div class="p-4 sm:p-6">
-                  <!-- CLI Example -->
-                  <div id="code-cli" class="code-content">
-                    <div class="flex items-center space-x-2 mb-4">
-                      <span class="text-gray-400 text-sm">bash</span>
-                    </div>
-                    <pre
-                      class="text-xs sm:text-sm text-gray-300 overflow-x-auto whitespace-pre-wrap"><code><span class="text-gray-500"># Install with uv (recommended)</span>
-<span class="text-green-400">$</span> uv init && uv add dataio-artpark
-
-<span class="text-gray-500"># Register and Obtain your API Keys, then run:</span>
-<span class="text-green-400">$</span> uv run dataio init
-
-<span class="text-gray-500"># List datasets by collection</span>
-<span class="text-green-400">$</span> uv run dataio list-datasets --collection "Census Data"
-
-<span class="text-gray-500"># Download a dataset with metadata</span>
-<span class="text-green-400">$</span> uv run dataio download-dataset TS0001DS0042</code></pre>
-                  </div>
-                  <!-- Python SDK Example -->
-                  <div id="code-python" class="code-content hidden">
-                    <div class="flex items-center space-x-2 mb-4">
-                      <span class="text-gray-400 text-sm">python3</span>
-                    </div>
-                    <pre
-                      class="text-xs sm:text-sm text-gray-300 overflow-x-auto whitespace-pre-wrap"><code><span class="text-purple-400">from</span> dataio <span class="text-purple-400">import</span> DataIOAPI
-
-<span class="text-gray-500"># Initialize client (reads from .env)</span>
-client = DataIOAPI()
-
-<span class="text-gray-500"># List all datasets</span>
-datasets = client.list_datasets(limit=<span class="text-blue-400">50</span>)
-
-<span class="text-gray-500"># Get dataset details</span>
-details = client.get_dataset_details(<span class="text-green-400">"TS0001DS0042"</span>)
-
-<span class="text-gray-500"># Download dataset with metadata</span>
-path = client.download_dataset(
-    <span class="text-green-400">"TS0001DS0042"</span>,
-    root_dir=<span class="text-green-400">"./data"</span>
-)</code></pre>
-                  </div>
-                  <!-- REST API Example -->
-                  <div
-                    id="code-api"
-                    class="code-content hidden overflow-hidden"
-                  >
-                    <div class="flex items-center space-x-2 mb-4">
-                      <span class="text-gray-400 text-sm">cURL</span>
-                    </div>
-                    <div class="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
-                      <pre
-                        class="text-xs sm:text-sm text-gray-300 min-w-max"><code><span class="text-gray-500"># List datasets</span>
-<span class="text-green-400">$</span> curl -H <span class="text-green-400">"X-API-Key: $API_KEY"</span> \
-  <span class="text-green-400">"https://dataio.artpark.ai/api/v1/datasets"</span>
-
-<span class="text-gray-500"># Get dataset tables</span>
-<span class="text-green-400">$</span> curl -H <span class="text-green-400">"X-API-Key: $API_KEY"</span> \
-  <span class="text-green-400">".../datasets/TS0001DS0042/STANDARDISED/tables"</span>
-
-<span class="text-gray-500"># Download shapefile as GeoJSON</span>
-<span class="text-green-400">$</span> curl -H <span class="text-green-400">"X-API-Key: $API_KEY"</span> \
-  <span class="text-green-400">".../shapefiles/state_29"</span></code></pre>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div
-                class="mt-4 flex flex-col sm:flex-row items-center justify-center gap-3 text-sm"
-              >
-                <a
-                  href="https://github.com/dsih-artpark/dataio"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="inline-flex items-center text-gray-400 hover:text-white"
-                >
-                  <svg
-                    class="w-4 h-4 mr-1.5"
-                    fill="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      fill-rule="evenodd"
-                      d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
-                      clip-rule="evenodd"></path>
-                  </svg>
-                  GitHub
-                </a>
-                <span class="text-gray-600 hidden sm:inline">•</span>
-                <a
-                  href="https://pypi.org/project/dataio-artpark/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="inline-flex items-center text-gray-400 hover:text-white"
-                >
-                  <img
-                    src="/pypi_logo.svg.png"
-                    alt="PyPI"
-                    class="w-4 h-4 mr-1.5"
-                  />
-                  PyPI
-                </a>
-                <span class="text-gray-600 hidden sm:inline">•</span>
-                <a
-                  href="https://dataio.artpark.ai/docs"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="text-primary-400 hover:text-primary-300"
-                >
-                  View full documentation →
-                </a>
-              </div>
-            </div>
-            <div class="order-1 lg:order-2">
-              <h2
-                class="text-xl sm:text-2xl font-semibold text-primary-400 mb-3"
-              >
-                For Developers
-              </h2>
-              <h3
-                class="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-2"
-              >
-                Powered by a <span class="text-primary-400"
-                  >first class API</span
-                >
-              </h3>
-              <p
-                class="text-lg font-semibold text-gray-300 mb-4 hidden lg:block"
-              >
-                Quick Start
-              </p>
-              <p class="text-base sm:text-lg text-gray-400 mb-6">
-                We built <a
-                  href="https://dataio.artpark.ai"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="text-primary-400 hover:text-primary-300 font-semibold"
-                  >dataio</a
-                > to power our own research workflows — and now it powers this platform
-                too! It's open-source on <a
-                  href="https://github.com/dsih-artpark/dataio"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="text-primary-400 hover:text-primary-300 font-semibold"
-                  >GitHub</a
-                > and available on <a
-                  href="https://pypi.org/project/dataio-artpark/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="text-primary-400 hover:text-primary-300 font-semibold"
-                  >PyPI</a
-                >, with a <a
-                  href="https://dataio.artpark.ai/docs/cli/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="text-primary-400 hover:text-primary-300 font-semibold"
-                  >CLI</a
-                > for quick access, a <a
-                  href="https://dataio.artpark.ai/docs/sdk"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="text-primary-400 hover:text-primary-300 font-semibold"
-                  >Python SDK</a
-                > for scripting, and a <a
-                  href="https://dataio.artpark.ai/api/v1"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="text-primary-400 hover:text-primary-300 font-semibold"
-                  >REST API</a
-                >
-                for full programmatic control.
-              </p>
-              <ul class="space-y-4">
-                <li class="flex items-start">
-                  <div
-                    class="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0"
-                  >
-                    <svg
-                      class="w-4 h-4 text-primary-400"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M5 13l4 4L19 7"></path>
-                    </svg>
-                  </div>
-                  <div>
-                    <p class="font-medium text-white">CLI Tool & Python SDK</p>
-                    <p class="text-gray-400 text-sm">
-                      Quick dataset discovery and download from your terminal or
-                      Python scripts
-                    </p>
-                  </div>
-                </li>
-                <li class="flex items-start">
-                  <div
-                    class="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0"
-                  >
-                    <svg
-                      class="w-4 h-4 text-primary-400"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M5 13l4 4L19 7"></path>
-                    </svg>
-                  </div>
-                  <div>
-                    <p class="font-medium text-white">REST API</p>
-                    <p class="text-gray-400 text-sm">
-                      Full programmatic access to datasets, tables, weather
-                      data, and shapefiles at state, district, or city level
-                    </p>
-                  </div>
-                </li>
-                <li class="flex items-start">
-                  <div
-                    class="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0"
-                  >
-                    <svg
-                      class="w-4 h-4 text-primary-400"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M5 13l4 4L19 7"></path>
-                    </svg>
-                  </div>
-                  <div>
-                    <p class="font-medium text-white">Reusable Code</p>
-                    <p class="text-gray-400 text-sm">
-                      Consistent dataset structure means code written for one
-                      dataset works for others
-                    </p>
-                  </div>
-                </li>
-                <li class="flex items-start">
-                  <div
-                    class="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0"
-                  >
-                    <svg
-                      class="w-4 h-4 text-primary-400"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M5 13l4 4L19 7"></path>
-                    </svg>
-                  </div>
-                  <div>
-                    <p class="font-medium text-white">Pipeline Ready</p>
-                    <p class="text-gray-400 text-sm">
-                      Integrate with CI/CD workflows and automation — we follow <a
-                        href="https://semver.org"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="text-primary-400 hover:text-primary-300"
-                        >semver</a
-                      > for reproducible systems
-                    </p>
-                  </div>
-                </li>
-              </ul>
-              <div class="mt-8 flex flex-wrap gap-3">
-                <a
-                  href="https://dataio.artpark.ai/docs"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="btn border border-gray-600 text-gray-300 hover:bg-gray-800 focus:ring-gray-500 px-4 py-2 text-sm font-medium justify-center"
-                >
-                  <svg
-                    class="w-4 h-4 mr-1.5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-                    ></path>
-                  </svg>
-                  Docs
-                </a>
-                <a
-                  href="https://github.com/dsih-artpark/dataio"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="btn border border-gray-600 text-gray-300 hover:bg-gray-800 focus:ring-gray-500 px-4 py-2 text-sm font-medium justify-center"
-                >
-                  <svg
-                    class="w-4 h-4 mr-1.5"
-                    fill="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      fill-rule="evenodd"
-                      d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
-                      clip-rule="evenodd"></path>
-                  </svg>
-                  GitHub
-                </a>
-                <a
-                  href="/login"
-                  class="btn bg-white text-gray-900 hover:bg-gray-100 focus:ring-white px-4 py-2 text-sm font-medium justify-center"
-                >
-                  <svg
-                    class="w-4 h-4 mr-1.5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
-                    ></path>
-                  </svg>
-                  Get API Key
-                  <svg
-                    class="w-4 h-4 ml-1.5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
-                  </svg>
-                </a>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Coming Soon Section -->
-      <section
-        id="coming-soon"
-        class="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 bg-gradient-to-b from-white to-amber-50"
-      >
-        <div class="max-w-7xl mx-auto">
-          <div class="text-center mb-8 sm:mb-12">
-            <div
-              class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-amber-100 text-amber-700 mb-4"
-            >
-              <svg
-                class="w-4 h-4 mr-1.5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
+                  stroke-width="2"
                   stroke-linecap="round"
                   stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-              </svg>
-              Coming Soon
-            </div>
-            <h2
-              class="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900"
-            >
-              More features on the way
-            </h2>
-            <p
-              class="mt-4 text-base sm:text-lg text-gray-600 max-w-2xl mx-auto"
-            >
-              We're actively building new capabilities to make the platform even
-              more powerful.
-            </p>
-          </div>
-
-          <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            <!-- Analytics Card -->
-            <div class="card p-6">
-              <div
-                class="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center mb-4"
-              >
-                <svg
-                  class="w-6 h-6 text-purple-600"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-                  ></path>
-                </svg>
+                  class="text-primary-600"
+                  set:html={audience.icon}
+                />
               </div>
-              <h3 class="text-lg font-semibold text-gray-900 mb-2">
-                Advanced Analytics
-              </h3>
-              <p class="text-gray-600 text-sm mb-4">
-                Automated insights for every dataset you access.
-              </p>
-              <ul class="space-y-2 text-sm text-gray-600">
-                <li class="flex items-start">
-                  <svg
-                    class="w-4 h-4 text-purple-500 mr-2 mt-0.5 flex-shrink-0"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M9 5l7 7-7 7"></path>
-                  </svg>
-                  <span>Statistical summaries & distributions</span>
-                </li>
-                <li class="flex items-start">
-                  <svg
-                    class="w-4 h-4 text-purple-500 mr-2 mt-0.5 flex-shrink-0"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M9 5l7 7-7 7"></path>
-                  </svg>
-                  <span>Temporal trend visualisation</span>
-                </li>
-                <li class="flex items-start">
-                  <svg
-                    class="w-4 h-4 text-purple-500 mr-2 mt-0.5 flex-shrink-0"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M9 5l7 7-7 7"></path>
-                  </svg>
-                  <span>Data quality scoring & anomaly detection</span>
-                </li>
-                <li class="flex items-start">
-                  <svg
-                    class="w-4 h-4 text-purple-500 mr-2 mt-0.5 flex-shrink-0"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M9 5l7 7-7 7"></path>
-                  </svg>
-                  <span>Spatial coverage heatmaps</span>
-                </li>
+              <h3 class="m-0 text-[22px] font-bold">{audience.title}</h3>
+              <p class="m-0 text-base leading-relaxed text-gray-600">{audience.text}</p>
+              <ul class="m-0 pl-5 list-disc text-[15px] leading-[1.8] text-gray-700">
+                {audience.points.map((point) => (
+                  <li>{point}</li>
+                ))}
               </ul>
-            </div>
+              <a href={audience.link.href} class={`mt-auto text-[15px] ${textLink}`}>
+                {audience.link.label} →
+              </a>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
 
-            <!-- Playground Card -->
-            <div class="card p-6">
-              <div
-                class="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center mb-4"
-              >
-                <svg
-                  class="w-6 h-6 text-blue-600"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
-                  ></path>
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-              </div>
-              <h3 class="text-lg font-semibold text-gray-900 mb-2">
-                Data Playground
-              </h3>
-              <p class="text-gray-600 text-sm mb-4">
-                Interactive environment to explore and experiment with datasets.
-              </p>
-              <ul class="space-y-2 text-sm text-gray-600">
-                <li class="flex items-start">
-                  <svg
-                    class="w-4 h-4 text-blue-500 mr-2 mt-0.5 flex-shrink-0"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M9 5l7 7-7 7"></path>
-                  </svg>
-                  <span>Jupyter-style notebook interface</span>
-                </li>
-                <li class="flex items-start">
-                  <svg
-                    class="w-4 h-4 text-blue-500 mr-2 mt-0.5 flex-shrink-0"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M9 5l7 7-7 7"></path>
-                  </svg>
-                  <span>LLM integrations for natural language queries</span>
-                </li>
-                <li class="flex items-start">
-                  <svg
-                    class="w-4 h-4 text-blue-500 mr-2 mt-0.5 flex-shrink-0"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M9 5l7 7-7 7"></path>
-                  </svg>
-                  <span>Auto-generated visualisations</span>
-                </li>
-                <li class="flex items-start">
-                  <svg
-                    class="w-4 h-4 text-blue-500 mr-2 mt-0.5 flex-shrink-0"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M9 5l7 7-7 7"></path>
-                  </svg>
-                  <span>Share and collaborate on analyses</span>
-                </li>
-              </ul>
-            </div>
+  <!-- OUR APPROACH -->
+  <section id="approach" aria-labelledby="approach-heading" class="py-16 sm:py-20 bg-white border-t border-gray-200 scroll-mt-4">
+    <div class="max-w-page mx-auto px-4 sm:px-6">
+      <p class={`${eyebrow} mb-2`}>Our approach</p>
+      <h2 id="approach-heading" class={`${h2} mb-3`}>Why you can rely on this data</h2>
+      <p class={`${intro} mb-10`}>
+        Public data in India is scattered across portals, PDFs and spreadsheets in different formats. We do the slow work
+        once, in the open, so everyone can build on it.
+      </p>
+      <ol class="m-0 p-0 list-none grid gap-5 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
+        {
+          steps.map((step, index) => (
+            <li class="p-6 rounded-[14px] bg-primary-50 flex flex-col gap-2.5">
+              <span class="text-sm font-bold text-primary-700" aria-hidden="true">
+                {String(index + 1).padStart(2, '0')}
+              </span>
+              <h3 class="m-0 text-[19px] font-bold">{step.title}</h3>
+              <p class="m-0 text-[15px] leading-relaxed text-gray-700">{step.text}</p>
+              {step.link && (
+                <a href={step.link.href} class={`text-sm ${textLink}`}>
+                  {step.link.label} →
+                </a>
+              )}
+            </li>
+          ))
+        }
+      </ol>
 
-            <!-- Validation Card -->
-            <div class="card p-6 sm:col-span-2 lg:col-span-1">
-              <div
-                class="w-12 h-12 rounded-xl bg-green-100 flex items-center justify-center mb-4"
-              >
-                <svg
-                  class="w-6 h-6 text-green-600"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-              </div>
-              <h3 class="text-lg font-semibold text-gray-900 mb-2">
-                Auto Validation
-              </h3>
-              <p class="text-gray-600 text-sm mb-4">
-                Automated data quality checks during upload.
-              </p>
-              <ul class="space-y-2 text-sm text-gray-600">
-                <li class="flex items-start">
-                  <svg
-                    class="w-4 h-4 text-green-500 mr-2 mt-0.5 flex-shrink-0"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M9 5l7 7-7 7"></path>
-                  </svg>
-                  <span>Schema validation against templates</span>
-                </li>
-                <li class="flex items-start">
-                  <svg
-                    class="w-4 h-4 text-green-500 mr-2 mt-0.5 flex-shrink-0"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M9 5l7 7-7 7"></path>
-                  </svg>
-                  <span>Geospatial integrity checks</span>
-                </li>
-                <li class="flex items-start">
-                  <svg
-                    class="w-4 h-4 text-green-500 mr-2 mt-0.5 flex-shrink-0"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M9 5l7 7-7 7"></path>
-                  </svg>
-                  <span>Duplicate detection & deduplication</span>
-                </li>
-                <li class="flex items-start">
-                  <svg
-                    class="w-4 h-4 text-green-500 mr-2 mt-0.5 flex-shrink-0"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M9 5l7 7-7 7"></path>
-                  </svg>
-                  <span>Customisable validation rules</span>
-                </li>
-              </ul>
-            </div>
-          </div>
+      <div class="mt-8 p-7 rounded-2xl border border-primary-200 bg-white flex flex-wrap gap-x-8 gap-y-5 items-center">
+        <div aria-hidden="true" class="w-14 h-14 shrink-0 rounded-[14px] bg-primary-100 flex items-center justify-center">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-primary-600">
+            <path d="M9 17H7A5 5 0 0 1 7 7h2"></path><path d="M15 7h2a5 5 0 1 1 0 10h-2"></path><path d="M8 12h8"></path>
+          </svg>
         </div>
-      </section>
-
-      <!-- Open Standards Section -->
-      <section
-        id="open-source"
-        class="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 bg-white"
-      >
-        <div class="max-w-7xl mx-auto">
-          <div class="text-center mb-8 sm:mb-12">
-            <h2
-              class="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900"
-            >
-              Open Standards, Transparent Design
-            </h2>
-            <p
-              class="mt-4 text-base sm:text-lg text-gray-600 max-w-2xl mx-auto"
-            >
-              Available for self-hosting, with full control over your data.
-            </p>
-          </div>
-
-          <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8">
-            <div class="text-center">
-              <div
-                class="w-14 h-14 rounded-2xl bg-primary-100 flex items-center justify-center mx-auto mb-4"
-              >
-                <svg
-                  class="w-7 h-7 text-primary-600"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path>
-                </svg>
-              </div>
-              <h3 class="text-lg font-semibold text-gray-900 mb-2">
-                Open Source
-              </h3>
-              <p class="text-gray-600 text-sm">
-                Licensed under AGPL-3.0. Inspect the code, contribute
-                improvements, or fork for your needs.
-              </p>
-            </div>
-
-            <div class="text-center">
-              <div
-                class="w-14 h-14 rounded-2xl bg-primary-100 flex items-center justify-center mx-auto mb-4"
-              >
-                <svg
-                  class="w-7 h-7 text-primary-600"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"
-                  ></path>
-                </svg>
-              </div>
-              <h3 class="text-lg font-semibold text-gray-900 mb-2">
-                Self-Hostable
-              </h3>
-              <p class="text-gray-600 text-sm">
-                Deploy the entire platform on your own infrastructure. Full
-                control over your data.
-              </p>
-            </div>
-
-            <div class="text-center">
-              <div
-                class="w-14 h-14 rounded-2xl bg-primary-100 flex items-center justify-center mx-auto mb-4"
-              >
-                <svg
-                  class="w-7 h-7 text-primary-600"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                  ></path>
-                </svg>
-              </div>
-              <h3 class="text-lg font-semibold text-gray-900 mb-2">
-                Open Standards
-              </h3>
-              <p class="text-gray-600 text-sm">
-                Standard data formats and APIs. No vendor lock-in, easy
-                integration with existing tools.
-              </p>
-            </div>
-
-            <div class="text-center">
-              <div
-                class="w-14 h-14 rounded-2xl bg-primary-100 flex items-center justify-center mx-auto mb-4"
-              >
-                <svg
-                  class="w-7 h-7 text-primary-600"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
-                  ></path>
-                </svg>
-              </div>
-              <h3 class="text-lg font-semibold text-gray-900 mb-2">
-                Open Methodology
-              </h3>
-              <p class="text-gray-600 text-sm">
-                We're open-sourcing our data standardisation methodology so you
-                can apply it to your own datasets.
-              </p>
-            </div>
-          </div>
-
-          <div class="mt-10 sm:mt-12 text-center">
-            <a
-              href="https://github.com/dsih-artpark/dataio"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="inline-flex items-center text-primary-600 hover:text-primary-700 font-medium"
-            >
-              <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 24 24">
-                <path
-                  fill-rule="evenodd"
-                  d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
-                  clip-rule="evenodd"></path>
-              </svg>
-              View on GitHub
-            </a>
-          </div>
-        </div>
-      </section>
-
-      <!-- CTA Section -->
-      <section class="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 bg-primary-600">
-        <div class="max-w-4xl mx-auto text-center">
-          <h2
-            class="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-6"
-          >
-            Ready to explore?
-          </h2>
-          <p
-            class="text-base sm:text-lg text-primary-100 mb-8 max-w-2xl mx-auto"
-          >
-            Sign in to access the full catalog, download datasets, and generate
-            API keys. No account yet? Sign in with your email to get started.
+        <div class="flex-[1_1_420px] min-w-0 flex flex-col gap-1.5">
+          <h3 class="m-0 text-xl font-bold">Join datasets without the clean-up</h3>
+          <p class="m-0 text-[15px] leading-relaxed text-gray-700">
+            Every dataset uses the Government of India’s official LGD (Local Government Directory) codes for states,
+            districts, sub-districts and villages, the same date format and documented units. Census figures, case counts
+            and rainfall for a district line up in a single join.
           </p>
-          <div class="flex flex-col sm:flex-row gap-4 justify-center">
-            <a
-              href="/login"
-              class="btn bg-white text-primary-700 hover:bg-primary-50 focus:ring-white px-8 py-3 text-base font-medium justify-center"
-            >
-              Sign In
-              <svg
-                class="w-5 h-5 ml-2"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
-              </svg>
-            </a>
-            <a
-              href="/datasets"
-              class="btn border-2 border-white text-white hover:bg-primary-700 focus:ring-white px-8 py-3 text-base font-medium justify-center"
-            >
-              Browse as Guest
-            </a>
-          </div>
         </div>
-      </section>
-    </main>
+        <a href={STANDARDS_URL} target="_blank" rel="noopener noreferrer" class={`text-[15px] ${textLink}`}>
+          Read our data standards →
+        </a>
+      </div>
 
-    <!-- Footer -->
-    <footer class="bg-gray-900 text-gray-400 py-8 px-4 sm:px-6 lg:px-8">
-      <div class="max-w-7xl mx-auto">
-        <div
-          class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6"
-        >
-          <div class="flex items-center space-x-2">
-            <div
-              class="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center"
-            >
-              <span class="text-white font-bold text-sm">AP</span>
-            </div>
-            <span class="text-lg font-bold text-white"
-              >ARTPARK Data Platform</span
-            >
-          </div>
-          <nav class="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-            <a href="/datasets" class="hover:text-white transition-colors"
-              >Datasets</a
-            >
-            <a
-              href="https://dataio.artpark.ai/docs"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="hover:text-white transition-colors">dataio docs</a
-            >
-            <a
-              href="https://pypi.org/project/dataio-artpark/"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="hover:text-white transition-colors">PyPI</a
-            >
-            <a
-              href="https://github.com/dsih-artpark/dataio"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="hover:text-white transition-colors">GitHub</a
-            >
-            <a
-              href="https://artpark.in"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="hover:text-white transition-colors">ARTPARK</a
-            >
-          </nav>
+      <div class="mt-12 pt-8 border-t border-gray-200 flex flex-col gap-4">
+        <h3 class="m-0 text-sm font-semibold text-gray-600">Data from</h3>
+        <ul class="m-0 p-0 list-none flex flex-wrap items-center gap-x-10 gap-y-6">
+          {
+            dataSources.map((item) => (
+              <li>
+                <img src={item.file} alt={item.name} title={item.name} loading="lazy" decoding="async" class={`${logoImg} h-14 sm:h-16 max-w-[240px]`} />
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- BROWSE BY THEME -->
+  <section aria-labelledby="themes-heading" class="py-16 sm:py-[72px] bg-gray-50 border-y border-gray-200">
+    <div class="max-w-page mx-auto px-4 sm:px-6">
+      <div class="flex flex-wrap justify-between items-end gap-4 mb-8">
+        <div>
+          <p class={`${eyebrow} mb-2`}>Browse by theme</p>
+          <h2 id="themes-heading" class="m-0 text-[28px] sm:text-[32px] font-bold text-gray-900">What’s in the catalogue</h2>
         </div>
-        <div
-          class="border-t border-gray-800 mt-6 pt-6 text-sm text-center sm:text-left"
-        >
-          <p>
-            &copy; {new Date().getFullYear()} ARTPARK. Licensed under AGPL-3.0.
-          </p>
+        <a href="/datasets" class={`text-[15px] ${textLink}`}>See all datasets →</a>
+      </div>
+      <ThemeGrid client:visible />
+    </div>
+  </section>
+
+  <!-- DATA FOR YOUR AREA -->
+  <section id="coverage" aria-labelledby="coverage-heading" class="py-16 sm:py-[72px] bg-white border-b border-gray-200 scroll-mt-4">
+    <CoverageMap client:visible />
+  </section>
+
+  <!-- DATA IN USE -->
+  <section aria-labelledby="stories-heading" class="py-16 sm:py-20 bg-white">
+    <div class="max-w-page mx-auto px-4 sm:px-6">
+      <p class={`${eyebrow} mb-2`}>Data in use</p>
+      <h2 id="stories-heading" class="m-0 mb-8 text-[28px] sm:text-[32px] leading-tight font-bold text-gray-900">
+        What people have done with it
+      </h2>
+      <div class="flex flex-wrap gap-6">
+        {
+          stories.map((story) => (
+            <article class="flex-[1_1_320px] min-w-0 border border-gray-200 rounded-2xl overflow-hidden flex flex-col">
+              <div class="h-40 bg-gray-100 flex items-center justify-center text-[13px] text-gray-600">
+                [Photo or chart from the project]
+              </div>
+              <div class="p-[22px] flex flex-col gap-2 flex-1">
+                <span class="text-[13px] font-semibold text-primary-700">{story.tag}</span>
+                <h3 class="m-0 text-[19px] font-bold">{story.title}</h3>
+                <p class="m-0 text-[15px] leading-relaxed text-gray-600">{story.text}</p>
+                {story.href ? (
+                  <a href={story.href} target="_blank" rel="noopener noreferrer" class={`mt-auto text-[15px] ${textLink}`}>
+                    Read more on the ARTPARK site →
+                  </a>
+                ) : (
+                  <span class="mt-auto text-[15px] text-gray-500">[Link to come]</span>
+                )}
+              </div>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- RECENTLY UPDATED -->
+  <section aria-labelledby="recent-heading" class="py-16 sm:py-[72px] bg-gray-50 border-y border-gray-200">
+    <div class="max-w-page mx-auto px-4 sm:px-6">
+      <div class="flex flex-wrap justify-between items-end gap-4 mb-6">
+        <h2 id="recent-heading" class="m-0 text-[28px] font-bold text-gray-900 flex items-center gap-2.5">
+          <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gray-500">
+            <circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path>
+          </svg>
+          Recently updated
+        </h2>
+        <a href={datasetsHref({ sort: 'updated' })} class={`text-[15px] ${textLink}`}>View all →</a>
+      </div>
+      <RecentlyUpdated client:visible />
+    </div>
+  </section>
+
+  <!-- HOW ACCESS WORKS -->
+  <section id="access" aria-labelledby="access-heading" class="py-16 sm:py-[72px] bg-white scroll-mt-4">
+    <div class="max-w-page mx-auto px-4 sm:px-6">
+      <h2 id="access-heading" class="m-0 mb-2 text-[28px] font-bold text-gray-900">How access works</h2>
+      <p class="m-0 mb-7 text-base leading-relaxed text-gray-600 max-w-[680px]">
+        Each dataset shows one of three access levels. Open datasets need no account. For the rest, use “Request access”
+        on the dataset’s page and we add you to the access list.
+      </p>
+      <div class="flex flex-wrap gap-4">
+        <div class="flex-[1_1_300px] p-[22px] border border-gray-200 rounded-[14px] flex flex-col gap-2">
+          <span class="self-start px-2.5 py-1 rounded-full bg-green-100 text-green-800 text-[13px] font-semibold">Open download</span>
+          <p class="m-0 text-[15px] leading-relaxed text-gray-700">{ACCESS_DESCRIPTIONS.DOWNLOAD}</p>
+        </div>
+        <div class="flex-[1_1_300px] p-[22px] border border-gray-200 rounded-[14px] flex flex-col gap-2">
+          <span class="self-start px-2.5 py-1 rounded-full bg-blue-100 text-blue-800 text-[13px] font-semibold">View only</span>
+          <p class="m-0 text-[15px] leading-relaxed text-gray-700">{ACCESS_DESCRIPTIONS.VIEW}</p>
+          <figure class="m-0 border border-gray-200 rounded-lg overflow-hidden text-[13px]">
+            <figcaption class="flex justify-between items-center px-2.5 py-1.5 bg-gray-100 text-gray-700 font-semibold">
+              <span>Preview</span>
+              <span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-xs">Synthetic preview only</span>
+            </figcaption>
+            <table class="w-full border-collapse text-left text-gray-700">
+              <thead>
+                <tr class="border-t border-gray-200">
+                  <th scope="col" class="px-2.5 py-1.5 font-semibold">district</th>
+                  <th scope="col" class="px-2.5 py-1.5 font-semibold">year</th>
+                  <th scope="col" class="px-2.5 py-1.5 font-semibold">cases</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="border-t border-gray-100"><td class="px-2.5 py-1.5">Bagalkote</td><td class="px-2.5 py-1.5">2023</td><td class="px-2.5 py-1.5">18</td></tr>
+                <tr class="border-t border-gray-100"><td class="px-2.5 py-1.5">Belagavi</td><td class="px-2.5 py-1.5">2023</td><td class="px-2.5 py-1.5">31</td></tr>
+              </tbody>
+            </table>
+          </figure>
+          <a href={datasetsHref({ access_level: ['VIEW'] })} class={`text-sm ${textLink}`}>Find View only datasets →</a>
+        </div>
+        <div class="flex-[1_1_300px] p-[22px] border border-gray-200 rounded-[14px] flex flex-col gap-2">
+          <span class="self-start px-2.5 py-1 rounded-full bg-gray-100 text-gray-700 text-[13px] font-semibold">Restricted</span>
+          <p class="m-0 text-[15px] leading-relaxed text-gray-700">{ACCESS_DESCRIPTIONS.NONE}</p>
+          <a href={datasetsHref({ access_level: ['NONE'] })} class={`text-sm ${textLink}`}>Find Restricted datasets →</a>
         </div>
       </div>
-    </footer>
+    </div>
+  </section>
 
-    <!-- Scripts -->
-    <script>
-      // Tab switching for code examples
-      function switchTab(tab: string) {
-        // Hide all code content
-        document.querySelectorAll(".code-content").forEach((el) => {
-          el.classList.add("hidden");
-        });
-        // Show selected content
-        const content = document.getElementById("code-" + tab);
-        if (content) {
-          content.classList.remove("hidden");
-        }
-        // Update tab styles
-        document.querySelectorAll(".code-tab").forEach((el) => {
-          el.classList.remove(
-            "active",
-            "text-white",
-            "bg-gray-700",
-            "border-b-2",
-            "border-primary-500",
-          );
-          el.classList.add("text-gray-400");
-        });
-        const activeTab = document.getElementById("tab-" + tab);
-        if (activeTab) {
-          activeTab.classList.add(
-            "active",
-            "text-white",
-            "bg-gray-700",
-            "border-b-2",
-            "border-primary-500",
-          );
-          activeTab.classList.remove("text-gray-400");
-        }
-      }
-      // Make switchTab available globally
-      (window as any).switchTab = switchTab;
+  <!-- DEVELOPERS -->
+  <section id="developers" aria-labelledby="developers-heading" class="py-16 bg-primary-950 text-white scroll-mt-4">
+    <div class="max-w-page mx-auto px-4 sm:px-6 flex flex-wrap gap-10 items-center">
+      <div class="flex-[1_1_380px] min-w-0 flex flex-col gap-3.5">
+        <p class="m-0 text-[13px] font-semibold uppercase tracking-[0.08em] text-primary-200">For developers &amp; analysts</p>
+        <h2 id="developers-heading" class="m-0 text-[26px] sm:text-[30px] leading-tight font-bold">Pull data straight into your code</h2>
+        <p class="m-0 text-base leading-relaxed text-primary-100">
+          Python SDK, command-line tool and REST API. The same structure across datasets means code written for one works
+          for the next.
+        </p>
+        <div class="flex flex-wrap gap-4 text-[15px]">
+          <a href="https://dataio.artpark.ai/docs" target="_blank" rel="noopener noreferrer" class="font-semibold text-white underline-offset-4 hover:underline">Documentation</a>
+          <a href="https://github.com/dsih-artpark/dataio" target="_blank" rel="noopener noreferrer" class="font-semibold text-white underline-offset-4 hover:underline">GitHub</a>
+          <a href="https://pypi.org/project/dataio-artpark/" target="_blank" rel="noopener noreferrer" class="font-semibold text-white underline-offset-4 hover:underline">PyPI</a>
+        </div>
+      </div>
+      <CodeTabs client:visible />
+    </div>
+  </section>
 
-      // Hero scroll-triggered animations
-      const heroElements = document.querySelectorAll(
-        ".hero-title, .hero-subtitle, .hero-cta",
-      );
+  <!-- FIND / SHARE / REQUEST -->
+  <section id="partner" aria-labelledby="partner-heading" class="py-16 sm:py-20 bg-white scroll-mt-4">
+    <div class="max-w-page mx-auto px-4 sm:px-6 flex flex-col gap-7">
+      <h2 id="partner-heading" class="m-0 text-[28px] sm:text-[32px] leading-tight font-bold text-gray-900">
+        Use it, add to it, or ask for what’s missing
+      </h2>
+      <div class="flex flex-wrap gap-5">
+        <div class="flex-[1_1_300px] p-7 rounded-2xl bg-primary-50 flex flex-col gap-2.5">
+          <h3 class="m-0 text-[21px] font-bold">Find data</h3>
+          <p class="m-0 text-[15px] leading-relaxed text-gray-700">Search documented datasets and download what you need.</p>
+          <a href="/datasets" class="mt-auto self-start inline-flex items-center min-h-[44px] px-[18px] rounded-[10px] bg-primary-600 text-white font-semibold text-[15px] hover:bg-primary-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2">
+            Search datasets
+          </a>
+        </div>
+        <div class="flex-[1_1_300px] p-7 rounded-2xl bg-primary-50 flex flex-col gap-2.5">
+          <h3 class="m-0 text-[21px] font-bold">Contribute data</h3>
+          <p class="m-0 text-[15px] leading-relaxed text-gray-700">
+            NGOs, research groups and departments: we help standardise and document your data. You choose how it is shared
+            (open, view only or restricted), and credit always goes to you.
+          </p>
+          <a href={contributeHref} class="mt-auto self-start inline-flex items-center min-h-[44px] px-[18px] rounded-[10px] bg-white border border-primary-200 text-primary-900 font-semibold text-[15px] hover:border-primary-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500">
+            Contribute data
+          </a>
+        </div>
+        <div class="flex-[1_1_300px] p-7 rounded-2xl bg-primary-50 flex flex-col gap-2.5">
+          <h3 class="m-0 text-[21px] font-bold">Request a dataset</h3>
+          <p class="m-0 text-[15px] leading-relaxed text-gray-700">
+            Can’t find it? Tell us what you need and for which place and years. We’ll let you know if we can add it.
+          </p>
+          <a href={requestHref} class="mt-auto self-start inline-flex items-center min-h-[44px] px-[18px] rounded-[10px] bg-white border border-primary-200 text-primary-900 font-semibold text-[15px] hover:border-primary-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500">
+            Request a dataset
+          </a>
+        </div>
+      </div>
+      <p class="m-0 text-base text-gray-700">
+        <strong>Philanthropies and partners:</strong> support shared, open data infrastructure for public health and
+        livelihoods. <a href={partnerHref} class={textLink}>Partner with us →</a>
+      </p>
+    </div>
+  </section>
 
-      // Use Intersection Observer for scroll-triggered reveal
-      const heroObserver = new IntersectionObserver(
-        (entries) => {
-          entries.forEach((entry) => {
-            if (entry.isIntersecting) {
-              entry.target.classList.add("visible");
+  <!-- PARTNERS -->
+  <section aria-labelledby="partners-heading" class="py-14 bg-white border-t border-gray-200">
+    <div class="max-w-page mx-auto px-4 sm:px-6 flex flex-col gap-8">
+      <h2 id="partners-heading" class="m-0 text-2xl font-bold text-gray-900">Partners</h2>
+      <div class="flex flex-col gap-4">
+        <h3 class="m-0 text-sm font-semibold text-gray-600">Research collaborators</h3>
+        <!-- Scrolling strip: the set is repeated once (hidden from screen readers) so the loop is seamless.
+             Pauses on hover/focus; with reduced motion it becomes a static wrapped row. -->
+        <div class="marquee overflow-hidden">
+          <div class="marquee-track flex w-max">
+            {
+              [false, true].map((copy) => (
+                <ul class="marquee-set m-0 p-0 list-none flex items-center gap-14 pr-14" aria-hidden={copy ? 'true' : undefined}>
+                  {collaborators.map((item) => (
+                    <li class="shrink-0">
+                      <img src={item.file} alt={copy ? '' : item.name} title={item.name} loading="lazy" decoding="async" class={`${logoImg} h-12 max-w-[180px]`} />
+                    </li>
+                  ))}
+                </ul>
+              ))
             }
-          });
-        },
-        {
-          threshold: 0.1,
-          rootMargin: "0px 0px -50px 0px",
-        },
-      );
-
-      heroElements.forEach((el) => heroObserver.observe(el));
-
-      // Trigger immediately if already visible (for page load)
-      setTimeout(() => {
-        heroElements.forEach((el) => {
-          const rect = el.getBoundingClientRect();
-          if (rect.top < window.innerHeight && rect.bottom > 0) {
-            el.classList.add("visible");
+          </div>
+        </div>
+      </div>
+      <div class="flex flex-col gap-4">
+        <h3 class="m-0 text-sm font-semibold text-gray-600">Supported by</h3>
+        <ul class="m-0 p-0 list-none flex flex-wrap items-center gap-x-10 gap-y-6">
+          {
+            supporters.map((item) => (
+              <li>
+                <img src={item.file} alt={item.name} title={item.name} loading="lazy" decoding="async" class={`${logoImg} h-12 max-w-[180px]`} />
+              </li>
+            ))
           }
-        });
-      }, 100);
-    </script>
-  </body>
-</html>
+        </ul>
+      </div>
+    </div>
+  </section>
+</PublicLayout>
 
-<style is:global>
-  @import "../styles/global.css";
-
-  html {
-    scroll-behavior: smooth;
+<style>
+  .marquee {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent);
+    mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent);
   }
-
-  .code-content {
-    min-height: 220px;
+  .marquee-track {
+    animation: marquee 40s linear infinite;
   }
-
-  @media (max-width: 640px) {
-    .code-content {
-      min-height: 200px;
-    }
+  .marquee:hover .marquee-track,
+  .marquee:focus-within .marquee-track {
+    animation-play-state: paused;
   }
-
-  /* Hero animations */
-  .hero-title,
-  .hero-subtitle,
-  .hero-cta {
-    transition:
-      opacity 0.8s ease-out,
-      transform 0.8s ease-out;
-    transform: translateY(20px);
-  }
-
-  .hero-title.visible,
-  .hero-subtitle.visible,
-  .hero-cta.visible {
-    opacity: 1;
-    transform: translateY(0);
-  }
-
-  .hero-subtitle {
-    transition-delay: 0.15s;
-  }
-
-  .hero-cta {
-    transition-delay: 0.3s;
-  }
-
-  /* Bubble fade-in animations */
-  .bubble {
-    opacity: 0;
-    animation: bubbleFadeIn 0.5s ease-out forwards;
-  }
-
-  .bubble-1 {
-    animation-delay: 0.1s;
-  }
-  .bubble-2 {
-    animation-delay: 0.15s;
-  }
-  .bubble-3 {
-    animation-delay: 0.2s;
-  }
-  .bubble-4 {
-    animation-delay: 0.25s;
-  }
-  .bubble-5 {
-    animation-delay: 0.3s;
-  }
-  .bubble-6 {
-    animation-delay: 0.35s;
-  }
-  .bubble-7 {
-    animation-delay: 0.4s;
-  }
-
-  @keyframes bubbleFadeIn {
+  @keyframes marquee {
     from {
-      opacity: 0;
-      transform: translateY(8px);
+      transform: translateX(0);
     }
     to {
-      opacity: 1;
-      transform: translateY(0);
+      transform: translateX(-50%);
     }
   }
-
-  /* Reduce motion for accessibility */
   @media (prefers-reduced-motion: reduce) {
-    .bubble {
-      animation-duration: 0.2s;
+    .marquee {
+      -webkit-mask-image: none;
+      mask-image: none;
     }
-    .hero-title,
-    .hero-subtitle,
-    .hero-cta {
-      transition-duration: 0.3s;
+    .marquee-track {
+      animation: none;
+      width: auto;
+    }
+    .marquee-set {
+      flex-wrap: wrap;
+      row-gap: 1.5rem;
+    }
+    .marquee-set[aria-hidden='true'] {
+      display: none;
     }
   }
 </style>

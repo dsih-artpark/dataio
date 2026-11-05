@@ -1,0 +1,24 @@
+---
+// Request access (redesign wireframe v2): /request-access?dataset=<ds_id>.
+import PublicLayout from '../layouts/PublicLayout.astro';
+import RequestAccessForm from '../components/public/RequestAccessForm';
+---
+
+<PublicLayout
+  title="Request access"
+  description="Ask for access to a View only or Restricted dataset."
+  current="datasets"
+  width="full"
+>
+  <div class="max-w-[720px] mx-auto px-4 sm:px-6 pt-12 pb-20 flex flex-col gap-6">
+    <a href="/datasets" class="self-start text-sm font-semibold text-primary-700 hover:text-primary-900">← All datasets</a>
+    <div class="flex flex-col gap-2.5">
+      <h1 class="m-0 text-[30px] sm:text-[34px] leading-tight font-bold text-gray-900">Request access</h1>
+      <p class="m-0 text-[17px] leading-relaxed text-gray-600">
+        Some datasets can be viewed but not downloaded, and some are shared under agreement. Tell us who you are and what
+        you need. We review each request and add approved people to the access list.
+      </p>
+    </div>
+    <RequestAccessForm client:load />
+  </div>
+</PublicLayout>

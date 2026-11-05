@@ -304,6 +304,7 @@ class AdminDatasetService(BaseService):
                 "temporal_coverage_end_date": dataset.temporal_coverage_end_date.isoformat() if dataset.temporal_coverage_end_date else None,
                 "temporal_resolution": dataset.temporal_resolution.value if dataset.temporal_resolution else None,
                 "access_level": dataset.access_level.value if dataset.access_level else None,
+                "licence": dataset.licence,
                 "additional_metadata": dataset.additional_metadata,
                 "tags": [tag.tag_name for tag in (dataset.tags or [])],
                 "raw_dataset_ids": [raw_dataset.rds_id for raw_dataset in (dataset.raw_datasets or [])],

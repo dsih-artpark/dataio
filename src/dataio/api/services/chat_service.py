@@ -39,6 +39,9 @@ AIProvider = Literal["bedrock", "openrouter"]
 # Configuration
 CHAT_PROVIDER = os.getenv("CHAT_PROVIDER", "bedrock").lower()
 MAX_TOOL_ITERATIONS = int(os.getenv("CHAT_MAX_TOOL_ITERATIONS", "10"))
+# Shown instead of the raw exception, which can carry provider or internal details.
+CHAT_ERROR_MESSAGE = "The assistant couldn’t answer just now. Please try again in a moment."
+TOO_MANY_STEPS_MESSAGE = "That needed more lookups than the assistant allows for one question. Try asking about one dataset or topic at a time."
 
 # Bedrock configuration
 BEDROCK_REGION = os.getenv("AWS_BEDROCK_REGION", "us-east-1")
@@ -67,7 +70,12 @@ When helping users:
 4. Offer to get more details on specific datasets if they're interested
 5. Be transparent about access restrictions - some datasets require permissions
 
-Always be concise and helpful. If the user doesn't have access to a dataset, explain how they might request access through the platform."""
+Access levels work like the website:
+- Open download: anyone can see the details and download the files.
+- View only: anyone can see the description, tables and columns, but the files need access.
+- Restricted: only the title is shared; nothing else about it is known until access is granted.
+
+Always be concise and helpful. If the user doesn't have access to a dataset, explain how they might request access through the platform (the "Request access" button on the dataset's page)."""
 
 
 # =============================================================================
@@ -514,9 +522,13 @@ class ChatService(BaseService):
         conversation_history: list[dict],
         user_email: str,
         session_id: str | None = None,
+        max_model_calls: int | None = None,
     ) -> AsyncGenerator[dict, None]:
         """
         Process a chat message and stream the response.
+
+        ``max_model_calls`` caps the calls to the AI provider for this message
+        (default MAX_TOOL_ITERATIONS); each tool round trip is one call.
 
         Yields dicts with different event types:
         - {"type": "text", "content": "..."} - Text content
@@ -546,7 +558,8 @@ class ChatService(BaseService):
 
         # Agentic loop
         iteration = 0
-        while iteration < MAX_TOOL_ITERATIONS:
+        limit = max_model_calls or MAX_TOOL_ITERATIONS
+        while iteration < limit:
             iteration += 1
 
             try:
@@ -639,13 +652,13 @@ class ChatService(BaseService):
                             yield {"type": "done"}
                             return
 
-            except Exception as e:
+            except Exception:
                 logger.exception("Error in chat stream")
-                yield {"type": "error", "message": str(e)}
+                yield {"type": "error", "message": CHAT_ERROR_MESSAGE}
                 return
 
         # Hit max iterations
-        yield {"type": "error", "message": "Maximum tool iterations reached"}
+        yield {"type": "error", "message": TOO_MANY_STEPS_MESSAGE}
 
     async def chat(
         self,

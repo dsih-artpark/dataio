@@ -20,7 +20,9 @@ export class ConsentRequiredError extends Error {
  */
 async function openDownloadTables(dsId: string, email?: string) {
   const visitorId = getVisitorId() ?? undefined;
-  if (!email && !visitorId) throw new ConsentRequiredError();
+  // Ask the API even without an email or visitor ID: it answers "no files yet"
+  // (404) before asking for consent (428), so the pop-up only shows when there
+  // is something to download.
   try {
     const data = await api.getOpenDownloadUrls(
       dsId,

@@ -36,6 +36,8 @@ export default function DatasetCard({ dataset, search }: DatasetCardProps) {
   const { downloading, error, start, dialog } = useDatasetDownload(dataset);
   const href = datasetPath(dataset.ds_id);
   const open = dataset.access_level === 'DOWNLOAD';
+  // Restricted: only the title and a way to request access are shown.
+  const restricted = dataset.access_level === 'NONE';
   const tag = matchedTag(dataset, search);
   const updated = formatMonthYear(dataset.updated_at);
 
@@ -59,15 +61,17 @@ export default function DatasetCard({ dataset, search }: DatasetCardProps) {
       {dataset.description && <p class="m-0 text-[15px] leading-[1.55] text-gray-700 line-clamp-3">{dataset.description}</p>}
       {tag && <p class="m-0 text-[13px] text-gray-600">Related to your search through the tag “{tag}”</p>}
 
-      <div class="flex flex-wrap gap-2">
-        <MetaChip label="Where" value={dataset.spatial_coverage_region_name} />
-        <MetaChip label="Detail" value={labelFor(SPATIAL_RESOLUTION_LABELS, dataset.spatial_resolution)} />
-        <MetaChip label="When" value={formatYears(dataset.temporal_coverage_start_date, dataset.temporal_coverage_end_date)} />
-        <MetaChip label="Source" value={dataset.data_owner_name} />
-        <MetaChip label="Format" value={FORMAT[dataset.dataset_kind] ?? null} />
-        <MetaChip label="Licence" value={dataset.licence} fallback={LICENCE_NOT_SPECIFIED} />
-        <MetaChip label="Tables" value={tableCountLabel(dataset.table_count)} fallback={NO_TABLES} />
-      </div>
+      {!restricted && (
+        <div class="flex flex-wrap gap-2">
+          <MetaChip label="Where" value={dataset.spatial_coverage_region_name} />
+          <MetaChip label="Detail" value={labelFor(SPATIAL_RESOLUTION_LABELS, dataset.spatial_resolution)} />
+          <MetaChip label="When" value={formatYears(dataset.temporal_coverage_start_date, dataset.temporal_coverage_end_date)} />
+          <MetaChip label="Source" value={dataset.data_owner_name} />
+          <MetaChip label="Format" value={FORMAT[dataset.dataset_kind] ?? null} />
+          <MetaChip label="Licence" value={dataset.licence} fallback={LICENCE_NOT_SPECIFIED} />
+          <MetaChip label="Tables" value={tableCountLabel(dataset.table_count)} fallback={NO_TABLES} />
+        </div>
+      )}
 
       <div class="flex flex-wrap gap-x-4 gap-y-2 items-center text-sm text-gray-600 border-t border-gray-100 pt-3">
         {dataset.has_data_dictionary && <span>Data dictionary included</span>}
@@ -97,12 +101,14 @@ export default function DatasetCard({ dataset, search }: DatasetCardProps) {
               Request access
             </a>
           )}
-          <a
-            href={`${href}#api`}
-            class="inline-flex items-center min-h-[40px] px-3 rounded-lg border border-gray-300 bg-white text-gray-700 font-semibold text-sm hover:border-gray-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
-          >
-            API
-          </a>
+          {!restricted && (
+            <a
+              href={`${href}#api`}
+              class="inline-flex items-center min-h-[40px] px-3 rounded-lg border border-gray-300 bg-white text-gray-700 font-semibold text-sm hover:border-gray-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+            >
+              API
+            </a>
+          )}
           <a href={href} class="inline-flex items-center min-h-[40px] px-1 font-semibold text-sm text-primary-700 hover:text-primary-900">
             Details <span aria-hidden="true">&nbsp;→</span>
             <span class="sr-only"> for {dataset.title}</span>

@@ -280,8 +280,22 @@ def test_list_items_carry_the_card_fields():
 def test_table_count_reads_manifest_then_data_dictionary():
     by_id = {d["ds_id"]: d for d in service.list_datasets(limit=50)["datasets"]}
     assert by_id["EP0001DS0001"]["table_count"] == 1  # manifest datasetTables
-    assert by_id["CS0002DS0003"]["table_count"] == 1  # data dictionary only
     assert by_id["GS0001DS0004"]["table_count"] == 0  # manifest without tables
+    assert by_id["CS0002DS0003"]["table_count"] == 0  # Restricted: hidden
+    session = catalogue_module.DBSession()
+    survey = session.query(Dataset).filter(Dataset.ds_id == "CS0002DS0003").one()
+    assert catalogue_module.table_count(survey) == 1  # data dictionary only
+    session.close()
+
+
+def test_restricted_list_item_shows_only_that_it_exists():
+    survey = next(
+        d for d in service.list_datasets(limit=50)["datasets"] if d["ds_id"] == "CS0002DS0003"
+    )
+    assert survey["title"] == "Bengaluru ward health survey"
+    assert survey["access_level"] == "NONE"
+    shown = {key for key, value in survey.items() if value not in (None, [], 0, False, "tabular")}
+    assert shown == {"ds_id", "title", "access_level"}
 
 
 def test_list_never_includes_documents_or_download_links():
@@ -298,21 +312,22 @@ def test_list_never_includes_documents_or_download_links():
 
 
 def test_region_filter_includes_regions_inside_it():
-    # Karnataka: the state-level dengue data and the survey of a Bengaluru subdistrict
-    assert set(ids(service.list_datasets(region_id="state_29"))) == {"EP0001DS0001", "CS0002DS0003"}
-    assert ids(service.list_datasets(region_id="district_525")) == ["CS0002DS0003"]
+    # Karnataka: the state-level dengue data. The Restricted survey of a Bengaluru
+    # subdistrict is left out, because its place is hidden.
+    assert set(ids(service.list_datasets(region_id="state_29"))) == {"EP0001DS0001"}
+    assert ids(service.list_datasets(region_id="district_525")) == []
     assert ids(service.list_datasets(region_id="state_27")) == []
 
 
 def test_region_filter_matches_any_of_several_regions():
-    assert set(ids(service.list_datasets(region_id=["district_525", "state_21"]))) == {
-        "CS0002DS0003",
+    assert set(ids(service.list_datasets(region_id=["state_29", "state_21"]))) == {
+        "EP0001DS0001",
         "WE0001DS0005",
     }
     response = client.get(
-        "/api/v1/web/public/datasets", params=[("region_id", "district_525"), ("region_id", "state_21")]
+        "/api/v1/web/public/datasets", params=[("region_id", "state_29"), ("region_id", "state_21")]
     )
-    assert set(ids(response.json())) == {"CS0002DS0003", "WE0001DS0005"}
+    assert set(ids(response.json())) == {"EP0001DS0001", "WE0001DS0005"}
 
 
 def test_india_region_means_all_india_datasets_only():
@@ -328,18 +343,17 @@ def test_india_region_means_all_india_datasets_only():
     [
         ({"access_levels": ["DOWNLOAD"]}, {"EP0001DS0001", "GS0001DS0004", "WE0001DS0005"}),
         ({"access_levels": ["view,none"]}, {"CS0001DS0002", "CS0002DS0003"}),
-        ({"category_ids": ["CS"]}, {"CS0001DS0002", "CS0002DS0003"}),
-        ({"spatial_resolutions": ["WARD"]}, {"CS0002DS0003"}),
+        # Filters on details a Restricted dataset hides leave it out (CS0002DS0003).
+        ({"category_ids": ["CS"]}, {"CS0001DS0002"}),
+        ({"spatial_resolutions": ["WARD"]}, set()),
         ({"temporal_resolutions": ["MONTH", "YEAR"]}, {"EP0001DS0001", "CS0001DS0002"}),
         ({"dataset_kinds": ["geojson"]}, {"GS0001DS0004"}),
-        (
-            {"dataset_kinds": ["tabular"]},
-            {"EP0001DS0001", "CS0001DS0002", "CS0002DS0003", "WE0001DS0005"},
-        ),
+        ({"dataset_kinds": ["tabular"]}, {"EP0001DS0001", "CS0001DS0002", "WE0001DS0005"}),
         ({"licences": ["GODL-India"]}, {"WE0001DS0005"}),
         # time overlap: anything covering part of 2018-2019; undated datasets drop out
         ({"year_from": 2018, "year_to": 2019}, {"EP0001DS0001", "CS0001DS0002", "WE0001DS0005"}),
-        ({"year_from": 2021}, {"EP0001DS0001", "CS0002DS0003"}),
+        ({"year_from": 2021}, {"EP0001DS0001"}),
+        ({"access_levels": ["NONE"], "category_ids": ["CS"]}, set()),
         ({"year_to": 1995}, {"WE0001DS0005"}),
     ],
 )
@@ -372,9 +386,15 @@ def test_collection_and_owner_filters_take_ids():
         ("lgd_district_code", {"EP0001DS0001"}),  # column name in the manifest
         ("dengue cases since 2015", {"EP0001DS0001"}),  # year matches coverage
         ("dengue 2010", set()),
-        ("census & surveys", {"CS0001DS0002", "CS0002DS0003"}),  # theme name
+        ("census & surveys", {"CS0001DS0002"}),  # theme name; not the Restricted survey
         ("100%", set()),  # LIKE wildcards are literal
         ("EP0001DS0001", {"EP0001DS0001"}),
+        # Restricted: found by title or ID only, never by its hidden details
+        ("ward health", {"CS0002DS0003"}),
+        ("CS0002DS0003", {"CS0002DS0003"}),
+        ("household", set()),  # description
+        ("respondent_age", set()),  # column name
+        ("Bengaluru 2021", set()),  # title + year from its hidden coverage
     ],
 )
 def test_search(search, expected):
@@ -407,6 +427,14 @@ def test_sorts(sort, first):
     assert ids(service.list_datasets(sort=sort, limit=50))[0] == first
 
 
+def test_restricted_dates_sort_as_unknown():
+    # The survey's real end date (2022) would put it second; hidden, it sorts with the undated.
+    assert set(ids(service.list_datasets(sort="newest", limit=50))[-2:]) == {
+        "CS0002DS0003",
+        "GS0001DS0004",
+    }
+
+
 def test_pagination_reports_the_full_total():
     page = service.list_datasets(sort="title", limit=2, offset=2)
     assert page["total"] == 5
@@ -437,9 +465,10 @@ def test_bad_parameters_are_400(params):
 # ----------------------------------------------------------------- detail
 
 
-def test_restricted_detail_shows_columns_but_no_documents():
+def test_restricted_detail_shows_only_that_it_exists():
     detail = service.get_dataset("CS0002DS0003")
     assert detail["access_level"] == "NONE"
+    assert detail["title"] == "Bengaluru ward health survey"
     assert detail["readme_md"] is None
     assert detail["manifest_yaml"] is None
     assert detail["manifest_json"] is None
@@ -448,22 +477,15 @@ def test_restricted_detail_shows_columns_but_no_documents():
     assert detail["manifest_updated_by"] is None
     assert detail["can_download"] is False
     assert detail["raw_datasets"] == []
-    assert detail["tables"] == [
-        {
-            "name": "responses",
-            "description": "One row per household",
-            "columns": [
-                {
-                    "name": "respondent_age",
-                    "description": "Age in years",
-                    "type": None,
-                    "unit": None,
-                }
-            ],
-        }
-    ]
-    assert "phone_number" not in json.dumps(detail)
-    assert "contact sheet" not in json.dumps(detail)
+    assert detail["tables"] == []
+    assert detail["description"] is None
+    assert detail["collection"] is None
+    assert detail["data_owner"] is None
+    assert detail["spatial_coverage_region_id"] is None
+    assert detail["temporal_coverage_start_date"] is None
+    text = json.dumps(detail)
+    for hidden in ("household", "respondent_age", "phone_number", "contact sheet", "subdistrict_9001", "2021"):
+        assert hidden not in text
 
 
 def test_view_only_detail_keeps_documents_for_existing_clients():
@@ -523,13 +545,9 @@ def test_stats():
     assert stats["latest_year"] == 2023
     assert stats["by_access_level"] == {"DOWNLOAD": 3, "VIEW": 1, "NONE": 1}
     assert stats["by_dataset_kind"] == {"tabular": 4, "geojson": 1}
-    assert stats["themes"][0] == {
-        "category_id": "CS",
-        "category_name": "Census & surveys",
-        "count": 2,
-    }
+    # Theme and map counts leave out the Restricted survey, whose theme and place are hidden.
     assert {t["category_id"]: t["count"] for t in stats["themes"]} == {
-        "CS": 2,
+        "CS": 1,
         "EP": 1,
         "GS": 1,
         "WE": 1,
@@ -537,9 +555,8 @@ def test_stats():
     assert stats["coverage"] == {
         "national": 1,
         "unknown": 1,
-        # the Bengaluru subdistrict survey counts for Karnataka
         "states": [
-            {"region_id": "state_29", "region_name": "Karnataka", "count": 2},
+            {"region_id": "state_29", "region_name": "Karnataka", "count": 1},
             {"region_id": "state_21", "region_name": "Odisha", "count": 1},
         ],
     }

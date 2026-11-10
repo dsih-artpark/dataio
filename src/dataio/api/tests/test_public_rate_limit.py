@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 
 import pytest
 from fastapi import HTTPException
@@ -74,8 +76,34 @@ def test_limit_is_keyed_by_action_and_ip(monkeypatch):
             "limit": 20,
             "window_seconds": 3600,
             "block_seconds": 3600,
+            "fail_closed": True,
         }
     ]
+
+
+class BrokenSession:
+    """A database that is down."""
+
+    def execute(self, *args, **kwargs):
+        raise RuntimeError("could not connect to server")
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def test_public_limits_refuse_when_the_counter_is_unavailable(monkeypatch):
+    monkeypatch.setattr(security, "DBSession", BrokenSession)
+    with pytest.raises(HTTPException) as exc_info:
+        security.enforce_ip_rate_limit(make_request(), "chat", limit=3, window_seconds=60)
+    assert exc_info.value.status_code == 503
+
+
+def test_sign_in_limits_still_let_the_call_through_when_the_counter_is_unavailable(monkeypatch):
+    monkeypatch.setattr(security, "DBSession", BrokenSession)
+    security.enforce_rate_limit(action="login", subject="email:a@example.org", limit=3)
 
 
 # ------------------------------------------------------- against Postgres
@@ -116,3 +144,40 @@ def test_blocks_an_ip_after_the_limit_and_not_others(rate_limit_db):
         ("public:chat", "ip:203.0.113.8"): 1,
         ("public:download", "ip:203.0.113.7"): 1,
     }
+
+
+@requires_postgres
+def test_a_new_window_starts_counting_again(rate_limit_db, monkeypatch):
+    for _ in range(2):
+        security.enforce_rate_limit(action="a", subject="s", limit=2, window_seconds=60, block_seconds=60)
+    session = rate_limit_db()
+    session.query(AuthRateLimit).update(
+        {AuthRateLimit.window_started_at: datetime.utcnow() - timedelta(seconds=61)}
+    )
+    session.commit()
+    session.close()
+    # The old window is over, so this is attempt 1 of a new one, not attempt 3.
+    security.enforce_rate_limit(action="a", subject="s", limit=2, window_seconds=60, block_seconds=60)
+    session = rate_limit_db()
+    assert session.query(AuthRateLimit).one().attempt_count == 1
+    session.close()
+
+
+@requires_postgres
+def test_simultaneous_requests_are_all_counted(rate_limit_db):
+    # Before, two requests at once could read the same count and both get through.
+    limit, callers = 10, 40
+    outcomes = []
+
+    def attempt():
+        try:
+            security.enforce_rate_limit(action="burst", subject="s", limit=limit, window_seconds=60, block_seconds=60)
+            outcomes.append("ok")
+        except HTTPException as exc:
+            outcomes.append(exc.status_code)
+
+    with ThreadPoolExecutor(max_workers=callers) as pool:
+        for _ in range(callers):
+            pool.submit(attempt)
+    assert outcomes.count("ok") == limit
+    assert outcomes.count(429) == callers - limit

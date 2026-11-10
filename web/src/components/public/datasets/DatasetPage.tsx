@@ -108,6 +108,8 @@ export default function DatasetPage() {
   const canDownload = access === 'DOWNLOAD' || userCanDownload;
   const hasFiles = dataset.table_count > 0;
   const updated = formatMonthYear(dataset.updated_at);
+  // Restricted: only the title and a way to request access are shown.
+  const restricted = access === 'NONE';
 
   return (
     <div class="flex flex-col gap-7">
@@ -120,15 +122,17 @@ export default function DatasetPage() {
           </span>
           <h1 class="m-0 text-[26px] sm:text-[32px] leading-tight font-bold text-gray-900">{dataset.title}</h1>
           {dataset.description && <p class="m-0 text-base leading-relaxed text-gray-600">{dataset.description}</p>}
-          <div class="flex flex-wrap gap-2">
-            <MetaChip label="Where" value={dataset.spatial_coverage_region_name} />
-            <MetaChip label="Detail" value={labelFor(SPATIAL_RESOLUTION_LABELS, dataset.spatial_resolution)} />
-            <MetaChip label="When" value={formatYears(dataset.temporal_coverage_start_date, dataset.temporal_coverage_end_date)} />
-            <MetaChip label="How often" value={labelFor(TEMPORAL_RESOLUTION_LABELS, dataset.temporal_resolution)} />
-            <MetaChip label="Source" value={dataset.data_owner_name} />
-            <MetaChip label="Licence" value={dataset.licence} fallback={LICENCE_NOT_SPECIFIED} />
-            <MetaChip label="Tables" value={tableCountLabel(dataset.table_count)} fallback={NO_TABLES} />
-          </div>
+          {!restricted && (
+            <div class="flex flex-wrap gap-2">
+              <MetaChip label="Where" value={dataset.spatial_coverage_region_name} />
+              <MetaChip label="Detail" value={labelFor(SPATIAL_RESOLUTION_LABELS, dataset.spatial_resolution)} />
+              <MetaChip label="When" value={formatYears(dataset.temporal_coverage_start_date, dataset.temporal_coverage_end_date)} />
+              <MetaChip label="How often" value={labelFor(TEMPORAL_RESOLUTION_LABELS, dataset.temporal_resolution)} />
+              <MetaChip label="Source" value={dataset.data_owner_name} />
+              <MetaChip label="Licence" value={dataset.licence} fallback={LICENCE_NOT_SPECIFIED} />
+              <MetaChip label="Tables" value={tableCountLabel(dataset.table_count)} fallback={NO_TABLES} />
+            </div>
+          )}
           {(updated || dataset.tags.length > 0) && (
             <p class="m-0 text-sm text-gray-600">
               {updated && `Updated ${updated}`}
@@ -209,7 +213,7 @@ export default function DatasetPage() {
             <>
               <p class="m-0 text-sm leading-[1.55] text-gray-600">
                 {preview.mode === 'synthetic'
-                  ? 'Place names, codes and dates are real. The numbers are random and don’t reflect the real data’s totals, averages or trends; other text is hidden.'
+                  ? 'Made-up rows that follow the data dictionary, so you can see the shape of the data. None of these values are real records.'
                   : `The first ${preview.rows.length} rows of “${preview.table}”.`}
               </p>
               <div class="overflow-x-auto border border-gray-200 rounded-[10px]" tabIndex={0} role="region" aria-label="Preview table">
@@ -242,11 +246,12 @@ export default function DatasetPage() {
       )}
 
       {/* TABLES + COLUMNS */}
+      {!restricted && (
       <section aria-labelledby="columns-heading" class={card}>
         <h2 id="columns-heading" class={h2}>
           Tables and columns
         </h2>
-        <p class="m-0 text-sm leading-[1.55] text-gray-600">Visible to everyone, whatever the access level.</p>
+        <p class="m-0 text-sm leading-[1.55] text-gray-600">Visible to everyone, for Open and View only datasets.</p>
         {dataset.tables.length === 0 && <p class="m-0 text-sm text-gray-600">No data dictionary has been published for this dataset yet.</p>}
         {dataset.tables.map((table) => (
           <div key={table.name} class="flex flex-col gap-2">
@@ -281,6 +286,7 @@ export default function DatasetPage() {
           </div>
         ))}
       </section>
+      )}
 
       {/* DOCUMENTATION (README) */}
       {readmeHtml && (
@@ -295,6 +301,7 @@ export default function DatasetPage() {
       )}
 
       {/* API */}
+      {(!restricted || canDownload) && (
       <section id="api" aria-labelledby="api-heading" class={`${card} scroll-mt-4`}>
         <h2 id="api-heading" class={h2}>
           Use it in your code
@@ -308,6 +315,7 @@ export default function DatasetPage() {
         </p>
         <CodeSnippets datasetId={dataset.ds_id} />
       </section>
+      )}
     </div>
   );
 }

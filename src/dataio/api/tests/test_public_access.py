@@ -8,10 +8,14 @@ invite flow are replaced by fakes.
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 
 import pytest
+import yaml
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -40,7 +44,7 @@ from dataio.api.services import filestore_service as filestore_module
 from dataio.api.services import public_access_service as access_module
 from dataio.api.services import web_admin_service as admin_module
 from dataio.api.services.public_access_service import (
-    HIDDEN_TEXT,
+    SAMPLE_TEXT,
     PublicAccessService,
     count_words,
     synthetic_rows,
@@ -49,25 +53,38 @@ from dataio.api.tests.postgres_schema import fresh_schema_engine, requires_postg
 
 # ------------------------------------------------------- synthetic preview
 
+# A v2 data dictionary like a line list's: IDs, places, dates, codes and counts.
+DICTIONARY = {
+    "case_id": {"type": "string"},
+    "district.ID": {"type": "regionID"},
+    "village.name": {"type": "regionName"},
+    "onset_date": {"type": "date", "format": "%Y-%m-%d"},
+    "sex": {"type": "enum", "allowedValues": ["M", "F"]},
+    "serotype": {"type": "enum", "enumRef": "serotypes"},
+    "age": {"type": "int", "min": 0, "max": 99},
+    "rate": {"type": "float", "range": [0, 1]},
+    "notes": {"description": "free text, no type"},
+}
+ENUMS = {"serotypes": {"values": {"DENV-1": {}, "DENV-2": {}}}}
 
-def test_synthetic_preview_keeps_places_codes_and_dates_and_randomises_numbers():
-    columns = ["district", "lgd_district_code", "year", "month", "dengue_cases", "rate", "notes"]
-    rows = [
-        ["Bagalkote", "524", "2023", "7", "18", "1.25", "outbreak in ward 4"],
-        ["Ballari", "528", "2023", "7", "6", "0.50", ""],
-    ]
-    out = synthetic_rows("EP0001DS0001", columns, rows)
 
-    assert [row[:4] for row in out] == [row[:4] for row in rows]
-    assert all(row[4].isdigit() for row in out)
-    assert all(len(row[5].split(".")[1]) == 2 for row in out)
-    assert out[0][6] == HIDDEN_TEXT
-    assert out[1][6] == ""  # empty stays empty
+def test_synthetic_preview_follows_the_data_dictionary():
+    rows = synthetic_rows(
+        "EP0001DS0002", DICTIONARY, ENUMS, date(2023, 6, 1), date(2023, 6, 30), count=20
+    )
+    assert len(rows) == 20 and all(len(row) == len(DICTIONARY) for row in rows)
+    for case_id, region_id, village, onset, sex, serotype, age, rate, notes in rows:
+        assert case_id == SAMPLE_TEXT and notes == SAMPLE_TEXT
+        assert region_id.startswith("district_")
+        assert village == "Sample village"
+        assert date(2023, 6, 1) <= date.fromisoformat(onset) <= date(2023, 6, 30)
+        assert sex in ("M", "F") and serotype in ("DENV-1", "DENV-2")
+        assert 0 <= int(age) <= 99 and 0 <= float(rate) <= 1
 
 
 def test_synthetic_preview_is_stable_per_dataset():
-    columns, rows = ["district", "cases"], [["Bidar", "4"], ["Kolar", "9"]]
-    assert synthetic_rows("A", columns, rows) == synthetic_rows("A", columns, rows)
+    assert synthetic_rows("A", DICTIONARY, ENUMS) == synthetic_rows("A", DICTIONARY, ENUMS)
+    assert synthetic_rows("A", DICTIONARY, ENUMS) != synthetic_rows("B", DICTIONARY, ENUMS)
 
 
 def test_count_words():
@@ -91,7 +108,23 @@ def session_factory():
     owner = DataOwner(name="NVBDCP")
     session.add_all([collection, owner])
     session.flush()
-    for ds_id, level in (("EP0001DS0001", AccessLevel.DOWNLOAD), ("EP0001DS0002", AccessLevel.VIEW), ("EP0001DS0003", AccessLevel.NONE)):
+    manifest = {"datasetTables": {"cases": {"dataDictionary": DICTIONARY}}, "enumDefinitions": ENUMS}
+    for ds_id, level, extra in (
+        ("EP0001DS0001", AccessLevel.DOWNLOAD, {}),
+        # JSONB doesn't keep key order, so column order comes from the YAML, as in real imports.
+        (
+            "EP0001DS0002",
+            AccessLevel.VIEW,
+            {"manifest_json": manifest, "manifest_yaml": yaml.safe_dump(manifest, sort_keys=False)},
+        ),
+        ("EP0001DS0003", AccessLevel.NONE, {}),
+        # View only with only an untyped v1 data dictionary
+        (
+            "EP0001DS0004",
+            AccessLevel.VIEW,
+            {"data_dictionary_json": json.dumps({"tables": {"main": {"data_dictionary": {"district": {}}}}})},
+        ),
+    ):
         session.add(
             Dataset(
                 ds_id=ds_id,
@@ -101,6 +134,7 @@ def session_factory():
                 spatial_resolution=SpatialResolution.DISTRICT,
                 temporal_resolution=TemporalResolution.MONTH,
                 access_level=level,
+                **extra,
             )
         )
         # One row per INSERT: a batched insert casts to SQLAlchemy's default
@@ -244,6 +278,16 @@ def test_download_without_email_or_known_visitor_needs_the_pop_up(db, kwargs):
 
 
 @requires_postgres
+def test_no_files_is_said_before_asking_for_consent(db, monkeypatch):
+    monkeypatch.setattr(FakeFilestore, "list_files_in_s3", lambda self, dataset_id, version_type: [])
+    # Without an email: "no files" (404), not the pop-up (428), so nobody
+    # gives consent for a download that can't happen.
+    with pytest.raises(HTTPException) as error:
+        PublicAccessService().get_open_download_urls("EP0001DS0001")
+    assert error.value.status_code == 404
+
+
+@requires_postgres
 def test_email_without_accepting_the_terms_is_refused(db):
     with pytest.raises(HTTPException) as error:
         PublicAccessService().get_open_download_urls("EP0001DS0001", email="asha@example.org")
@@ -299,12 +343,26 @@ def test_preview_modes_follow_access_level(db):
     assert real["mode"] == "real"
     assert real["rows"][0] == ["Bidar", "2023", "4"]
 
-    synthetic = service.get_preview("EP0001DS0002")
-    assert synthetic["mode"] == "synthetic"
-    assert [row[:2] for row in synthetic["rows"]] == [["Bidar", "2023"], ["Kolar", "2023"]]
-
     restricted = service.get_preview("EP0001DS0003")
     assert restricted == {"mode": "none", "table": None, "columns": [], "rows": []}
+
+
+@requires_postgres
+def test_view_only_preview_never_reads_the_data_file(db, monkeypatch):
+    def fail(*args, **kwargs):
+        raise AssertionError("a View only preview must not read the data file")
+
+    monkeypatch.setattr(FakeFilestore, "read_table_head", fail)
+    service = PublicAccessService()
+
+    synthetic = service.get_preview("EP0001DS0002")
+    assert synthetic["mode"] == "synthetic"
+    assert synthetic["table"] == "cases"
+    assert synthetic["columns"] == list(DICTIONARY)
+    assert synthetic["rows"] == synthetic_rows("EP0001DS0002", DICTIONARY, ENUMS)
+
+    # Without a typed data dictionary there is nothing to build it from.
+    assert service.get_preview("EP0001DS0004")["mode"] == "unavailable"
 
 
 # ------------------------------------------------------ access requests
@@ -321,6 +379,68 @@ def test_access_request_is_saved_and_emails_team_and_requester(db):
     assert row.email == "asha@example.org"
     assert row.status == "PENDING"
     assert {mail["to"] for mail in FakeEmail.sent} == {access_module.ACCESS_REQUEST_NOTIFY_EMAIL, "asha@example.org"}
+
+
+@requires_postgres
+def test_receipt_carries_no_text_from_the_form(db):
+    # Anyone can type someone else's address, so the sender's words must not reach it.
+    PublicAccessService().submit_access_request(**_request(full_name="Click evil.example now"))
+    receipt = next(m for m in FakeEmail.sent if m["to"] == "asha@example.org")
+    assert "evil" not in receipt["text"] and "evil" not in receipt["html"]
+    assert receipt["text"].startswith("Hi,")
+
+
+@requires_postgres
+def test_filled_in_honeypot_is_dropped_quietly(db):
+    result = PublicAccessService().submit_access_request(**_request(), honeypot="http://spam.example")
+    assert result["submitted"] is True
+    session = db()
+    assert session.query(AccessRequest).count() == 0
+    session.close()
+    assert FakeEmail.sent == []
+
+
+@requires_postgres
+def test_repeat_of_a_pending_request_sends_nothing_more(db):
+    service = PublicAccessService()
+    first = service.submit_access_request(**_request())
+    sent_after_first = len(FakeEmail.sent)
+    again = service.submit_access_request(**_request(email="ASHA@example.org"))
+    assert again["submitted"] is True and again["id"] != first["id"]
+    assert len(FakeEmail.sent) == sent_after_first
+    session = db()
+    assert session.query(AccessRequest).count() == 1
+    session.close()
+
+    # Once it's been answered, a new request is welcome.
+    service.review_access_request(_admin(db), first["id"], approve=False)
+    service.submit_access_request(**_request())
+    session = db()
+    assert session.query(AccessRequest).count() == 2
+    session.close()
+
+
+@requires_postgres
+def test_approval_finds_an_account_whatever_the_case_of_its_email(db, monkeypatch):
+    session = db()
+    session.add(User(email="Mixed.Case@Example.org", email_verified=True))
+    session.commit()
+    session.close()
+    monkeypatch.setattr(admin_module.WebAdminService, "__init__", lambda self: None)
+    monkeypatch.setattr(
+        admin_module.WebAdminService,
+        "invite_user",
+        lambda *args, **kwargs: pytest.fail("an existing account must not be invited again"),
+    )
+    service = PublicAccessService()
+    request_id = service.submit_access_request(**_request(email="mixed.case@example.org"))["id"]
+
+    assert service.review_access_request(_admin(db), request_id, approve=True)["invited"] is False
+    session = db()
+    perm = session.query(UserPermission).one()
+    session.close()
+    # Granted to the account's own spelling, which its permission checks compare against.
+    assert perm.user_email == "Mixed.Case@Example.org"
 
 
 @requires_postgres
@@ -400,6 +520,47 @@ def test_rejecting_sends_the_note_and_cannot_be_reviewed_twice(db):
     with pytest.raises(HTTPException) as error:
         service.review_access_request(_admin(db), request_id, approve=True)
     assert error.value.status_code == 409
+
+
+@requires_postgres
+def test_two_admins_reviewing_at_once_decide_it_once(db, monkeypatch):
+    service = PublicAccessService()
+    request_id = service.submit_access_request(**_request(email="known@example.org"))["id"]
+    FakeEmail.sent = []
+    outcomes = []
+
+    def review(approve):
+        try:
+            outcomes.append(service.review_access_request(_admin(db), request_id, approve=approve)["status"])
+        except HTTPException as exc:
+            outcomes.append(exc.status_code)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(review, [True, False]))
+    assert outcomes.count(409) == 1
+    assert {o for o in outcomes if o != 409} <= {"APPROVED", "REJECTED"}
+    assert len(FakeEmail.sent) == 1  # one decision email, not two
+
+
+@requires_postgres
+def test_rejecting_does_not_need_the_admin_service(db, monkeypatch):
+    def unavailable(self):
+        raise RuntimeError("S3 settings missing")
+
+    monkeypatch.setattr(admin_module.WebAdminService, "__init__", unavailable)
+    service = PublicAccessService()
+    request_id = service.submit_access_request(**_request())["id"]
+    assert service.review_access_request(_admin(db), request_id, approve=False)["status"] == "REJECTED"
+    # Approving someone who already has an account doesn't need it either.
+    request_id = service.submit_access_request(**_request(email="known@example.org"))["id"]
+    assert service.review_access_request(_admin(db), request_id, approve=True)["status"] == "APPROVED"
+
+
+@requires_postgres
+def test_negative_offset_is_a_400(db):
+    with pytest.raises(HTTPException) as error:
+        PublicAccessService().list_access_requests(offset=-1)
+    assert error.value.status_code == 400
 
 
 @requires_postgres

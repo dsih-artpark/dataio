@@ -41,7 +41,10 @@ def fresh_schema_engine() -> Engine:
         cursor.execute((DB_DIR / "schema.sql").read_text())
         cursor.execute("SET search_path TO public")
         for name in MIGRATIONS_AFTER_SCHEMA:
-            cursor.execute((DB_DIR / "migrations" / name).read_text())
+            # One string inside one transaction here, where CREATE INDEX
+            # CONCURRENTLY isn't allowed; on an empty test database it changes nothing.
+            sql = (DB_DIR / "migrations" / name).read_text().replace(" CONCURRENTLY ", " ")
+            cursor.execute(sql)
         raw.commit()
     finally:
         raw.close()

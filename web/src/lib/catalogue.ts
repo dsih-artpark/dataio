@@ -121,6 +121,8 @@ export interface AccessRequestInput {
   organisation_type_other?: string | null;
   purpose: string;
   consent: boolean;
+  /** Honeypot: only bots fill it in. */
+  website?: string;
 }
 
 export type AccessRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';

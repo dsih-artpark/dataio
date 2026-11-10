@@ -29,6 +29,8 @@ export default function RequestAccessForm() {
     purpose: '',
     consent: false,
   });
+  // Honeypot: hidden from people, so only bots fill it in; the API then drops the request.
+  const [website, setWebsite] = useState('');
   const [errors, setErrors] = useState<Partial<Record<Field, string>>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -101,6 +103,7 @@ export default function RequestAccessForm() {
         organisation_type_other: values.organisation_type === 'Other' ? values.organisation_type_other.trim() : null,
         purpose: values.purpose.trim(),
         consent: values.consent,
+        ...(website ? { website } : {}),
       });
       setDone(true);
     } catch (err) {
@@ -298,6 +301,20 @@ export default function RequestAccessForm() {
           </span>
         </span>
       </label>
+
+      <div aria-hidden="true" class="absolute -left-[10000px] w-px h-px overflow-hidden">
+        <label>
+          Website (leave empty)
+          <input
+            type="text"
+            name="website"
+            tabIndex={-1}
+            autoComplete="off"
+            value={website}
+            onInput={(e) => setWebsite((e.target as HTMLInputElement).value)}
+          />
+        </label>
+      </div>
 
       <div class="flex flex-col gap-1">
         <label class="flex items-start gap-2.5 text-sm leading-normal text-gray-700 cursor-pointer">

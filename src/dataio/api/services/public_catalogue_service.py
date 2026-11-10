@@ -4,8 +4,9 @@ public site. No authentication.
 
 Every dataset is listed here whatever its access level (Open download =
 DOWNLOAD, View only = VIEW, Restricted = NONE), but only as metadata: no
-download links ever, and for Restricted datasets nothing beyond the catalogue
-fields and column names (no README, manifest or data dictionary file).
+download links ever. A Restricted dataset shows only that it exists (ID, title,
+access level): no description, theme, owner, coverage, tables or columns, and
+it never matches a search or filter on those hidden details.
 """
 
 from __future__ import annotations
@@ -30,6 +31,8 @@ logger = logging.getLogger(__name__)
 
 INDIA_REGION_ID = "country_IN"
 PUBLIC_ACCESS_LEVELS = (AccessLevel.DOWNLOAD, AccessLevel.VIEW, AccessLevel.NONE)
+# Levels whose details (theme, place, ...) may be shown, so they count in theme and map totals.
+DETAIL_ACCESS_LEVELS = (AccessLevel.DOWNLOAD, AccessLevel.VIEW)
 DATASET_KINDS = ("tabular", "geojson")
 SORT_OPTIONS = ("relevance", "updated", "newest", "span", "title")
 MAX_PAGE_SIZE = 200
@@ -235,7 +238,41 @@ def _updated_at(dataset: Dataset) -> str | None:
     return value.isoformat() if value else None
 
 
+def _is_restricted(dataset: Dataset) -> bool:
+    return dataset.access_level == AccessLevel.NONE
+
+
+def _restricted_summary(dataset: Dataset) -> dict:
+    """A Restricted dataset shows only that it exists: ID, title and access level."""
+    return {
+        "ds_id": dataset.ds_id,
+        "title": dataset.title,
+        "description": None,
+        "collection_id": None,
+        "collection_name": None,
+        "category_id": None,
+        "category_name": None,
+        "data_owner_id": None,
+        "data_owner_name": None,
+        "spatial_coverage_region_id": None,
+        "spatial_coverage_region_name": None,
+        "spatial_resolution": None,
+        "temporal_coverage_start_date": None,
+        "temporal_coverage_end_date": None,
+        "temporal_resolution": None,
+        "access_level": _enum_value(dataset.access_level),
+        "licence": None,
+        "dataset_kind": "tabular",
+        "tags": [],
+        "has_data_dictionary": False,
+        "table_count": 0,
+        "updated_at": None,
+    }
+
+
 def _summary(dataset: Dataset) -> dict:
+    if _is_restricted(dataset):
+        return _restricted_summary(dataset)
     collection = dataset.collection
     owner = dataset.data_owner
     region = dataset.spatial_coverage_region
@@ -333,6 +370,21 @@ class PublicCatalogueService:
                 .filter(Dataset.access_level.in_(levels or PUBLIC_ACCESS_LEVELS))
             )
 
+            # Restricted datasets show only that they exist, so a filter on any
+            # detail they hide (theme, owner, place, years, licence...) leaves them out.
+            if (
+                collection_id_list
+                or category_list
+                or owner_id_list
+                or spatial
+                or temporal
+                or licence_list
+                or kinds
+                or region_list
+                or year_from is not None
+                or year_to is not None
+            ):
+                query = query.filter(Dataset.access_level != AccessLevel.NONE)
             if collection_id_list:
                 query = query.filter(Dataset.collection_id.in_(collection_id_list))
             if category_list:
@@ -410,10 +462,13 @@ class PublicCatalogueService:
     @staticmethod
     def _term_condition(term: str, param: str):
         pattern = _like_pattern(term)
-        conditions = [
+        visible = [
             Dataset.title.ilike(pattern, escape="\\"),
-            Dataset.description.ilike(pattern, escape="\\"),
             Dataset.ds_id.ilike(pattern, escape="\\"),
+        ]
+        # Matched only for datasets that aren't Restricted.
+        conditions = [
+            Dataset.description.ilike(pattern, escape="\\"),
             Collection.collection_name.ilike(pattern, escape="\\"),
             Collection.category_name.ilike(pattern, escape="\\"),
             DataOwner.name.ilike(pattern, escape="\\"),
@@ -432,20 +487,28 @@ class PublicCatalogueService:
                     ),
                 )
             )
-        return or_(*conditions)
+        return or_(*visible, and_(Dataset.access_level != AccessLevel.NONE, or_(*conditions)))
 
     @staticmethod
     def _ordering(sort: str, terms: list[str]):
-        updated = func.coalesce(Dataset.manifest_updated_at, Dataset.documentation_synced_at)
+        def hidden_if_restricted(expr):
+            # Sorting on a Restricted dataset's dates would hint at them, so it sorts as unknown.
+            return case((Dataset.access_level == AccessLevel.NONE, None), else_=expr)
+
+        updated = hidden_if_restricted(
+            func.coalesce(Dataset.manifest_updated_at, Dataset.documentation_synced_at)
+        )
         title = func.lower(Dataset.title)
         if sort == "title":
             return [title.asc(), Dataset.ds_id.asc()]
         if sort == "updated":
             return [updated.desc().nullslast(), title.asc()]
         if sort == "newest":
-            return [Dataset.temporal_coverage_end_date.desc().nullslast(), title.asc()]
+            return [hidden_if_restricted(Dataset.temporal_coverage_end_date).desc().nullslast(), title.asc()]
         if sort == "span":
-            span = Dataset.temporal_coverage_end_date - Dataset.temporal_coverage_start_date
+            span = hidden_if_restricted(
+                Dataset.temporal_coverage_end_date - Dataset.temporal_coverage_start_date
+            )
             return [span.desc().nullslast(), title.asc()]
         # relevance: titles matching more of the search words first
         if terms:
@@ -479,7 +542,7 @@ class PublicCatalogueService:
                 raise HTTPException(status_code=404, detail="Dataset not found")
 
             detail = _summary(dataset)
-            restricted = dataset.access_level == AccessLevel.NONE
+            restricted = _is_restricted(dataset)
             # Older clients read collection/data_owner as nested objects.
             detail["collection"] = (
                 {
@@ -487,15 +550,15 @@ class PublicCatalogueService:
                     "name": dataset.collection.collection_name,
                     "category": dataset.collection.category_name,
                 }
-                if dataset.collection
+                if dataset.collection and not restricted
                 else None
             )
             detail["data_owner"] = (
                 {"id": dataset.data_owner.id, "name": dataset.data_owner.name}
-                if dataset.data_owner
+                if dataset.data_owner and not restricted
                 else None
             )
-            detail["tables"] = public_columns(dataset)
+            detail["tables"] = [] if restricted else public_columns(dataset)
             detail["can_download"] = False  # download links are never part of this response
             detail["raw_datasets"] = []
             detail["readme_md"] = None if restricted else dataset.readme_md
@@ -506,7 +569,9 @@ class PublicCatalogueService:
                 dataset.manifest_yaml or dataset.manifest_json
             )
             detail["manifest_updated_at"] = (
-                dataset.manifest_updated_at.isoformat() if dataset.manifest_updated_at else None
+                dataset.manifest_updated_at.isoformat()
+                if dataset.manifest_updated_at and not restricted
+                else None
             )
             detail["manifest_updated_by"] = None if restricted else dataset.manifest_updated_by
             return detail
@@ -577,7 +642,7 @@ class PublicCatalogueService:
                         Collection.category_id, Collection.category_name, func.count(Dataset.id)
                     )
                     .join(Dataset, Dataset.collection_id == Collection.id)
-                    .filter(listed)
+                    .filter(Dataset.access_level.in_(DETAIL_ACCESS_LEVELS))
                     .group_by(Collection.category_id, Collection.category_name)
                     .order_by(func.count(Dataset.id).desc(), Collection.category_name)
                 )
@@ -638,9 +703,9 @@ class PublicCatalogueService:
                 ORDER BY COUNT(DISTINCT w.dataset_id) DESC, r.region_name
                 """
             ).bindparams(bindparam("levels", expanding=True)),
-            {"levels": [level.value for level in PUBLIC_ACCESS_LEVELS], "india": INDIA_REGION_ID},
+            {"levels": [level.value for level in DETAIL_ACCESS_LEVELS], "india": INDIA_REGION_ID},
         ).all()
-        listed = Dataset.access_level.in_(PUBLIC_ACCESS_LEVELS)
+        listed = Dataset.access_level.in_(DETAIL_ACCESS_LEVELS)
         national = (
             session.query(func.count(Dataset.id))
             .filter(listed, Dataset.spatial_coverage_region_id == INDIA_REGION_ID)

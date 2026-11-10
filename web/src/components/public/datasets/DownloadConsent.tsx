@@ -140,8 +140,9 @@ function ConsentDialog({ dataset, busy, error, onCancel, onSubmit }: ConsentDial
               Before you download
             </h2>
             <p class="m-0 text-[15px] leading-relaxed text-gray-600">
-              <span class="font-semibold text-gray-800">{dataset.title}</span> is free to download. Tell us your email so we
-              can let you know about corrections or updates to this data. No account needed.
+              <span class="font-semibold text-gray-800">{dataset.title}</span> is free to download. No account needed. We
+              record your email with each download, together with your IP address and browser, so we know how the data is
+              used; our team can view and export these records.
             </p>
           </div>
 

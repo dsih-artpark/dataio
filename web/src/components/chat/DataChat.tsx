@@ -18,6 +18,10 @@ interface ActiveTool {
 
 type AIProvider = 'bedrock' | 'openrouter';
 
+// Limits of the signed-out assistant (PublicChatRequest in the API's web router).
+const PUBLIC_HISTORY_MESSAGES = 10;
+const PUBLIC_MESSAGE_CHARS = 2000;
+
 interface DataChatProps {
   initialMessage?: string;
   provider?: AIProvider;
@@ -65,11 +69,25 @@ export default function DataChat({
 
   const generateId = () => Math.random().toString(36).substring(7);
 
-  const buildHistoryForAPI = (): { role: string; content: { text: string }[] }[] => {
-    return messages.map((msg) => ({
-      role: msg.role,
-      content: [{ text: msg.content }],
-    }));
+  // The conversation so far, as complete question-and-answer pairs, so the new
+  // message always follows an answer (a question whose answer failed is left
+  // out). Signed-out visitors send only the last PUBLIC_HISTORY_MESSAGES
+  // messages, each clipped to PUBLIC_MESSAGE_CHARS (the server's limits).
+  const buildHistoryForAPI = (signedOut: boolean): { role: string; content: { text: string }[] }[] => {
+    const clip = (text: string) => (signedOut ? text.slice(0, PUBLIC_MESSAGE_CHARS) : text);
+    const pairs: { role: string; content: { text: string }[] }[][] = [];
+    for (let i = 0; i < messages.length - 1; i++) {
+      const question = messages[i];
+      const answer = messages[i + 1];
+      if (question.role === 'user' && answer.role === 'assistant' && answer.content.trim()) {
+        pairs.push([
+          { role: 'user', content: [{ text: clip(question.content) }] },
+          { role: 'assistant', content: [{ text: clip(answer.content) }] },
+        ]);
+        i++;
+      }
+    }
+    return (signedOut ? pairs.slice(-PUBLIC_HISTORY_MESSAGES / 2) : pairs).flat();
   };
 
   const sendMessage = async () => {
@@ -108,18 +126,23 @@ export default function DataChat({
         },
         body: JSON.stringify({
           message: trimmedInput,
-          history: buildHistoryForAPI().slice(0, -1), // Exclude the message we just added
+          // `messages` is still the list from before this send, so it holds
+          // neither the new question nor the empty answer placeholder.
+          history: buildHistoryForAPI(!accessToken),
           ...(accessToken ? { provider: selectedProvider } : {}),
         }),
       });
 
-      if (response.status === 429) {
-        throw new Error('You’ve reached today’s limit for the assistant. Please try again tomorrow, or sign in.');
-      }
-
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || 'Failed to send message');
+        // FastAPI validation errors come as a list of objects, not a sentence.
+        const detail = typeof errorData.detail === 'string' ? errorData.detail : null;
+        if (response.status === 429) {
+          throw new Error(detail || 'You’ve reached today’s limit for the assistant. Please try again tomorrow, or sign in.');
+        }
+        throw new Error(
+          response.status === 422 ? 'The assistant couldn’t read that message. Please start a new chat and try again.' : detail || 'Failed to send message'
+        );
       }
 
       const reader = response.body?.getReader();
@@ -330,17 +353,21 @@ export default function DataChat({
             value={input}
             onInput={(e) => setInput(e.currentTarget.value)}
             onKeyDown={handleKeyDown}
+            maxLength={PUBLIC_MESSAGE_CHARS}
+            aria-label="Your question for the data assistant"
             placeholder="Ask about datasets..."
             disabled={isLoading}
             class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 disabled:bg-gray-100 disabled:text-gray-500"
           />
           <button
+            type="button"
             onClick={sendMessage}
             disabled={isLoading || !input.trim()}
+            aria-label={isLoading ? 'Sending' : 'Send'}
             class="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
           >
             {isLoading ? (
-              <svg class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+              <svg aria-hidden="true" class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path
                   class="opacity-75"
@@ -349,7 +376,7 @@ export default function DataChat({
                 />
               </svg>
             ) : (
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg aria-hidden="true" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"

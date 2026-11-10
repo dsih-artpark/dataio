@@ -5,23 +5,26 @@ submissions with their admin review.
 
 Access levels: Open download = DOWNLOAD, View only = VIEW, Restricted = NONE.
 - Download links are only ever handed out here for DOWNLOAD datasets.
-- The preview shows real rows for DOWNLOAD, synthetic rows for VIEW (place
-  names, codes and dates kept, numbers randomised, other text hidden), and
-  nothing for NONE.
+- The preview shows real rows for DOWNLOAD, synthetic rows for VIEW and
+  nothing for NONE. Synthetic rows are made up from the v2 data dictionary
+  alone (types, allowed values, ranges, date formats); the data files are
+  never read for them, so no real value can reach a View only preview.
 """
 
 from __future__ import annotations
 
 import hashlib
 import html
+import math
 import os
 import random
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from fastapi import HTTPException
+from sqlalchemy import func
 
 from dataio.api.database.config import Session as DBSession
 from dataio.api.database.enums import AccessLevel, ResourceType
@@ -46,17 +49,15 @@ PREVIEW_ROWS = 5
 # 428 detail when a signed-out download needs the email + terms pop-up first.
 CONSENT_REQUIRED = "Enter your email and accept the terms to download."
 
-# Column names whose values are kept as-is in a synthetic preview: places,
-# codes and time. Everything else numeric is randomised, other text hidden.
-_KEEP_COLUMN = re.compile(
-    r"(^|_)(state|district|sub_?district|taluk|tehsil|block|mandal|village|ward|city|town|"
-    r"region|zone|division|circle|lgd|code|id|year|month|week|day|date|quarter|season|"
-    r"period|time|gender|sex|age_group|category|type|unit|level)(_|$)",
+# Shown for free-text and untyped columns in a synthetic preview.
+SAMPLE_TEXT = "Sample text"
+# Region level guessed from a column name such as "district.ID" or "lgd_village_code".
+_REGION_LEVEL = re.compile(
+    r"(village|sub_?district|district|state|ward|block|taluk|tehsil|city|ulb|zone|country)",
     re.IGNORECASE,
 )
-_INTEGER = re.compile(r"^-?\d+$")
-_DECIMAL = re.compile(r"^-?\d*\.(\d+)$")
-HIDDEN_TEXT = "…"
+_DEFAULT_START = date(2020, 1, 1)
+_DEFAULT_END = date(2024, 12, 31)
 
 
 def _access(dataset: Dataset) -> str:
@@ -64,29 +65,90 @@ def _access(dataset: Dataset) -> str:
     return level.value if hasattr(level, "value") else str(level or "NONE")
 
 
-def synthetic_rows(dataset_id: str, columns: list[str], rows: list[list[str]]) -> list[list[str]]:
-    """Real place/code/date values, random numbers, other text hidden.
+def _bounds(field: dict) -> tuple[float, float]:
+    span = field.get("range")
+    if isinstance(span, list) and len(span) == 2:
+        return float(span[0]), float(span[1])
+    low = float(field["min"]) if field.get("min") is not None else 0.0
+    high = float(field["max"]) if field.get("max") is not None else low + 100
+    return low, max(low, high)
 
-    Seeded by the dataset ID so the preview doesn't change on every visit.
+
+def _fake_value(rng: random.Random, name: str, field: dict, enums: dict, start: date, end: date) -> str:
+    kind = field.get("type")
+    if kind == "enum":
+        enum = enums.get(field.get("enumRef")) if field.get("enumRef") else None
+        values = field.get("allowedValues") or sorted(((enum or {}).get("values") or {}).keys())
+        return str(rng.choice(values)) if values else SAMPLE_TEXT
+    if kind == "int":
+        low, high = _bounds(field)
+        return str(rng.randint(math.ceil(low), max(math.ceil(low), math.floor(high))))
+    if kind == "float":
+        low, high = _bounds(field)
+        return f"{rng.uniform(low, high):.2f}"
+    if kind == "boolean":
+        return rng.choice(["true", "false"])
+    if kind in ("date", "dateTime"):
+        day = date.fromordinal(rng.randint(start.toordinal(), end.toordinal()))
+        moment = datetime(day.year, day.month, day.day, rng.randint(0, 23), rng.randint(0, 59), tzinfo=timezone.utc)
+        return moment.strftime(field.get("format") or "%Y-%m-%d")
+    if kind in ("regionID", "regionName"):
+        match = _REGION_LEVEL.search(name)
+        level = match.group(1).lower().replace("sub_", "sub") if match else "region"
+        return f"{level}_{rng.randint(100, 999)}" if kind == "regionID" else f"Sample {level}"
+    return SAMPLE_TEXT
+
+
+def synthetic_rows(
+    dataset_id: str,
+    fields: dict[str, dict],
+    enums: dict | None = None,
+    start: Optional[date] = None,
+    end: Optional[date] = None,
+    count: int = PREVIEW_ROWS,
+) -> list[list[str]]:
+    """Made-up rows that follow a data dictionary; no real value is ever used.
+
+    Numbers fall inside the column's range, enums use the allowed values,
+    dates fall inside the dataset's time coverage, places get sample names
+    and IDs, and free text is SAMPLE_TEXT. Seeded by the dataset ID so the
+    preview doesn't change on every visit.
     """
     rng = random.Random(hashlib.sha256(dataset_id.encode()).hexdigest())
-    keep = [bool(_KEEP_COLUMN.search(name.strip())) for name in columns]
-    result = []
-    for row in rows:
-        out = []
-        for index, value in enumerate(row):
-            value = value.strip()
-            if not value or keep[index]:
-                out.append(value)
-            elif _INTEGER.match(value):
-                out.append(str(rng.randint(0, 120)))
-            elif match := _DECIMAL.match(value):
-                places = min(len(match.group(1)), 3)
-                out.append(f"{rng.uniform(0, 100):.{places}f}")
-            else:
-                out.append(HIDDEN_TEXT)
-        result.append(out)
-    return result
+    start = start or _DEFAULT_START
+    end = end if end and end >= start else max(start, _DEFAULT_END)
+    enums = enums if isinstance(enums, dict) else {}
+    return [
+        [_fake_value(rng, name, field if isinstance(field, dict) else {}, enums, start, end) for name, field in fields.items()]
+        for _ in range(count)
+    ]
+
+
+def _synthetic_preview(dataset: Dataset) -> Optional[dict]:
+    """Synthetic preview of the first table, or None without a typed v2 data dictionary."""
+    from dataio.api.services.public_catalogue_service import _manifest_tables
+
+    tables = _manifest_tables(dataset) or {}
+    for table_name, table in tables.items():
+        dictionary = table.get("dataDictionary") if isinstance(table, dict) else None
+        if not isinstance(dictionary, dict) or not dictionary:
+            continue
+        if not any(isinstance(field, dict) and field.get("type") for field in dictionary.values()):
+            return None
+        manifest = dataset.manifest_json if isinstance(dataset.manifest_json, dict) else {}
+        return {
+            "mode": "synthetic",
+            "table": table_name,
+            "columns": list(dictionary.keys()),
+            "rows": synthetic_rows(
+                dataset.ds_id,
+                dictionary,
+                manifest.get("enumDefinitions"),
+                dataset.temporal_coverage_start_date,
+                dataset.temporal_coverage_end_date,
+            ),
+        }
+    return None
 
 
 def _parse_uuid(value: Optional[str]) -> Optional[uuid.UUID]:
@@ -174,10 +236,9 @@ class PublicAccessService(BaseService):
                     status_code=403,
                     detail="This dataset isn't open for download. Request access to it instead.",
                 )
-            visitor_email, visitor_uuid, terms_accepted_at = self._resolve_visitor(
-                session, email, visitor_id, accept_terms
-            )
-
+            # Files first: with nothing to download, say so before asking for an
+            # email, so the pop-up only appears when consent leads to a download
+            # (and is recorded with it).
             filestore = FilestoreService()
             tables = []
             for version_type in (VersionType.STANDARDISED, VersionType.PREPROCESSED):
@@ -198,25 +259,32 @@ class PublicAccessService(BaseService):
                         for f in files
                     ]
                     break
+            if not tables:
+                raise HTTPException(
+                    status_code=404,
+                    detail="No data files are available for this dataset yet. Please try again later.",
+                )
 
-            if tables:
-                try:
-                    session.add(
-                        DatasetDownload(
-                            user_email=None,
-                            dataset_id=dataset_id,
-                            access_channel="PUBLIC",
-                            ip_address=ip_address,
-                            user_agent=(user_agent or "")[:500] or None,
-                            visitor_email=visitor_email,
-                            visitor_id=visitor_uuid,
-                            terms_accepted_at=terms_accepted_at,
-                        )
+            visitor_email, visitor_uuid, terms_accepted_at = self._resolve_visitor(
+                session, email, visitor_id, accept_terms
+            )
+            try:
+                session.add(
+                    DatasetDownload(
+                        user_email=None,
+                        dataset_id=dataset_id,
+                        access_channel="PUBLIC",
+                        ip_address=ip_address,
+                        user_agent=(user_agent or "")[:500] or None,
+                        visitor_email=visitor_email,
+                        visitor_id=visitor_uuid,
+                        terms_accepted_at=terms_accepted_at,
                     )
-                    session.commit()
-                except Exception:
-                    session.rollback()
-                    self.logger.error("Failed to log public download of %s", dataset_id, exc_info=True)
+                )
+                session.commit()
+            except Exception:
+                session.rollback()
+                self.logger.error("Failed to log public download of %s", dataset_id, exc_info=True)
 
             return {
                 "dataset_id": dataset_id,
@@ -230,18 +298,24 @@ class PublicAccessService(BaseService):
     # -------------------------------------------------------------- preview
 
     def get_preview(self, dataset_id: str) -> dict:
-        """First rows of the first table: real (Open), synthetic (View only) or none (Restricted)."""
+        """First rows of the first table: real (Open), synthetic (View only) or none (Restricted).
+
+        Only Open datasets read the data file; View only previews are made up
+        from the data dictionary.
+        """
         from dataio.api.services.filestore_service import FilestoreService
 
+        unavailable = {"mode": "unavailable", "table": None, "columns": [], "rows": []}
         session = DBSession()
         try:
             dataset = self._get_dataset(session, dataset_id)
             access = _access(dataset)
+            if access == AccessLevel.NONE.value:
+                return {"mode": "none", "table": None, "columns": [], "rows": []}
+            if access != AccessLevel.DOWNLOAD.value:
+                return _synthetic_preview(dataset) or unavailable
         finally:
             session.close()
-
-        if access == AccessLevel.NONE.value:
-            return {"mode": "none", "table": None, "columns": [], "rows": []}
 
         head = None
         filestore = FilestoreService()
@@ -255,16 +329,8 @@ class PublicAccessService(BaseService):
                 break
 
         if not head:
-            return {"mode": "unavailable", "table": None, "columns": [], "rows": []}
-
-        if access == AccessLevel.DOWNLOAD.value:
-            return {"mode": "real", **head}
-        return {
-            "mode": "synthetic",
-            "table": head["table"],
-            "columns": head["columns"],
-            "rows": synthetic_rows(dataset_id, head["columns"], head["rows"]),
-        }
+            return unavailable
+        return {"mode": "real", **head}
 
     # ------------------------------------------------------ access requests
 
@@ -281,9 +347,22 @@ class PublicAccessService(BaseService):
         consent: bool,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
+        honeypot: Optional[str] = None,
     ) -> dict:
-        """Store a request, email the team and send the requester a receipt."""
+        """Store a request, email the team and send the requester a receipt.
+
+        Anyone can type any email address here, so the form must not become a
+        way to send our email to strangers: the receipt carries no text the
+        sender chose (not even their name), a filled-in honeypot field is
+        dropped, and a repeat of a request still pending for the same email
+        and dataset sends nothing. Both of those still answer "submitted", so
+        neither a bot nor someone probing an address can tell.
+        """
         from dataio.api.services.email_service import EmailService
+
+        if honeypot and honeypot.strip():
+            self.logger.info("Access request for %s dropped: honeypot filled", dataset_id)
+            return {"submitted": True, "id": str(uuid.uuid4())}
 
         full_name = full_name.strip()
         organisation = organisation.strip()
@@ -311,6 +390,18 @@ class PublicAccessService(BaseService):
                 raise HTTPException(
                     status_code=400, detail="This dataset is open: you can download it without asking."
                 )
+            pending = (
+                session.query(AccessRequest.id)
+                .filter(
+                    AccessRequest.dataset_id == dataset_id,
+                    AccessRequest.email == email,
+                    AccessRequest.status == "PENDING",
+                )
+                .first()
+            )
+            if pending:
+                self.logger.info("Repeat access request for %s ignored: one is pending", dataset_id)
+                return {"submitted": True, "id": str(uuid.uuid4())}
             request_row = AccessRequest(
                 id=uuid.uuid4(),
                 dataset_id=dataset_id,
@@ -367,8 +458,9 @@ class PublicAccessService(BaseService):
                 html_body=team_html,
                 text_body=team_text,
             )
+            # No name or other text from the form: see the docstring.
             receipt = (
-                f"Hi {full_name},\n\nWe've received your request for access to “{title}” ({dataset_id}). "
+                f"Hi,\n\nWe've received your request for access to “{title}” ({dataset_id}). "
                 "We usually reply within 3 working days.\n\n"
                 f"If you have questions, write to {ACCESS_REQUEST_NOTIFY_EMAIL}.\n"
             )
@@ -406,6 +498,9 @@ class PublicAccessService(BaseService):
         """Requests for the admin panel, newest first, with the dataset title."""
         if status and status not in ACCESS_REQUEST_STATUSES:
             raise HTTPException(status_code=422, detail="Unknown status")
+        if offset < 0:
+            # PostgreSQL rejects a negative OFFSET, which surfaced as a 500.
+            raise HTTPException(status_code=400, detail="offset must be 0 or more")
         limit = max(1, min(limit, 500))
         session = DBSession()
         try:
@@ -447,9 +542,19 @@ class PublicAccessService(BaseService):
         except ValueError:
             raise HTTPException(status_code=404, detail="Request not found")
 
+        # One transaction holding a lock on the request: if two admins review it
+        # at the same time, the second waits, then finds it no longer PENDING
+        # (409) instead of granting, inviting and emailing a second time.
+        # Anything that fails before the commit leaves the request PENDING.
+        invited = False
         session = DBSession()
         try:
-            row = session.query(AccessRequest).filter(AccessRequest.id == request_uuid).first()
+            row = (
+                session.query(AccessRequest)
+                .filter(AccessRequest.id == request_uuid)
+                .with_for_update()
+                .first()
+            )
             if not row:
                 raise HTTPException(status_code=404, detail="Request not found")
             if row.status != "PENDING":
@@ -459,18 +564,17 @@ class PublicAccessService(BaseService):
                 raise HTTPException(status_code=404, detail="The dataset no longer exists")
             email, full_name, dataset_id = row.email, row.full_name, row.dataset_id
             title = dataset.title if dataset else dataset_id
-            has_account = session.query(User).filter(User.email == email).first() is not None
-        finally:
-            session.close()
 
-        invited = False
-        if approve:
-            admin_service = WebAdminService()
-            if not has_account:
-                admin_service.invite_user(admin_user, email, display_name=full_name)
-                invited = True
-            session = DBSession()
-            try:
+            if approve:
+                # Request emails are stored lower-cased; an account may have capitals.
+                account = session.query(User).filter(func.lower(User.email) == email.lower()).first()
+                if account:
+                    # Grant to the account's own spelling, which its permission checks use.
+                    email = account.email
+                else:
+                    # Only built when needed: it needs the S3 settings.
+                    WebAdminService().invite_user(admin_user, email, display_name=full_name)
+                    invited = True
                 existing = (
                     session.query(UserPermission)
                     .filter(
@@ -491,31 +595,31 @@ class PublicAccessService(BaseService):
                             permission=AccessLevel.DOWNLOAD,
                         )
                     )
-                session.commit()
-            except Exception:
-                session.rollback()
-                self.logger.error("Failed to grant %s on %s", email, dataset_id, exc_info=True)
-                raise HTTPException(status_code=500, detail="Couldn't grant access")
-            finally:
-                session.close()
 
-        session = DBSession()
-        try:
-            row = session.query(AccessRequest).filter(AccessRequest.id == request_uuid).first()
             row.status = "APPROVED" if approve else "REJECTED"
             row.reviewed_at = datetime.now(timezone.utc)
             row.reviewed_by = admin_user.email
             row.review_note = (note or "").strip() or None
             session.commit()
             result = self._request_dict(row, title)
+        except HTTPException:
+            session.rollback()
+            raise
+        except Exception:
+            session.rollback()
+            # The request ID, not the email: logs aren't covered by the privacy policy.
+            self.logger.error("Failed to review access request %s", request_id, exc_info=True)
+            raise HTTPException(status_code=500, detail="Couldn't save the review. Please try again.")
         finally:
             session.close()
 
         # Tell the requester. A new account already got the invitation email.
         try:
+            # No name from the form here either: rejecting a request made with
+            # someone else's address must not pass the sender's text on to them.
             if approve:
                 body = (
-                    f"Hi {full_name},\n\nYour request for “{title}” ({dataset_id}) has been approved. "
+                    f"Hi,\n\nYour request for “{title}” ({dataset_id}) has been approved. "
                     + (
                         "We've sent you a separate email to set up your account; once signed in you can download it."
                         if invited
@@ -526,7 +630,7 @@ class PublicAccessService(BaseService):
                 subject = f"Access approved: {title}"
             else:
                 body = (
-                    f"Hi {full_name},\n\nThank you for your interest in “{title}” ({dataset_id}). "
+                    f"Hi,\n\nThank you for your interest in “{title}” ({dataset_id}). "
                     "We're not able to share this dataset with you at the moment."
                     + (f"\n\n{note.strip()}" if note and note.strip() else "")
                     + f"\n\nIf you have questions, write to {ACCESS_REQUEST_NOTIFY_EMAIL}.\n"

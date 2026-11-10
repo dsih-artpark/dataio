@@ -13,7 +13,7 @@ import json
 import os
 import secrets
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 from urllib.parse import urlencode
 
 from fastapi import (
@@ -28,7 +28,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 from dataio.api.database.enums import VersionType
 from dataio.api.database.models import User
@@ -893,6 +893,12 @@ PUBLIC_DOWNLOADS_PER_HOUR = int(os.getenv("PUBLIC_DOWNLOADS_PER_HOUR", "30"))
 PUBLIC_PREVIEWS_PER_HOUR = int(os.getenv("PUBLIC_PREVIEWS_PER_HOUR", "120"))
 PUBLIC_ACCESS_REQUESTS_PER_HOUR = int(os.getenv("PUBLIC_ACCESS_REQUESTS_PER_HOUR", "5"))
 PUBLIC_CHAT_MESSAGES_PER_DAY = int(os.getenv("PUBLIC_CHAT_MESSAGES_PER_DAY", "30"))
+# All signed-out visitors together, so a few IPs can't run up the model bill.
+PUBLIC_CHAT_MESSAGES_PER_DAY_TOTAL = int(os.getenv("PUBLIC_CHAT_MESSAGES_PER_DAY_TOTAL", "200"))
+# Model calls per signed-out message: enough to search, open one dataset and answer.
+PUBLIC_CHAT_MAX_MODEL_CALLS = int(os.getenv("PUBLIC_CHAT_MAX_MODEL_CALLS", "3"))
+PUBLIC_CHAT_HISTORY_MESSAGES = 10
+PUBLIC_CHAT_MESSAGE_CHARS = 2000
 
 
 class PublicDownloadRequest(BaseModel):
@@ -934,9 +940,9 @@ async def get_public_dataset_preview(dataset_id: str, request: Request):
     """
     First rows of the dataset's first table for the dataset page.
 
-    ``mode`` is ``real`` (Open download), ``synthetic`` (View only: place
-    names, codes and dates are real, numbers random, other text hidden),
-    ``none`` (Restricted) or ``unavailable`` (no CSV table found).
+    ``mode`` is ``real`` (Open download), ``synthetic`` (View only: made-up
+    rows from the data dictionary, no real values), ``none`` (Restricted) or
+    ``unavailable`` (no CSV table, or no typed data dictionary for View only).
     """
     from dataio.api.auth.security import enforce_ip_rate_limit
     from dataio.api.services.public_access_service import PublicAccessService
@@ -954,6 +960,8 @@ class AccessRequestCreate(BaseModel):
     organisation_type_other: Optional[str] = Field(None, max_length=200)
     purpose: str = Field(..., min_length=1, max_length=4000)
     consent: bool
+    # Honeypot: hidden on the form, so only bots fill it in.
+    website: Optional[str] = Field(None, max_length=500)
 
 
 @web_router.post("/public/access-requests", tags=["public"])
@@ -980,12 +988,38 @@ async def create_access_request(body: AccessRequestCreate, request: Request):
         consent=body.consent,
         ip_address=ip_address,
         user_agent=user_agent,
+        honeypot=body.website,
     )
 
 
+class PublicChatText(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(..., max_length=PUBLIC_CHAT_MESSAGE_CHARS)
+
+
+class PublicChatTurn(BaseModel):
+    # Plain text only: no tool calls or tool results can be slipped into the history.
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "assistant"]
+    content: List[PublicChatText] = Field(..., min_length=1, max_length=1)
+
+
 class PublicChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=2000)
-    history: Optional[List[dict]] = Field(None, max_length=20)
+    message: str = Field(..., min_length=1, max_length=PUBLIC_CHAT_MESSAGE_CHARS)
+    history: List[PublicChatTurn] = Field(default_factory=list, max_length=PUBLIC_CHAT_HISTORY_MESSAGES)
+
+    @model_validator(mode="after")
+    def _turns_alternate(self) -> "PublicChatRequest":
+        # The model needs user, assistant, user, ... ending with an answer, so
+        # that the new message is the next user turn.
+        for index, turn in enumerate(self.history):
+            if turn.role != ("user" if index % 2 == 0 else "assistant"):
+                raise ValueError("history must alternate user and assistant turns, starting with the user")
+        if len(self.history) % 2:
+            raise ValueError("history must end with an assistant turn")
+        return self
 
 
 # Not a real account (no "@"), so the assistant's tools treat the visitor as a
@@ -999,21 +1033,47 @@ async def public_chat_stream(body: PublicChatRequest, request: Request):
     The data assistant for signed-out visitors (floating button on the public site).
 
     Same Server-Sent Events as /chat/stream, on the server's default model,
-    nothing saved. Rate-limited per IP per day.
+    nothing saved. Limited per IP per day, for all visitors together per day,
+    and to PUBLIC_CHAT_MAX_MODEL_CALLS model calls per message.
     """
     from fastapi.responses import StreamingResponse
-    from dataio.api.auth.security import enforce_ip_rate_limit
+    from dataio.api.auth.security import enforce_ip_rate_limit, enforce_rate_limit
     from dataio.api.services.chat_service import ChatService
 
-    enforce_ip_rate_limit(request, "chat", PUBLIC_CHAT_MESSAGES_PER_DAY, 86400)
+    try:
+        enforce_ip_rate_limit(request, "chat", PUBLIC_CHAT_MESSAGES_PER_DAY, 86400)
+    except HTTPException as exc:
+        if exc.status_code != 429:
+            raise
+        raise HTTPException(
+            status_code=429,
+            detail="You’ve reached today’s limit for the assistant. Please try again tomorrow, or sign in.",
+        ) from exc
+    try:
+        enforce_rate_limit(
+            action="public:chat-all",
+            subject="all-visitors",
+            limit=PUBLIC_CHAT_MESSAGES_PER_DAY_TOTAL,
+            window_seconds=86400,
+            block_seconds=86400,
+            fail_closed=True,
+        )
+    except HTTPException as exc:
+        if exc.status_code != 429:
+            raise
+        raise HTTPException(
+            status_code=429,
+            detail="The assistant has had a lot of questions today. Please try again tomorrow, or sign in.",
+        ) from exc
     chat_service = ChatService()
 
     async def generate():
         try:
             async for event in chat_service.chat_stream(
                 user_message=body.message,
-                conversation_history=body.history or [],
+                conversation_history=[turn.model_dump() for turn in body.history],
                 user_email=ANONYMOUS_CHAT_USER,
+                max_model_calls=PUBLIC_CHAT_MAX_MODEL_CALLS,
             ):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception:
@@ -2188,7 +2248,7 @@ async def chat_stream(
     Supports optional `provider` parameter: "bedrock" (default) or "openrouter".
     """
     from fastapi.responses import StreamingResponse
-    from dataio.api.services.chat_service import ChatService
+    from dataio.api.services.chat_service import CHAT_ERROR_MESSAGE, ChatService
     import json
 
     chat_service = ChatService(provider=body.provider)
@@ -2211,7 +2271,7 @@ async def chat_stream(
             logger.info(f"Chat stream completed, yielded {event_count} events")
         except Exception as e:
             logger.exception(f"Error in chat stream generate: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': CHAT_ERROR_MESSAGE})}\n\n"
 
     return StreamingResponse(
         generate(),

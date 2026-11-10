@@ -73,39 +73,6 @@ const steps: { title: string; text: string; link?: { label: string; href: string
   },
 ];
 
-// Logos from the "Partners and Research Collaborators" deck, in public/logos/
-// (trimmed, 2x display height, WebP).
-interface Logo {
-  name: string;
-  file: string;
-}
-const logo = (name: string, file: string): Logo => ({ name, file: `/logos/${file}.webp` });
-const dataSources = [
-  logo('Government of Karnataka', 'gov-karnataka'),
-  logo('NVBDCP', 'nvbdcp'),
-  logo('India Meteorological Department', 'imd'),
-  logo('Indian Institute of Tropical Meteorology', 'iitm'),
-  logo('ICMR National Institute of Virology', 'icmr-niv'),
-];
-const collaborators = [
-  logo('Google Research', 'google-research'),
-  logo('National Disease Modelling Consortium', 'ndmc'),
-  logo('Indian Institute of Science', 'iisc'),
-  logo('International Centre for Theoretical Sciences', 'icts'),
-  logo('The Institute of Mathematical Sciences', 'imsc'),
-  logo('BITS Pilani', 'bits-pilani'),
-  logo('Ashoka University', 'ashoka-university'),
-  logo('Yale School of Public Health', 'yale-public-health'),
-  logo('MAPSolve AI', 'mapsolve-ai'),
-];
-const supporters = [
-  logo('India Health Fund', 'india-health-fund'),
-  logo('Clinton Foundation', 'clinton-foundation'),
-  logo('Asian Venture Philanthropy Network', 'avpn'),
-  logo('Centre for Health Research and Innovation', 'chri'),
-  logo('Khushi Baby', 'khushi-baby'),
-];
-
 const stories = [
   {
     tag: 'Government',
@@ -147,7 +114,6 @@ const eyebrow = 'm-0 text-[13px] font-semibold uppercase tracking-[0.08em] text-
 const h2 = 'm-0 text-[28px] sm:text-4xl leading-tight font-bold text-gray-900';
 const intro = 'm-0 text-[17px] leading-relaxed text-gray-600 max-w-[680px]';
 const textLink = 'font-semibold text-primary-700 hover:text-primary-900';
-const logoImg = 'block w-auto object-contain';
 ---
 
 <PublicLayout title={PLATFORM_NAME} width="full" background="white" backToTop>
@@ -315,19 +281,6 @@ const logoImg = 'block w-auto object-contain';
           Read our data standards →
         </a>
       </div>
-
-      <div class="mt-12 pt-8 border-t border-gray-200 flex flex-col gap-4">
-        <h3 class="m-0 text-sm font-semibold text-gray-600">Data from</h3>
-        <ul class="m-0 p-0 list-none flex flex-wrap items-center gap-x-10 gap-y-6">
-          {
-            dataSources.map((item) => (
-              <li>
-                <img src={item.file} alt={item.name} title={item.name} loading="lazy" decoding="async" class={`${logoImg} h-14 sm:h-16 max-w-[240px]`} />
-              </li>
-            ))
-          }
-        </ul>
-      </div>
     </div>
   </section>
 
@@ -359,11 +312,8 @@ const logoImg = 'block w-auto object-contain';
       </h2>
       <div class="flex flex-wrap gap-6">
         {
-          stories.map((story) => (
+          stories.filter((story) => !story.placeholder).map((story) => (
             <article class="flex-[1_1_320px] min-w-0 border border-gray-200 rounded-2xl overflow-hidden flex flex-col">
-              <div class="h-40 bg-gray-100 flex items-center justify-center text-[13px] text-gray-600">
-                [Photo or chart from the project]
-              </div>
               <div class="p-[22px] flex flex-col gap-2 flex-1">
                 <span class="text-[13px] font-semibold text-primary-700">{story.tag}</span>
                 <h3 class="m-0 text-[19px] font-bold">{story.title}</h3>
@@ -505,82 +455,4 @@ const logoImg = 'block w-auto object-contain';
       </p>
     </div>
   </section>
-
-  <!-- PARTNERS -->
-  <section aria-labelledby="partners-heading" class="py-14 bg-white border-t border-gray-200">
-    <div class="max-w-page mx-auto px-4 sm:px-6 flex flex-col gap-8">
-      <h2 id="partners-heading" class="m-0 text-2xl font-bold text-gray-900">Partners</h2>
-      <div class="flex flex-col gap-4">
-        <h3 class="m-0 text-sm font-semibold text-gray-600">Research collaborators</h3>
-        <!-- Scrolling strip: the set is repeated once (hidden from screen readers) so the loop is seamless.
-             Pauses on hover/focus; with reduced motion it becomes a static wrapped row. -->
-        <div class="marquee overflow-hidden">
-          <div class="marquee-track flex w-max">
-            {
-              [false, true].map((copy) => (
-                <ul class="marquee-set m-0 p-0 list-none flex items-center gap-14 pr-14" aria-hidden={copy ? 'true' : undefined}>
-                  {collaborators.map((item) => (
-                    <li class="shrink-0">
-                      <img src={item.file} alt={copy ? '' : item.name} title={item.name} loading="lazy" decoding="async" class={`${logoImg} h-12 max-w-[180px]`} />
-                    </li>
-                  ))}
-                </ul>
-              ))
-            }
-          </div>
-        </div>
-      </div>
-      <div class="flex flex-col gap-4">
-        <h3 class="m-0 text-sm font-semibold text-gray-600">Supported by</h3>
-        <ul class="m-0 p-0 list-none flex flex-wrap items-center gap-x-10 gap-y-6">
-          {
-            supporters.map((item) => (
-              <li>
-                <img src={item.file} alt={item.name} title={item.name} loading="lazy" decoding="async" class={`${logoImg} h-12 max-w-[180px]`} />
-              </li>
-            ))
-          }
-        </ul>
-      </div>
-    </div>
-  </section>
 </PublicLayout>
-
-<style>
-  .marquee {
-    -webkit-mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent);
-    mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent);
-  }
-  .marquee-track {
-    animation: marquee 40s linear infinite;
-  }
-  .marquee:hover .marquee-track,
-  .marquee:focus-within .marquee-track {
-    animation-play-state: paused;
-  }
-  @keyframes marquee {
-    from {
-      transform: translateX(0);
-    }
-    to {
-      transform: translateX(-50%);
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .marquee {
-      -webkit-mask-image: none;
-      mask-image: none;
-    }
-    .marquee-track {
-      animation: none;
-      width: auto;
-    }
-    .marquee-set {
-      flex-wrap: wrap;
-      row-gap: 1.5rem;
-    }
-    .marquee-set[aria-hidden='true'] {
-      display: none;
-    }
-  }
-</style>

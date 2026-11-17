@@ -92,7 +92,7 @@ The dataset ID, collection, access level, user permissions and group memberships
 
 ### Recording what changed
 
-A replace also needs a short changelog entry: what changed (summary), why, whether it is a data or metadata change, and whether it is breaking (users may need to change their code). The apply route takes it as a `changelog_json` form field, and the admin UI asks for it in the **What changed** section; rows for added and removed tables and columns, unit changes and changed allowed values are filled in from the preview. Without a summary and a reason the replace is refused before anything is archived.
+A replace also needs a short changelog entry: what changed (summary), why, whether it is a data or metadata change, and whether it is breaking (users may need to change their code). The apply route takes it as a `changelog_json` form field, and the admin UI asks for it in the **What changed** section; rows for added and removed tables are filled in from the preview. When the dataset already has a stored manifest, rows for added and removed columns, unit changes and changed allowed values are also suggested for tables in both versions; hidden columns (`access: false`) are never suggested. A renamed column shows as one removed and one added column: replace the pair with a single **Column renamed** row. Without a summary and a reason the replace is refused before anything is archived.
 
 The entry is saved as a draft under **Datasets > Dataset changes**. An admin publishes it there, and it then shows in the dataset's **Version history** on its public page and on the public **Dataset changes** page (`/changes`). Old and new values and notes are hidden for Restricted datasets. Entries for metadata-only edits can be added on the same admin page.
 

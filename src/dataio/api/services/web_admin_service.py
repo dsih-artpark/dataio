@@ -163,15 +163,32 @@ def _dataset_columns(manifest) -> dict[str, dict]:
     columns = {}
     for table, spec in tables.items():
         dictionary = spec.get("dataDictionary") if isinstance(spec, dict) else None
-        if isinstance(dictionary, dict):
+        if isinstance(dictionary, dict) and str(table).strip():
             columns[str(table)] = {
-                str(name): field if isinstance(field, dict) else {} for name, field in dictionary.items()
+                str(name): field if isinstance(field, dict) else {}
+                for name, field in dictionary.items()
+                # Hidden columns (access: false) never go on a public changelog.
+                if not (isinstance(field, dict) and field.get("access") is False)
             }
     return columns
 
 
+def _dataset_columns_raw(manifest, table: str) -> dict:
+    """One table's dataDictionary as stored, hidden columns included."""
+    tables = manifest.get("datasetTables") if isinstance(manifest, dict) else None
+    spec = tables.get(table) if isinstance(tables, dict) else None
+    dictionary = spec.get("dataDictionary") if isinstance(spec, dict) else None
+    return {str(k): v for k, v in dictionary.items()} if isinstance(dictionary, dict) else {}
+
+
+def _allowed_values(field: dict) -> set[str]:
+    values = field.get("allowedValues")
+    return {str(v) for v in values} if isinstance(values, (list, tuple)) else set()
+
+
 def _text(value) -> Optional[str]:
-    return None if value is None else str(value)
+    # An empty unit means the same as no unit.
+    return None if value is None or str(value).strip() == "" else str(value)
 
 
 def _suggested_column_changes(old_manifest, new_manifest_yaml: Optional[str]) -> list[dict]:
@@ -181,12 +198,19 @@ def _suggested_column_changes(old_manifest, new_manifest_yaml: Optional[str]) ->
     unreadable manifest just means no column suggestions."""
     try:
         new_manifest = yaml.safe_load(new_manifest_yaml or "")
-    except yaml.YAMLError:
+    except (yaml.YAMLError, ValueError):  # ValueError: impossible dates such as 2026-02-30
         return []
     old_tables, new_tables = _dataset_columns(old_manifest), _dataset_columns(new_manifest)
     rows: list[dict] = []
     for table in sorted(old_tables.keys() & new_tables.keys()):
         old, new = old_tables[table], new_tables[table]
+        # A hidden column in either version stays out entirely.
+        hidden = {
+            c for c, f in (_dataset_columns_raw(old_manifest, table) | _dataset_columns_raw(new_manifest, table)).items()
+            if isinstance(f, dict) and f.get("access") is False
+        }
+        old = {c: f for c, f in old.items() if c not in hidden}
+        new = {c: f for c, f in new.items() if c not in hidden}
         rows += [{"kind": "column_added", "table": table, "column": c} for c in sorted(new.keys() - old.keys())]
         rows += [{"kind": "column_removed", "table": table, "column": c} for c in sorted(old.keys() - new.keys())]
         for column in sorted(old.keys() & new.keys()):
@@ -194,18 +218,17 @@ def _suggested_column_changes(old_manifest, new_manifest_yaml: Optional[str]) ->
             if old_unit != new_unit:
                 rows.append({"kind": "unit_changed", "table": table, "column": column, "old": old_unit, "new": new_unit})
         for column in sorted(old.keys() & new.keys()):
-            old_values = {str(v) for v in old[column].get("allowedValues") or []}
-            new_values = {str(v) for v in new[column].get("allowedValues") or []}
+            old_values, new_values = _allowed_values(old[column]), _allowed_values(new[column])
             if old_values and new_values and old_values != new_values:
-                note = "; ".join(
-                    part
-                    for part in (
-                        f"Allowed values removed: {', '.join(sorted(old_values - new_values))}" if old_values - new_values else "",
-                        f"added: {', '.join(sorted(new_values - old_values))}" if new_values - old_values else "",
-                    )
-                    if part
-                )
-                rows.append({"kind": "values_recoded", "table": table, "column": column, "note": note[:500]})
+                parts = []
+                if old_values - new_values:
+                    parts.append(f"removed: {', '.join(sorted(old_values - new_values))}")
+                if new_values - old_values:
+                    parts.append(f"added: {', '.join(sorted(new_values - old_values))}")
+                note = "Allowed values " + "; ".join(parts)
+                if len(note) > 500:
+                    note = note[:499] + "…"
+                rows.append({"kind": "values_recoded", "table": table, "column": column, "note": note})
     return rows
 
 

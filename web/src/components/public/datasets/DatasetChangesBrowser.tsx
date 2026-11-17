@@ -44,6 +44,11 @@ export default function DatasetChangesBrowser() {
     };
   }, [ready, dataset, offset]);
 
+  // Entries were removed while reading, so this page is now past the end: go to the first page.
+  useEffect(() => {
+    if (entries && entries.length === 0 && total > 0 && offset > 0) setOffset(0);
+  }, [entries, total, offset]);
+
   const applyFilter = (value: string) => {
     const next = value.trim().toUpperCase();
     setDataset(next);

@@ -924,3 +924,46 @@ def test_replace_plan_without_a_stored_manifest_suggests_only_tables(monkeypatch
     preview = {"dataset": {"ds_id": DS_ID}, "tables": [{"table_name": "keep"}], "manifest_yaml": "not: [valid"}
 
     assert service._replace_plan(preview, VersionType.STANDARDISED)["suggested_changes"] == []
+
+
+def _suggest(old_columns: dict, new_columns: dict) -> list[dict]:
+    from dataio.api.services.web_admin_service import _suggested_column_changes
+
+    new_yaml = json.dumps({"datasetTables": {"t": {"dataDictionary": new_columns}}})
+    return _suggested_column_changes({"datasetTables": {"t": {"dataDictionary": old_columns}}}, new_yaml)
+
+
+def test_hidden_columns_are_never_suggested():
+    rows = _suggest(
+        {"secret": {"access": False, "allowedValues": ["a"]}, "gone": {"access": False}},
+        {"secret": {"access": False, "allowedValues": ["b"]}, "new_secret": {"access": False}},
+    )
+
+    assert rows == []
+
+
+@pytest.mark.parametrize("odd", [1, True, "a,c", {"a": 1}, None])
+def test_odd_allowed_values_never_break_the_preview(odd):
+    rows = _suggest({"sex": {"allowedValues": odd}}, {"sex": {"allowedValues": ["male"]}})
+
+    assert rows == []
+
+
+def test_blank_tables_empty_units_and_long_notes():
+    from dataio.api.services.web_admin_service import _suggested_column_changes
+
+    assert _suggested_column_changes(
+        {"datasetTables": {" ": {"dataDictionary": {"a": {}}}}},
+        json.dumps({"datasetTables": {" ": {"dataDictionary": {"b": {}}}}}),
+    ) == []
+    assert _suggest({"cases": {"unit": ""}}, {"cases": {}}) == []
+    many = [f"value-{i:04d}" for i in range(300)]
+    note = _suggest({"code": {"allowedValues": many}}, {"code": {"allowedValues": ["x"]}})[0]["note"]
+    assert len(note) <= 500 and note.endswith("…")
+
+
+def test_a_manifest_with_an_impossible_date_suggests_nothing():
+    from dataio.api.services.web_admin_service import _suggested_column_changes
+
+    # PyYAML raises ValueError (not YAMLError) for 2026-02-30.
+    assert _suggested_column_changes({}, "released: 2026-02-30\n") == []

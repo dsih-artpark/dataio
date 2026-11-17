@@ -507,6 +507,30 @@ class AccessRequest(Base):
     review_note = Column(Text, nullable=True)
 
 
+class DatasetChangeRecord(Base):
+    """One dataset changelog entry (migration 032, DIO-53). Checked by the
+    pydantic models in services/dataset_changes.py before it is saved."""
+
+    __tablename__ = "dataset_changes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    dataset_id = Column(Text, nullable=False)  # no FK: history survives a deletion
+    change_date = Column(Date, nullable=False)
+    change_type = Column(Text, nullable=False)  # data, metadata
+    breaking = Column(Boolean, nullable=False, default=False)
+    summary = Column(Text, nullable=False)
+    reason = Column(Text, nullable=False)
+    changes = Column(JSONB, nullable=False, default=list)
+    status = Column(Text, nullable=False, default="DRAFT")  # DRAFT, PUBLISHED
+    archive_prefix = Column(Text, nullable=True)  # internal only, never public
+    created_by = Column(Text, ForeignKey("users.email", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_by = Column(Text, ForeignKey("users.email", ondelete="SET NULL"), nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=True)
+    published_by = Column(Text, ForeignKey("users.email", ondelete="SET NULL"), nullable=True)
+    published_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class ShapefileVersion(Base):
     """One batch of shapefiles (migration 026). released_at orders versions:
     a download without a version gets the newest one that has the region."""

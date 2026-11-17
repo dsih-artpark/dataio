@@ -155,6 +155,60 @@ def _dataset_restore_fields(dataset) -> dict:
     }
 
 
+def _dataset_columns(manifest) -> dict[str, dict]:
+    """{table: {column: spec}} from a manifest's datasetTables; {} if it has none."""
+    tables = manifest.get("datasetTables") if isinstance(manifest, dict) else None
+    if not isinstance(tables, dict):
+        return {}
+    columns = {}
+    for table, spec in tables.items():
+        dictionary = spec.get("dataDictionary") if isinstance(spec, dict) else None
+        if isinstance(dictionary, dict):
+            columns[str(table)] = {
+                str(name): field if isinstance(field, dict) else {} for name, field in dictionary.items()
+            }
+    return columns
+
+
+def _text(value) -> Optional[str]:
+    return None if value is None else str(value)
+
+
+def _suggested_column_changes(old_manifest, new_manifest_yaml: Optional[str]) -> list[dict]:
+    """Change rows for tables in both versions: columns added or removed, unit
+    changes and changed allowed values (DIO-53). Renames show as one removed
+    plus one added column; the admin merges them. Never raises: a missing or
+    unreadable manifest just means no column suggestions."""
+    try:
+        new_manifest = yaml.safe_load(new_manifest_yaml or "")
+    except yaml.YAMLError:
+        return []
+    old_tables, new_tables = _dataset_columns(old_manifest), _dataset_columns(new_manifest)
+    rows: list[dict] = []
+    for table in sorted(old_tables.keys() & new_tables.keys()):
+        old, new = old_tables[table], new_tables[table]
+        rows += [{"kind": "column_added", "table": table, "column": c} for c in sorted(new.keys() - old.keys())]
+        rows += [{"kind": "column_removed", "table": table, "column": c} for c in sorted(old.keys() - new.keys())]
+        for column in sorted(old.keys() & new.keys()):
+            old_unit, new_unit = _text(old[column].get("unit")), _text(new[column].get("unit"))
+            if old_unit != new_unit:
+                rows.append({"kind": "unit_changed", "table": table, "column": column, "old": old_unit, "new": new_unit})
+        for column in sorted(old.keys() & new.keys()):
+            old_values = {str(v) for v in old[column].get("allowedValues") or []}
+            new_values = {str(v) for v in new[column].get("allowedValues") or []}
+            if old_values and new_values and old_values != new_values:
+                note = "; ".join(
+                    part
+                    for part in (
+                        f"Allowed values removed: {', '.join(sorted(old_values - new_values))}" if old_values - new_values else "",
+                        f"added: {', '.join(sorted(new_values - old_values))}" if new_values - old_values else "",
+                    )
+                    if part
+                )
+                rows.append({"kind": "values_recoded", "table": table, "column": column, "note": note[:500]})
+    return rows
+
+
 def _replace_failed_error(exc: Exception, ds_id: str, leftovers: list[str], archive_prefix: str) -> HTTPException:
     """The error for a replace that failed part-way and was rolled back."""
     detail = exc.detail if isinstance(exc, HTTPException) else None
@@ -1584,7 +1638,9 @@ class WebAdminService(BaseService):
                 {"kind": "table_added", "table": name} for name in sorted(new_tables - current_tables)
             ] + [
                 {"kind": "table_removed", "table": name} for name in sorted(current_tables - new_tables)
-            ],
+            ] + _suggested_column_changes(
+                getattr(current, "manifest_json", None), preview.get("manifest_yaml")
+            ),
         }
 
     def import_dataset_package(

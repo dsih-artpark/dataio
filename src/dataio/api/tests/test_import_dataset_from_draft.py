@@ -870,3 +870,57 @@ def test_apply_passes_a_valid_changelog_to_the_service(monkeypatch):
 
     assert response.status_code == 200
     assert isinstance(seen[0], DatasetChangeInput) and seen[0].summary == "S."
+
+
+def test_replace_plan_suggests_column_unit_and_value_changes(monkeypatch):
+    service = _service()
+    current = _current_dataset()
+    current.manifest_json = {"datasetTables": {"keep": {"dataDictionary": {
+        "district": {"type": "string"},
+        "dist_code": {"type": "string"},
+        "cases": {"type": "int", "unit": "count"},
+        "sex": {"type": "enum", "allowedValues": ["M", "F"]},
+    }}}}
+    monkeypatch.setattr(
+        "dataio.api.services.web_admin_service.database.get_dataset", lambda ds_id: current
+    )
+    monkeypatch.setattr(
+        service.admin_dataset_service.filestore_service,
+        "list_dataset_version_files",
+        lambda ds_id, bucket_type: ["keep.csv"],
+    )
+    manifest_yaml = (
+        "datasetTables:\n"
+        "  keep:\n"
+        "    dataDictionary:\n"
+        "      district: {type: string}\n"
+        "      district.ID: {type: regionID}\n"
+        "      cases: {type: int, unit: per 1000}\n"
+        "      sex: {type: enum, allowedValues: [male, female]}\n"
+    )
+    preview = {"dataset": {"ds_id": DS_ID}, "tables": [{"table_name": "keep"}], "manifest_yaml": manifest_yaml}
+
+    plan = service._replace_plan(preview, VersionType.STANDARDISED)
+
+    assert plan["suggested_changes"] == [
+        {"kind": "column_added", "table": "keep", "column": "district.ID"},
+        {"kind": "column_removed", "table": "keep", "column": "dist_code"},
+        {"kind": "unit_changed", "table": "keep", "column": "cases", "old": "count", "new": "per 1000"},
+        {"kind": "values_recoded", "table": "keep", "column": "sex",
+         "note": "Allowed values removed: F, M; added: female, male"},
+    ]
+
+
+def test_replace_plan_without_a_stored_manifest_suggests_only_tables(monkeypatch):
+    service = _service()
+    monkeypatch.setattr(
+        "dataio.api.services.web_admin_service.database.get_dataset", lambda ds_id: _current_dataset()
+    )
+    monkeypatch.setattr(
+        service.admin_dataset_service.filestore_service,
+        "list_dataset_version_files",
+        lambda ds_id, bucket_type: ["keep.csv"],
+    )
+    preview = {"dataset": {"ds_id": DS_ID}, "tables": [{"table_name": "keep"}], "manifest_yaml": "not: [valid"}
+
+    assert service._replace_plan(preview, VersionType.STANDARDISED)["suggested_changes"] == []

@@ -31,7 +31,8 @@ export function isChangelogComplete(draft: ChangelogDraft): boolean {
 
 /** Keeps the admin's rows and adds suggested ones that aren't there yet. */
 export function mergeSuggestedRows(rows: ChangeRow[], suggested: ChangeRow[]): ChangeRow[] {
-  const has = (s: ChangeRow) => rows.some((row) => row.kind === s.kind && row.table === s.table);
+  const has = (s: ChangeRow) =>
+    rows.some((row) => row.kind === s.kind && row.table === s.table && (row.column ?? null) === (s.column ?? null));
   return [...rows, ...suggested.filter((s) => !has(s))];
 }
 

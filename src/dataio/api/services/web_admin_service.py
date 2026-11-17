@@ -35,6 +35,8 @@ from dataio.api.auth.otp import create_otp, verify_otp
 from dataio.api.auth.security import enforce_rate_limit
 from dataio.api.services.yaml_utils import stringify_yaml_dates
 from dataio.api.services.base_service import BaseService
+from dataio.api.services.dataset_change_service import DatasetChangeService
+from dataio.api.services.dataset_changes import DatasetChangeInput
 from dataio.api.services.admin_dataset_service import AdminDatasetService
 from dataio.api.services.draft_review_service import DraftReviewService
 from dataio.api.services.email_service import EmailService
@@ -1577,6 +1579,12 @@ class WebAdminService(BaseService):
             "tables_removed": sorted(current_tables - new_tables),
             "archive_location": f"archive/filestore/{bucket_type.value}/{ds_id}/<timestamp>/",
             "access_level_kept": current.access_level.value if current.access_level else None,
+            # Pre-filled rows for the "What changed" form (DIO-53).
+            "suggested_changes": [
+                {"kind": "table_added", "table": name} for name in sorted(new_tables - current_tables)
+            ] + [
+                {"kind": "table_removed", "table": name} for name in sorted(current_tables - new_tables)
+            ],
         }
 
     def import_dataset_package(
@@ -1589,8 +1597,20 @@ class WebAdminService(BaseService):
         raw_dataset_override: Optional[dict] = None,
         bucket_type: VersionType = VersionType.STANDARDISED,
         replace_existing: bool = False,
+        changelog: Optional[DatasetChangeInput] = None,
     ) -> dict:
         self._require_admin(admin_user)
+        # Checked before the preview, lock or archive, so a missing changelog
+        # changes nothing (DIO-53).
+        if replace_existing and changelog is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Describe what changed (summary and reason) before replacing a dataset.",
+            )
+        if not replace_existing and changelog is not None:
+            raise HTTPException(
+                status_code=422, detail="A changelog entry only applies when replacing a dataset."
+            )
         preview = self.preview_dataset_package_import(
             admin_user,
             info_file,
@@ -1618,7 +1638,7 @@ class WebAdminService(BaseService):
             with database.dataset_upload_lock(ds_id, exclusive=True):
                 if replace_existing:
                     return self._replace_dataset_package_locked(
-                        admin_user, preview, csv_files, bucket_type
+                        admin_user, preview, csv_files, bucket_type, changelog
                     )
                 return self._import_dataset_package_locked(
                     admin_user, preview, csv_files, bucket_type
@@ -1726,7 +1746,12 @@ class WebAdminService(BaseService):
         }
 
     def _replace_dataset_package_locked(
-        self, admin_user: User, preview: dict, csv_files: List, bucket_type: VersionType
+        self,
+        admin_user: User,
+        preview: dict,
+        csv_files: List,
+        bucket_type: VersionType,
+        changelog: DatasetChangeInput,
     ) -> dict:
         """Replaces an existing dataset's files and details with the package,
         keeping its ID, collection, access level, permissions and groups.
@@ -1836,6 +1861,11 @@ class WebAdminService(BaseService):
                 admin_user.email,
                 hold_upload_lock=False,  # this replace already holds it
             )
+            # Last step: if the changelog draft can't be saved, the replace is
+            # undone like any other failed step (DIO-53).
+            change = DatasetChangeService().create_draft(
+                admin_user, ds_id, changelog, archive_prefix=archive_prefix
+            )
         except Exception as exc:
             logger.exception("Replacing dataset %s failed; rolling it back", ds_id)
             leftovers = self._undo_dataset_replace(undo)
@@ -1849,6 +1879,7 @@ class WebAdminService(BaseService):
             "replaced": True,
             "archive_prefix": archive_prefix,
             "archived_files": archived_files,
+            "change_id": change["id"],
         }
 
     def _undo_dataset_replace(self, undo: "_ReplaceUndo") -> list[str]:

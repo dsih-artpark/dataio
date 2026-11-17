@@ -28,7 +28,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationError, model_validator
 
 from dataio.api.database.enums import VersionType
 from dataio.api.database.models import User
@@ -1879,14 +1879,26 @@ def admin_apply_dataset_import(
     raw_dataset_override_json: Optional[str] = Form(default=None),
     bucket_type: VersionType = Form(default=VersionType.STANDARDISED),
     replace_existing: bool = Form(default=False),
+    changelog_json: Optional[str] = Form(default=None),
     user: User = Depends(get_current_web_user),
     admin_service: WebAdminService = Depends(WebAdminService),
 ):
     """Create a dataset from an uploaded package and upload the referenced CSV tables.
     With replace_existing, replace an existing dataset's files and details instead,
-    archiving its old files first."""
+    archiving its old files first. A replace needs changelog_json (what changed:
+    summary, reason, type, breaking, optional change rows); it is saved as a
+    draft changelog entry."""
     dataset_override = json.loads(dataset_override_json) if dataset_override_json else None
     raw_dataset_override = json.loads(raw_dataset_override_json) if raw_dataset_override_json else None
+    changelog = None
+    if changelog_json:
+        try:
+            changelog = DatasetChangeInput.model_validate_json(changelog_json)
+        except ValidationError as err:
+            raise HTTPException(
+                status_code=422,
+                detail={"message": "The changelog entry is not valid", "errors": err.errors(include_url=False)},
+            ) from err
     return admin_service.import_dataset_package(
         user,
         info_file,
@@ -1896,6 +1908,7 @@ def admin_apply_dataset_import(
         raw_dataset_override=raw_dataset_override,
         bucket_type=bucket_type,
         replace_existing=replace_existing,
+        changelog=changelog,
     )
 
 

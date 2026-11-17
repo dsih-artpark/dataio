@@ -5,7 +5,7 @@ from datetime import date
 import pytest
 from pydantic import ValidationError
 
-from dataio.api.services.dataset_changes import DatasetChange
+from dataio.api.services.dataset_changes import DatasetChange, DatasetChangeInput
 
 
 def _entry(**overrides) -> dict:
@@ -48,7 +48,6 @@ def test_values_are_kept_exactly_as_written():
     (_entry(dataset_id="EP06DS97"), "dataset_id"),
     (_entry(date="20 Nov 2026"), "date"),
     (_entry(type="schema"), "type"),
-    (_entry(changes=[]), "changes"),
     (_entry(summary="   "), "summary"),
     (_entry(reason=""), "reason"),
     (_with_change(old=10), "changes.0.old"),  # a number would lose digits (0.10 -> 0.1)
@@ -58,3 +57,18 @@ def test_a_bad_entry_is_rejected_naming_the_field(entry, field):
         DatasetChange.model_validate(entry)
 
     assert field in {".".join(map(str, e["loc"])) for e in err.value.errors()}
+
+
+def test_an_entry_may_have_no_change_rows():
+    assert DatasetChange.model_validate(_entry(changes=[])).changes == []
+
+
+def test_input_without_a_date_has_none():
+    body = {k: v for k, v in _entry().items() if k not in ("dataset_id", "date")}
+
+    assert DatasetChangeInput.model_validate(body).date is None
+
+
+def test_input_rejects_a_dataset_id_field():
+    with pytest.raises(ValidationError):
+        DatasetChangeInput.model_validate({k: v for k, v in _entry().items() if k != "date"})

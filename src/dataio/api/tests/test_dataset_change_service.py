@@ -6,8 +6,12 @@ postgres_schema.py).
 from __future__ import annotations
 
 import os
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timezone
 
 import pytest
+from fastapi import HTTPException
 
 os.environ.setdefault("DB_HOST", "localhost")
 os.environ.setdefault("DB_PORT", "5432")
@@ -27,6 +31,9 @@ from dataio.api.database.models import (  # noqa: E402
     DatasetChangeRecord,
     User,
 )
+from dataio.api.services import dataset_change_service as change_module  # noqa: E402
+from dataio.api.services.dataset_change_service import DatasetChangeService  # noqa: E402
+from dataio.api.services.dataset_changes import DatasetChangeInput  # noqa: E402
 from dataio.api.tests.postgres_schema import fresh_schema_engine, requires_postgres  # noqa: E402
 
 
@@ -72,7 +79,8 @@ def session_factory():
 
 
 @pytest.fixture()
-def db(session_factory):
+def db(session_factory, monkeypatch):
+    monkeypatch.setattr(change_module, "DBSession", session_factory)
     session = session_factory()
     session.query(DatasetChangeRecord).delete()
     session.commit()
@@ -122,3 +130,136 @@ def test_the_table_rejects_bad_status_type_or_blank_text(db, overrides):
     finally:
         session.rollback()
         session.close()
+
+
+# ------------------------------------------------------------ admin service
+
+
+def _user(factory, email: str) -> User:
+    session = factory()
+    try:
+        return session.query(User).filter(User.email == email).one()
+    finally:
+        session.close()
+
+
+def _body(**overrides) -> DatasetChangeInput:
+    fields = {
+        "type": "data",
+        "breaking": True,
+        "summary": "Renamed the district column.",
+        "reason": "Match the v2 naming rules.",
+        "changes": [{"kind": "column_renamed", "table": "district_level", "old": "dist", "new": "district"}],
+    }
+    fields.update(overrides)
+    return DatasetChangeInput.model_validate(fields)
+
+
+def _status(call) -> int:
+    with pytest.raises(HTTPException) as error:
+        call()
+    return error.value.status_code
+
+
+@requires_postgres
+def test_an_admin_creates_a_draft_dated_today_by_default(db):
+    entry = DatasetChangeService().create_draft(_user(db, "admin@example.org"), "EP0001DS0001", _body())
+
+    assert entry["status"] == "DRAFT"
+    assert entry["date"] == datetime.now(timezone.utc).date().isoformat()
+    assert entry["created_by"] == "admin@example.org"
+    assert entry["dataset_title"] == "Dataset EP0001DS0001"
+    assert entry["changes"][0]["old"] == "dist"
+
+
+@requires_postgres
+def test_creating_needs_an_admin_and_a_known_dataset(db):
+    service = DatasetChangeService()
+
+    assert _status(lambda: service.create_draft(_user(db, "known@example.org"), "EP0001DS0001", _body())) == 403
+    assert _status(lambda: service.create_draft(_user(db, "admin@example.org"), "EP0001DS0999", _body())) == 404
+
+
+@requires_postgres
+def test_publishing_records_who_and_when_and_cannot_repeat(db):
+    service, admin = DatasetChangeService(), _user(db, "admin@example.org")
+    draft = service.create_draft(admin, "EP0001DS0001", _body())
+
+    published = service.publish(admin, draft["id"])
+
+    assert published["status"] == "PUBLISHED"
+    assert published["published_by"] == "admin@example.org"
+    assert published["published_at"] is not None
+    assert _status(lambda: service.publish(admin, draft["id"])) == 409
+
+
+@requires_postgres
+def test_two_admins_publishing_at_once_publish_once(db):
+    service = DatasetChangeService()
+    draft = service.create_draft(_user(db, "admin@example.org"), "EP0001DS0001", _body())
+    admins = [_user(db, "admin@example.org"), _user(db, "admin2@example.org")]
+
+    def publish(admin):
+        try:
+            return service.publish(admin, draft["id"])["published_by"]
+        except HTTPException as error:
+            return error.status_code
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(publish, admins))
+
+    assert results.count(409) == 1
+    assert {"admin@example.org", "admin2@example.org"} & set(results)
+
+
+@requires_postgres
+def test_editing_a_published_entry_records_the_editor(db):
+    service = DatasetChangeService()
+    draft = service.create_draft(_user(db, "admin@example.org"), "EP0001DS0001", _body())
+    service.publish(_user(db, "admin@example.org"), draft["id"])
+
+    edited = service.update(_user(db, "admin2@example.org"), draft["id"], _body(summary="Corrected summary."))
+
+    assert edited["summary"] == "Corrected summary."
+    assert edited["status"] == "PUBLISHED"
+    assert edited["updated_by"] == "admin2@example.org"
+    assert edited["updated_at"] is not None
+
+
+@requires_postgres
+def test_only_drafts_can_be_deleted(db):
+    service, admin = DatasetChangeService(), _user(db, "admin@example.org")
+    published = service.create_draft(admin, "EP0001DS0001", _body())
+    service.publish(admin, published["id"])
+    draft = service.create_draft(admin, "EP0001DS0001", _body())
+
+    assert _status(lambda: service.delete_draft(admin, published["id"])) == 409
+    service.delete_draft(admin, draft["id"])
+    assert [e["id"] for e in service.list_admin(admin)["entries"]] == [published["id"]]
+
+
+@requires_postgres
+def test_admin_list_filters_and_counts_drafts(db):
+    service, admin = DatasetChangeService(), _user(db, "admin@example.org")
+    older = service.create_draft(admin, "EP0001DS0001", _body(date="2026-10-01"))
+    newer = service.create_draft(admin, "EP0001DS0003", _body(date="2026-11-01"))
+    service.publish(admin, older["id"])
+
+    listed = service.list_admin(admin)
+    assert [e["id"] for e in listed["entries"]] == [newer["id"], older["id"]]
+    assert (listed["total"], listed["drafts"]) == (2, 1)
+    assert [e["id"] for e in service.list_admin(admin, status="PUBLISHED")["entries"]] == [older["id"]]
+    assert [e["id"] for e in service.list_admin(admin, dataset_id="EP0001DS0003")["entries"]] == [newer["id"]]
+    assert _status(lambda: service.list_admin(admin, status="bogus")) == 422
+    assert _status(lambda: service.list_admin(admin, offset=-1)) == 400
+    assert len(service.list_admin(admin, limit=10000)["entries"]) == 2
+    assert _status(lambda: service.list_admin(_user(db, "known@example.org"))) == 403
+
+
+@requires_postgres
+def test_a_malformed_or_unknown_id_is_a_404(db):
+    service, admin = DatasetChangeService(), _user(db, "admin@example.org")
+    for change_id in ("not-a-uuid", str(uuid.uuid4())):
+        assert _status(lambda: service.update(admin, change_id, _body())) == 404
+        assert _status(lambda: service.publish(admin, change_id)) == 404
+        assert _status(lambda: service.delete_draft(admin, change_id)) == 404

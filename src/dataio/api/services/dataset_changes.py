@@ -52,4 +52,18 @@ class DatasetChange(BaseModel):
     breaking: bool
     summary: ProseText
     reason: ProseText
-    changes: list[Change] = Field(min_length=1)
+    changes: list[Change] = Field(default_factory=list)  # optional: summary + reason are enough
+
+
+class DatasetChangeInput(BaseModel):
+    """Body for creating or editing an entry; the dataset comes from the URL.
+    No date means today."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    date: datetime.date | None = None
+    type: Literal["data", "metadata"]
+    breaking: bool
+    summary: ProseText
+    reason: ProseText
+    changes: list[Change] = Field(default_factory=list)

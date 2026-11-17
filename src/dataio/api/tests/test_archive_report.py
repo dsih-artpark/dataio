@@ -62,3 +62,11 @@ def test_keys_outside_the_layout_are_reported(capsys):
     out = capsys.readouterr().out
     assert "(0 of 0)" in out
     assert "archive/filestore/STANDARDISED/stray.csv" in out
+
+
+def test_a_shortened_stamp_is_not_read_as_a_date(capsys):
+    # strptime alone would read "2026111T..." as 1 November 2026 and hide it.
+    main([], filestore=_FakeFilestore([_archive("CS0007DS0996", "2026111T000000Z")]), now=NOW)
+
+    out = capsys.readouterr().out
+    assert "CS0007DS0996" in out and "unknown" in out

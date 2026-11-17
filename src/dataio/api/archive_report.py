@@ -8,14 +8,19 @@ and keeps them for a month. This report is read-only: it never deletes anything.
 from __future__ import annotations
 
 import argparse
+import re
 from datetime import datetime, timedelta, timezone
 
 from dataio.api.services.filestore_service import FilestoreService
 
 STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
+# strptime accepts unpadded fields, so check the fixed width first.
+STAMP_PATTERN = re.compile(r"[0-9]{8}T[0-9]{6}Z")
 
 
 def parse_stamp(stamp: str) -> datetime | None:
+    if not STAMP_PATTERN.fullmatch(stamp):
+        return None
     try:
         return datetime.strptime(stamp, STAMP_FORMAT).replace(tzinfo=timezone.utc)
     except ValueError:

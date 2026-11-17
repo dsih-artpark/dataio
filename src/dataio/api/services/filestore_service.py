@@ -408,7 +408,7 @@ class FilestoreService(BaseService):
             if obj.key.endswith("/"):
                 continue
             parts = obj.key.split("/", 5)
-            if len(parts) < 6:
+            if len(parts) < 6 or not all(parts[2:6]):
                 unrecognised.append(obj.key)
                 continue
             prefix = "/".join(parts[:5])

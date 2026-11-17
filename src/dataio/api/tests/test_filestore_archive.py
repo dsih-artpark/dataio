@@ -181,3 +181,13 @@ def test_list_archives_groups_files_by_archive_folder_oldest_first():
          "stamp": "20261101T000000Z", "files": 1, "size": 1},
     ]
     assert unrecognised == ["archive/filestore/STANDARDISED/stray.csv"]
+
+
+def test_list_archives_reports_paths_with_an_empty_folder_name():
+    empty_id = "archive/filestore/STANDARDISED//20261110T000000Z/table.csv"
+    filestore = _filestore({empty_id: b"1"})
+
+    archives, unrecognised = filestore.list_archives()
+
+    assert archives == []
+    assert unrecognised == [empty_id]

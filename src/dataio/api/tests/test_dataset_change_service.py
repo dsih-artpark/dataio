@@ -263,3 +263,134 @@ def test_a_malformed_or_unknown_id_is_a_404(db):
         assert _status(lambda: service.update(admin, change_id, _body())) == 404
         assert _status(lambda: service.publish(admin, change_id)) == 404
         assert _status(lambda: service.delete_draft(admin, change_id)) == 404
+
+
+# ------------------------------------------------------------- public reads
+
+
+def _published(db, dataset_id: str = "EP0001DS0001", **overrides) -> dict:
+    service, admin = DatasetChangeService(), _user(db, "admin@example.org")
+    draft = service.create_draft(admin, dataset_id, _body(**overrides), archive_prefix="archive/filestore/x")
+    return service.publish(admin, draft["id"])
+
+
+def _set_access(db, dataset_id: str, level: AccessLevel) -> None:
+    session = db()
+    try:
+        session.query(Dataset).filter(Dataset.ds_id == dataset_id).update({"access_level": level})
+        session.commit()
+    finally:
+        session.close()
+
+
+@requires_postgres
+def test_public_lists_only_published_entries_newest_first(db):
+    older = _published(db, date="2026-10-01")
+    newer = _published(db, date="2026-11-01")
+    DatasetChangeService().create_draft(_user(db, "admin@example.org"), "EP0001DS0001", _body())
+
+    listed = DatasetChangeService().list_public()
+
+    assert [e["id"] for e in listed["entries"]] == [newer["id"], older["id"]]
+    assert listed["total"] == 2
+    assert listed["entries"][0]["dataset_title"] == "Dataset EP0001DS0001"
+
+
+@requires_postgres
+def test_public_output_has_no_internal_fields(db):
+    _published(db)
+
+    entry = DatasetChangeService().list_public_for_dataset("EP0001DS0001")["entries"][0]
+
+    assert set(entry) == {
+        "id", "dataset_id", "dataset_title", "restricted", "date", "type", "breaking",
+        "summary", "reason", "changes",
+    }
+    assert entry["restricted"] is False
+    assert entry["changes"][0]["old"] == "dist"
+
+
+@requires_postgres
+def test_restricted_datasets_hide_old_new_and_note(db):
+    _published(db, "EP0001DS0003", changes=[
+        {"kind": "values_recoded", "table": "cases", "column": "status", "old": "A", "new": "B", "note": "n"},
+    ])
+
+    entry = DatasetChangeService().list_public_for_dataset("EP0001DS0003")["entries"][0]
+
+    assert entry["restricted"] is True
+    assert entry["changes"] == [{"kind": "values_recoded", "table": "cases", "column": "status",
+                                 "old": None, "new": None, "note": None}]
+    assert entry["summary"] == "Renamed the district column."
+
+
+@requires_postgres
+def test_masking_follows_the_current_access_level(db):
+    _published(db)
+    _set_access(db, "EP0001DS0001", AccessLevel.NONE)
+    try:
+        entry = DatasetChangeService().list_public()["entries"][0]
+        assert entry["restricted"] is True and entry["changes"][0]["old"] is None
+    finally:
+        _set_access(db, "EP0001DS0001", AccessLevel.DOWNLOAD)
+
+
+@requires_postgres
+def test_entries_of_a_deleted_dataset_leave_the_public_lists(db):
+    session = db()
+    try:
+        session.add(_record(dataset_id="EP0001DS0999", status="PUBLISHED"))
+        session.commit()
+    finally:
+        session.close()
+    service = DatasetChangeService()
+
+    assert service.list_public()["entries"] == []
+    assert _status(lambda: service.list_public_for_dataset("EP0001DS0999")) == 404
+    assert [e["dataset_id"] for e in service.list_admin(_user(db, "admin@example.org"))["entries"]] == [
+        "EP0001DS0999"]
+
+
+@requires_postgres
+def test_public_paging_limits(db):
+    for _ in range(3):
+        _published(db)
+    service = DatasetChangeService()
+
+    assert _status(lambda: service.list_public(offset=-1)) == 400
+    assert len(service.list_public(limit=10000)["entries"]) == 3
+    assert len(service.list_public(limit=2)["entries"]) == 2
+    assert len(service.list_public(limit=0)["entries"]) == 1
+
+
+@requires_postgres
+def test_routes_wire_admin_and_public_calls(db):
+    import importlib
+
+    from fastapi.testclient import TestClient
+
+    from dataio.api.auth.jwt import get_current_web_user
+
+    app = importlib.import_module("dataio.api").app
+    client = TestClient(app)
+    body = {"type": "data", "breaking": False, "summary": "S.", "reason": "R.", "changes": []}
+    try:
+        app.dependency_overrides[get_current_web_user] = lambda: _user(db, "known@example.org")
+        assert client.post("/api/v1/web/admin/datasets/EP0001DS0001/changes", json=body).status_code == 403
+
+        app.dependency_overrides[get_current_web_user] = lambda: _user(db, "admin@example.org")
+        draft = client.post("/api/v1/web/admin/datasets/EP0001DS0001/changes", json=body)
+        assert draft.status_code == 200 and draft.json()["status"] == "DRAFT"
+        change_id = draft.json()["id"]
+        assert client.get("/api/v1/web/public/datasets/EP0001DS0001/changes").json()["entries"] == []
+        edited = client.patch(f"/api/v1/web/admin/dataset-changes/{change_id}", json={**body, "summary": "T."})
+        assert edited.json()["summary"] == "T."
+        assert client.get("/api/v1/web/admin/dataset-changes?status=DRAFT").json()["total"] == 1
+        assert client.delete(f"/api/v1/web/admin/dataset-changes/{change_id}").status_code == 204
+
+        again = client.post("/api/v1/web/admin/datasets/EP0001DS0001/changes", json=body).json()["id"]
+        assert client.post(f"/api/v1/web/admin/dataset-changes/{again}/publish").status_code == 200
+        assert len(client.get("/api/v1/web/public/dataset-changes").json()["entries"]) == 1
+        assert len(client.get("/api/v1/web/public/datasets/EP0001DS0001/changes").json()["entries"]) == 1
+    finally:
+        app.dependency_overrides.clear()

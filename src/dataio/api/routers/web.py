@@ -47,6 +47,7 @@ from dataio.api.models import (
     RawDatasetCreate,
     RawDatasetUpdate,
 )
+from dataio.api.services.dataset_changes import DatasetChangeInput
 from dataio.api.services.draft_review_service import parse_curator_input_json
 from dataio.api.services.web_auth_service import WebAuthService
 from dataio.api.services.public_catalogue_service import PublicCatalogueService
@@ -1133,6 +1134,96 @@ async def admin_reject_access_request(
     from dataio.api.services.public_access_service import PublicAccessService
 
     return PublicAccessService().review_access_request(user, request_id, approve=False, note=body.note)
+
+
+# =============================================================================
+# Dataset changelog (DIO-53)
+# =============================================================================
+
+
+@web_router.get("/admin/dataset-changes", tags=["web-admin/dataset-changes"])
+async def admin_list_dataset_changes(
+    status: Optional[str] = None,
+    dataset_id: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    user: User = Depends(get_current_web_user),
+):
+    """List changelog entries (drafts and published), newest first. Admin only."""
+    from dataio.api.services.dataset_change_service import DatasetChangeService
+
+    return DatasetChangeService().list_admin(user, status=status, dataset_id=dataset_id, limit=limit, offset=offset)
+
+
+@web_router.post("/admin/datasets/{dataset_id}/changes", tags=["web-admin/dataset-changes"])
+async def admin_create_dataset_change(
+    dataset_id: str,
+    body: DatasetChangeInput,
+    user: User = Depends(get_current_web_user),
+):
+    """Record a changelog entry for a dataset as a draft. Admin only."""
+    from dataio.api.services.dataset_change_service import DatasetChangeService
+
+    return DatasetChangeService().create_draft(user, dataset_id, body)
+
+
+@web_router.patch("/admin/dataset-changes/{change_id}", tags=["web-admin/dataset-changes"])
+async def admin_update_dataset_change(
+    change_id: str,
+    body: DatasetChangeInput,
+    user: User = Depends(get_current_web_user),
+):
+    """Edit a draft or correct a published entry. Admin only."""
+    from dataio.api.services.dataset_change_service import DatasetChangeService
+
+    return DatasetChangeService().update(user, change_id, body)
+
+
+@web_router.post("/admin/dataset-changes/{change_id}/publish", tags=["web-admin/dataset-changes"])
+async def admin_publish_dataset_change(
+    change_id: str,
+    user: User = Depends(get_current_web_user),
+):
+    """Publish a draft so it shows on the public site. Admin only."""
+    from dataio.api.services.dataset_change_service import DatasetChangeService
+
+    return DatasetChangeService().publish(user, change_id)
+
+
+@web_router.delete("/admin/dataset-changes/{change_id}", status_code=204, tags=["web-admin/dataset-changes"])
+async def admin_delete_dataset_change(
+    change_id: str,
+    user: User = Depends(get_current_web_user),
+):
+    """Delete a draft. Published entries can only be edited. Admin only."""
+    from dataio.api.services.dataset_change_service import DatasetChangeService
+
+    DatasetChangeService().delete_draft(user, change_id)
+    return Response(status_code=204)
+
+
+@web_router.get("/public/datasets/{dataset_id}/changes", tags=["public"])
+async def get_public_dataset_changes(dataset_id: str):
+    """A dataset's "Version history": its published changelog entries, newest
+    first. Old/new values and notes are hidden for Restricted (NONE) datasets.
+    No authentication required."""
+    from dataio.api.services.dataset_change_service import DatasetChangeService
+
+    return DatasetChangeService().list_public_for_dataset(dataset_id)
+
+
+@web_router.get("/public/dataset-changes", tags=["public"])
+async def get_public_dataset_change_list(
+    dataset_id: Optional[str] = None,
+    limit: int = 20,
+    offset: int = 0,
+):
+    """All published changelog entries, newest first (20 per page by default,
+    at most 100). Old/new values and notes are hidden for Restricted (NONE)
+    datasets. No authentication required."""
+    from dataio.api.services.dataset_change_service import DatasetChangeService
+
+    return DatasetChangeService().list_public(dataset_id=dataset_id, limit=limit, offset=offset)
 
 
 # =============================================================================

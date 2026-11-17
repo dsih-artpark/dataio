@@ -51,6 +51,8 @@ def test_values_are_kept_exactly_as_written():
     (_entry(summary="   "), "summary"),
     (_entry(reason=""), "reason"),
     (_with_change(old=10), "changes.0.old"),  # a number would lose digits (0.10 -> 0.1)
+    (_with_change(table=""), "changes.0.table"),  # a blank row would show publicly as "— —"
+    (_with_change(table="  "), "changes.0.table"),
 ])
 def test_a_bad_entry_is_rejected_naming_the_field(entry, field):
     with pytest.raises(ValidationError) as err:

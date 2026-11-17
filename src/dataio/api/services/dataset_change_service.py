@@ -123,9 +123,13 @@ class DatasetChangeService(BaseService):
             )
             self._apply(row, body, creating=True)
             session.add(row)
-            session.commit()
+            # Build the result before committing: the replace undoes itself if
+            # this raises, and a committed draft must not outlive that undo.
+            session.flush()
             session.refresh(row)
-            return self._admin_result(session, row)
+            result = self._admin_result(session, row)
+            session.commit()
+            return result
         finally:
             session.close()
 

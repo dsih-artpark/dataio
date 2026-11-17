@@ -222,7 +222,7 @@ export default function DatasetChangeManager() {
                 >
                   Edit
                 </button>
-                {entry.status === 'DRAFT' ? (
+                {entry.status === 'DRAFT' && !isEditing ? (
                   <>
                     <button
                       type="button"
@@ -271,6 +271,9 @@ export default function DatasetChangeManager() {
             {isEditing && editing ? (
               <div class="space-y-3 border-t border-slate-100 pt-3">
                 <ChangelogEntryForm value={editing.draft} onChange={(draft) => setEditing({ ...editing, draft })} showDate />
+                {!isChangelogComplete(editing.draft) ? (
+                  <p class="text-xs text-amber-800">Summary, why and a table name on every row are needed to save.</p>
+                ) : null}
                 <div class="flex gap-2">
                   <button
                     type="button"

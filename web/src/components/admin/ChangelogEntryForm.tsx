@@ -1,3 +1,4 @@
+import { useId } from 'preact/hooks';
 import type { ChangeKind, ChangeRow, ChangelogDraft } from '../../lib/types';
 
 /** The 10 change kinds, in plain words for the dropdown. */
@@ -18,9 +19,20 @@ export function emptyChangelogDraft(): ChangelogDraft {
   return { type: 'data', breaking: false, summary: '', reason: '', changes: [] };
 }
 
-/** Summary and reason are required (the server rejects blank ones too). */
+/** Summary and reason are required, and every row needs a table name
+ * (the server rejects these too). */
 export function isChangelogComplete(draft: ChangelogDraft): boolean {
-  return draft.summary.trim() !== '' && draft.reason.trim() !== '';
+  return (
+    draft.summary.trim() !== '' &&
+    draft.reason.trim() !== '' &&
+    draft.changes.every((row) => row.table.trim() !== '')
+  );
+}
+
+/** Keeps the admin's rows and adds suggested ones that aren't there yet. */
+export function mergeSuggestedRows(rows: ChangeRow[], suggested: ChangeRow[]): ChangeRow[] {
+  const has = (s: ChangeRow) => rows.some((row) => row.kind === s.kind && row.table === s.table);
+  return [...rows, ...suggested.filter((s) => !has(s))];
 }
 
 const input = 'block w-full rounded-xl border border-slate-300 px-3 py-2 text-sm';
@@ -36,6 +48,8 @@ export function ChangelogEntryForm(props: {
   showDate?: boolean;
 }) {
   const { value, onChange } = props;
+  // Each form gets its own radio group, so two open forms can't share one.
+  const typeGroup = useId();
   const set = (patch: Partial<ChangelogDraft>) => onChange({ ...value, ...patch });
   const setRow = (index: number, patch: Partial<ChangeRow>) =>
     set({ changes: value.changes.map((row, i) => (i === index ? { ...row, ...patch } : row)) });
@@ -70,7 +84,7 @@ export function ChangelogEntryForm(props: {
           <legend class="sr-only">Type of change</legend>
           {(['data', 'metadata'] as const).map((type) => (
             <label key={type} class="flex items-center gap-2">
-              <input type="radio" name="changelog-type" checked={value.type === type} onChange={() => set({ type })} />
+              <input type="radio" name={typeGroup} checked={value.type === type} onChange={() => set({ type })} />
               {type === 'data' ? 'Data change' : 'Metadata change'}
             </label>
           ))}

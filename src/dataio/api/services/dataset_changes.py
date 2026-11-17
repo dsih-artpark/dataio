@@ -36,7 +36,8 @@ class Change(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     kind: ChangeKind
-    table: str
+    # Not blank: an empty row would show publicly as "— —". Kept as written otherwise.
+    table: str = Field(pattern=r"\S")
     column: str | None = None
     old: str | None = None
     new: str | None = None

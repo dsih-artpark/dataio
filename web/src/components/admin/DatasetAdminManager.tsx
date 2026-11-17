@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { marked } from 'marked';
 
 import { ApiRequestError, api } from '../../lib/api';
-import { ChangelogEntryForm, emptyChangelogDraft, isChangelogComplete } from './ChangelogEntryForm';
+import { ChangelogEntryForm, emptyChangelogDraft, isChangelogComplete, mergeSuggestedRows } from './ChangelogEntryForm';
 import type {
   ChangelogDraft,
   AdminDatasetDetail,
@@ -178,6 +178,8 @@ export default function DatasetAdminManager({
   const [importReplaceExisting, setImportReplaceExisting] = useState(false);
   // What changed, required when replacing; saved as a draft changelog entry (DIO-53).
   const [importChangelog, setImportChangelog] = useState<ChangelogDraft>(emptyChangelogDraft());
+  // The dataset the changelog form was filled in for; another dataset starts it fresh.
+  const [importChangelogFor, setImportChangelogFor] = useState<string | null>(null);
   const [importReplaceConfirmed, setImportReplaceConfirmed] = useState(false);
   const [deleteVerificationCode, setDeleteVerificationCode] = useState('');
   const [deleteConfirmationDatasetId, setDeleteConfirmationDatasetId] = useState('');
@@ -717,7 +719,13 @@ export default function DatasetAdminManager({
       setImportReplaceConfirmed(false);
       if (preview.replace) {
         const suggested = preview.replace.suggested_changes ?? [];
-        setImportChangelog((current) => ({ ...current, changes: suggested }));
+        const sameDataset = preview.replace.dataset_id === importChangelogFor;
+        setImportChangelog((current) =>
+          sameDataset
+            ? { ...current, changes: mergeSuggestedRows(current.changes, suggested) }
+            : { ...emptyChangelogDraft(), changes: suggested }
+        );
+        setImportChangelogFor(preview.replace.dataset_id);
       }
       setStatusMessage(
         preview.can_import
@@ -754,6 +762,7 @@ export default function DatasetAdminManager({
           : `Imported dataset ${response.dataset_id} with ${response.uploaded_tables.length} table(s).`
       );
       setImportChangelog(emptyChangelogDraft());
+      setImportChangelogFor(null);
       setSelectedDatasetId(response.dataset_id);
       setImportPreview(null);
       setImportReplaceConfirmed(false);
@@ -1910,7 +1919,9 @@ export default function DatasetAdminManager({
                 </p>
                 <ChangelogEntryForm value={importChangelog} onChange={setImportChangelog} />
                 {!isChangelogComplete(importChangelog) ? (
-                  <p class="mt-3 text-sm font-medium text-amber-800">Fill in the summary and why to enable Replace Dataset.</p>
+                  <p class="mt-3 text-sm font-medium text-amber-800">
+                    Fill in the summary, why and a table name on every row to enable Replace Dataset.
+                  </p>
                 ) : null}
               </div>
             ) : importReplaceExisting ? (

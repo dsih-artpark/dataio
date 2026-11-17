@@ -451,3 +451,20 @@ def test_the_default_date_is_today_in_india(db, monkeypatch):
     entry = DatasetChangeService().create_draft(_user(db, "admin@example.org"), "EP0001DS0001", _body())
 
     assert entry["date"] == "2026-11-18"
+
+
+@requires_postgres
+def test_a_failure_after_saving_leaves_no_draft_behind(db, monkeypatch):
+    # The replace undoes itself when create_draft raises; no draft may stay.
+    def broken(self, session, row):
+        raise RuntimeError("connection dropped")
+
+    monkeypatch.setattr(DatasetChangeService, "_admin_result", broken)
+    with pytest.raises(RuntimeError):
+        DatasetChangeService().create_draft(_user(db, "admin@example.org"), "EP0001DS0001", _body())
+
+    session = db()
+    try:
+        assert session.query(DatasetChangeRecord).count() == 0
+    finally:
+        session.close()

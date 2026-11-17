@@ -189,7 +189,12 @@ class ApiClient {
       const message =
         typeof error.detail === 'string'
           ? error.detail
-          : error.detail?.message || 'Request failed';
+          : Array.isArray(error.detail)
+            ? // FastAPI field checks: [{loc, msg}, ...]
+              (error.detail as { loc?: unknown[]; msg?: string }[])
+                .map((item) => [item.loc?.slice(1).join('.'), item.msg].filter(Boolean).join(': '))
+                .join('; ') || 'Request failed'
+            : error.detail?.message || 'Request failed';
       throw new ApiRequestError(message, error.detail, response.status);
     }
 

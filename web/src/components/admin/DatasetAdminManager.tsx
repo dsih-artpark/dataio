@@ -907,6 +907,25 @@ export default function DatasetAdminManager({
   const visibleSelectedSyncIds = visibleDocumentationStatuses
     .filter((item) => selectedSyncIds.has(item.ds_id))
     .map((item) => item.ds_id);
+  const allVisibleSyncSelected =
+    visibleDocumentationStatuses.length > 0 &&
+    visibleSelectedSyncIds.length === visibleDocumentationStatuses.length;
+
+  // Ticks (or unticks) every row currently shown, so "Show only outdated" +
+  // "Select all shown" ticks exactly the outdated list.
+  const toggleSelectAllVisibleSync = () => {
+    setSelectedSyncIds((current) => {
+      const next = new Set(current);
+      for (const item of visibleDocumentationStatuses) {
+        if (allVisibleSyncSelected) {
+          next.delete(item.ds_id);
+        } else {
+          next.add(item.ds_id);
+        }
+      }
+      return next;
+    });
+  };
 
   const handleSyncSelectedItems = async () => {
     const ids = visibleSelectedSyncIds;
@@ -2408,14 +2427,25 @@ export default function DatasetAdminManager({
             <p class="text-sm text-slate-600">
               {documentationStatuses.filter((item) => item.needs_update).length} of {documentationStatuses.length} datasets are outdated.
             </p>
-            <label class="flex items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={showOnlyOutdated}
-                onChange={(e) => setShowOnlyOutdated((e.currentTarget as HTMLInputElement).checked)}
-              />
-              Show only outdated
-            </label>
+            <div class="flex flex-wrap items-center gap-4">
+              <label class="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={showOnlyOutdated}
+                  onChange={(e) => setShowOnlyOutdated((e.currentTarget as HTMLInputElement).checked)}
+                />
+                Show only outdated
+              </label>
+              <label class="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={allVisibleSyncSelected}
+                  disabled={visibleDocumentationStatuses.length === 0 || syncingSelectedIds}
+                  onChange={toggleSelectAllVisibleSync}
+                />
+                Select all shown
+              </label>
+            </div>
           </div>
         ) : null}
 

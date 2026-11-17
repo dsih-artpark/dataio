@@ -1190,7 +1190,7 @@ async def admin_publish_dataset_change(
     return DatasetChangeService().publish(user, change_id)
 
 
-@web_router.delete("/admin/dataset-changes/{change_id}", status_code=204, tags=["web-admin/dataset-changes"])
+@web_router.delete("/admin/dataset-changes/{change_id}", tags=["web-admin/dataset-changes"])
 async def admin_delete_dataset_change(
     change_id: str,
     user: User = Depends(get_current_web_user),
@@ -1199,7 +1199,7 @@ async def admin_delete_dataset_change(
     from dataio.api.services.dataset_change_service import DatasetChangeService
 
     DatasetChangeService().delete_draft(user, change_id)
-    return Response(status_code=204)
+    return {"deleted": True, "id": change_id}
 
 
 @web_router.get("/public/datasets/{dataset_id}/changes", tags=["public"])

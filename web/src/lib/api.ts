@@ -6,7 +6,10 @@ import type {
   AccessLevel,
   AdminDatasetDetail,
   AdminDatasetPackagePreview,
+  AdminDatasetChange,
+  AdminDatasetChangeList,
   ChangelogDraft,
+  DatasetChangeStatus,
   AdminDatasetSummary,
   AdminDatasetTablesResponse,
   AdminManifestRecord,
@@ -599,6 +602,53 @@ class ApiClient {
     return this.request(`/admin/access-requests/${encodeURIComponent(requestId)}/${decision}`, {
       method: 'POST',
       body: JSON.stringify({ note: note || null }),
+    });
+  }
+
+  // ------------------------------------------------- dataset changelog (DIO-53)
+
+  async adminListDatasetChanges(params: {
+    status?: DatasetChangeStatus;
+    datasetId?: string;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<AdminDatasetChangeList> {
+    const query = new URLSearchParams();
+    if (params.status) query.set('status', params.status);
+    if (params.datasetId) query.set('dataset_id', params.datasetId);
+    if (params.limit !== undefined) query.set('limit', String(params.limit));
+    if (params.offset !== undefined) query.set('offset', String(params.offset));
+    const suffix = query.toString() ? `?${query}` : '';
+    return this.request<AdminDatasetChangeList>(`/admin/dataset-changes${suffix}`);
+  }
+
+  async adminCreateDatasetChange(datasetId: string, body: ChangelogDraft): Promise<AdminDatasetChange> {
+    return this.request<AdminDatasetChange>(`/admin/datasets/${encodeURIComponent(datasetId)}/changes`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** Leave out `date` or `changes` to keep the stored ones. */
+  async adminUpdateDatasetChange(
+    changeId: string,
+    body: Omit<ChangelogDraft, 'date' | 'changes'> & Partial<Pick<ChangelogDraft, 'date' | 'changes'>>
+  ): Promise<AdminDatasetChange> {
+    return this.request<AdminDatasetChange>(`/admin/dataset-changes/${encodeURIComponent(changeId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async adminPublishDatasetChange(changeId: string): Promise<AdminDatasetChange> {
+    return this.request<AdminDatasetChange>(`/admin/dataset-changes/${encodeURIComponent(changeId)}/publish`, {
+      method: 'POST',
+    });
+  }
+
+  async adminDeleteDatasetChange(changeId: string): Promise<{ deleted: boolean; id: string }> {
+    return this.request<{ deleted: boolean; id: string }>(`/admin/dataset-changes/${encodeURIComponent(changeId)}`, {
+      method: 'DELETE',
     });
   }
 

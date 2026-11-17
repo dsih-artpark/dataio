@@ -386,7 +386,8 @@ def test_routes_wire_admin_and_public_calls(db):
         edited = client.patch(f"/api/v1/web/admin/dataset-changes/{change_id}", json={**body, "summary": "T."})
         assert edited.json()["summary"] == "T."
         assert client.get("/api/v1/web/admin/dataset-changes?status=DRAFT").json()["total"] == 1
-        assert client.delete(f"/api/v1/web/admin/dataset-changes/{change_id}").status_code == 204
+        deleted = client.delete(f"/api/v1/web/admin/dataset-changes/{change_id}")
+        assert deleted.status_code == 200 and deleted.json() == {"deleted": True, "id": change_id}
 
         again = client.post("/api/v1/web/admin/datasets/EP0001DS0001/changes", json=body).json()["id"]
         assert client.post(f"/api/v1/web/admin/dataset-changes/{again}/publish").status_code == 200

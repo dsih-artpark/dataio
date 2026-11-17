@@ -1,19 +1,8 @@
 import { useId } from 'preact/hooks';
+import { CHANGE_KIND_LABELS } from '../../lib/changelog';
 import type { ChangeKind, ChangeRow, ChangelogDraft } from '../../lib/types';
 
-/** The 10 change kinds, in plain words for the dropdown. */
-export const CHANGE_KIND_LABELS: Record<ChangeKind, string> = {
-  table_added: 'Table added',
-  table_removed: 'Table removed',
-  table_renamed: 'Table renamed',
-  column_added: 'Column added',
-  column_removed: 'Column removed',
-  column_renamed: 'Column renamed',
-  unit_changed: 'Unit changed',
-  values_recoded: 'Values recoded',
-  rows_changed: 'Rows changed',
-  metadata_updated: 'Metadata updated',
-};
+export { CHANGE_KIND_LABELS };
 
 export function emptyChangelogDraft(): ChangelogDraft {
   return { type: 'data', breaking: false, summary: '', reason: '', changes: [] };
@@ -179,6 +168,7 @@ export function ChangelogEntryForm(props: {
                         type="button"
                         onClick={() => set({ changes: value.changes.filter((_, i) => i !== index) })}
                         class="rounded-lg px-2 py-1 text-xs text-red-700 hover:bg-red-50"
+                        aria-label={`Remove row ${index + 1}`}
                       >
                         Remove
                       </button>

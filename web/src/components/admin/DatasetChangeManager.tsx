@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { api } from '../../lib/api';
 import type { AdminDatasetChange, ChangelogDraft, DatasetChangeStatus } from '../../lib/types';
 import { CHANGE_KIND_LABELS, ChangelogEntryForm, emptyChangelogDraft, isChangelogComplete } from './ChangelogEntryForm';
@@ -28,6 +28,10 @@ export default function DatasetChangeManager() {
   const [datasetFilter, setDatasetFilter] = useState('');
   const [entries, setEntries] = useState<AdminDatasetChange[] | null>(null);
   const [drafts, setDrafts] = useState(0);
+  const [total, setTotal] = useState(0);
+  // The dataset filter actually applied (the box may hold unsubmitted text).
+  const [appliedFilter, setAppliedFilter] = useState('');
+  const requestNumber = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -38,13 +42,20 @@ export default function DatasetChangeManager() {
 
   const load = () => {
     setError(null);
+    const filter = datasetFilter.trim().toUpperCase(); // dataset IDs are upper case
+    const mine = ++requestNumber.current; // a slower, older response must not win
     api
-      .adminListDatasetChanges({ status, datasetId: datasetFilter.trim() || undefined, limit: 200 })
+      .adminListDatasetChanges({ status, datasetId: filter || undefined, limit: 200 })
       .then((response) => {
+        if (mine !== requestNumber.current) return;
         setEntries(response.entries);
         setDrafts(response.drafts);
+        setTotal(response.total);
+        setAppliedFilter(filter);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load changelog entries'));
+      .catch((err) => {
+        if (mine === requestNumber.current) setError(err instanceof Error ? err.message : 'Failed to load changelog entries');
+      });
   };
 
   useEffect(load, [status]);
@@ -82,7 +93,7 @@ export default function DatasetChangeManager() {
 
   const saveNew = () => {
     if (!adding) return;
-    const datasetId = adding.datasetId.trim();
+    const datasetId = adding.datasetId.trim().toUpperCase(); // dataset IDs are upper case
     const { date, ...rest } = adding.draft;
     const body = date ? adding.draft : rest; // no date: the server uses today (IST)
     run('new', () => api.adminCreateDatasetChange(datasetId, body).then(() => setAdding(null)), `Draft saved for ${datasetId}.`);
@@ -93,13 +104,12 @@ export default function DatasetChangeManager() {
   return (
     <div class="space-y-4">
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <div class="flex flex-wrap items-center gap-2" role="tablist" aria-label="Entry status">
+        <div class="flex flex-wrap items-center gap-2" role="group" aria-label="Show entries">
           {TABS.map((tab) => (
             <button
               key={tab.label}
               type="button"
-              role="tab"
-              aria-selected={status === tab.status}
+              aria-pressed={status === tab.status}
               onClick={() => setStatus(tab.status)}
               class={`${button} ${status === tab.status ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
             >
@@ -176,7 +186,12 @@ export default function DatasetChangeManager() {
       {!entries && !error && <p class="text-sm text-gray-500">Loading…</p>}
       {entries && entries.length === 0 && (
         <p class="text-sm text-gray-500">
-          {status || datasetFilter.trim() ? 'No entries match these filters.' : 'No changelog entries yet.'}
+          {status || appliedFilter ? 'No entries match these filters.' : 'No changelog entries yet.'}
+        </p>
+      )}
+      {entries && total > entries.length && (
+        <p class="text-sm text-gray-500">
+          Showing the newest {entries.length} of {total}. Filter by dataset to find older entries.
         </p>
       )}
 
@@ -274,6 +289,7 @@ export default function DatasetChangeManager() {
                 {!isChangelogComplete(editing.draft) ? (
                   <p class="text-xs text-amber-800">Summary, why and a table name on every row are needed to save.</p>
                 ) : null}
+                <p class="text-xs text-slate-500">To change the date, pick a new one; clearing it keeps the saved date.</p>
                 <div class="flex gap-2">
                   <button
                     type="button"

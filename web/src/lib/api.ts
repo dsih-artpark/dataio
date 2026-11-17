@@ -10,6 +10,7 @@ import type {
   AdminDatasetChangeList,
   ChangelogDraft,
   DatasetChangeStatus,
+  PublicDatasetChangeList,
   AdminDatasetSummary,
   AdminDatasetTablesResponse,
   AdminManifestRecord,
@@ -560,6 +561,25 @@ class ApiClient {
 
   async getCatalogueDataset(datasetId: string): Promise<CatalogueDatasetDetail> {
     return this.request<CatalogueDatasetDetail>(`/public/datasets/${encodeURIComponent(datasetId)}`, {}, false);
+  }
+
+  /** A dataset's published changelog ("Version history"), newest first. */
+  async getPublicDatasetChanges(datasetId: string): Promise<PublicDatasetChangeList> {
+    return this.request<PublicDatasetChangeList>(
+      `/public/datasets/${encodeURIComponent(datasetId)}/changes`,
+      {},
+      false
+    );
+  }
+
+  /** All published changelog entries, newest first. */
+  async getPublicDatasetChangeList(params: { datasetId?: string; limit?: number; offset?: number } = {}): Promise<PublicDatasetChangeList> {
+    const query = new URLSearchParams();
+    if (params.datasetId) query.set('dataset_id', params.datasetId);
+    if (params.limit !== undefined) query.set('limit', String(params.limit));
+    if (params.offset !== undefined) query.set('offset', String(params.offset));
+    const suffix = query.toString() ? `?${query}` : '';
+    return this.request<PublicDatasetChangeList>(`/public/dataset-changes${suffix}`, {}, false);
   }
 
   async getCatalogueStats(): Promise<CatalogueStats> {

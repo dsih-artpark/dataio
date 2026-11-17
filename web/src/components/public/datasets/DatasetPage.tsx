@@ -17,9 +17,11 @@ import {
   type CatalogueDatasetDetail,
   type CataloguePreview,
 } from '../../../lib/catalogue';
+import type { PublicDatasetChange } from '../../../lib/types';
 import CodeSnippets from '../../datasets/CodeSnippets';
 import AccessBadge from '../AccessBadge';
 import MetaChip from '../MetaChip';
+import DatasetChangeEntries from './DatasetChangeEntries';
 import { useDatasetDownload } from './DownloadConsent';
 
 const card = 'bg-white border border-gray-200 rounded-2xl p-5 sm:p-7 flex flex-col gap-3.5';
@@ -38,6 +40,8 @@ export default function DatasetPage() {
   const [dataset, setDataset] = useState<CatalogueDatasetDetail | null>(null);
   const [preview, setPreview] = useState<CataloguePreview | null>(null);
   const [error, setError] = useState<'missing' | 'not-found' | 'failed' | null>(null);
+  // Version history (DIO-53): null while loading, 'failed' if it couldn't load.
+  const [changes, setChanges] = useState<PublicDatasetChange[] | 'failed' | null>(null);
   // A signed-in user may have been granted download on a View only / Restricted dataset.
   const [userCanDownload, setUserCanDownload] = useState(false);
   const { downloading, error: downloadError, start: startDownload, dialog: downloadDialog } = useDatasetDownload(dataset);
@@ -56,6 +60,10 @@ export default function DatasetPage() {
         document.title = `${detail.title} | Data and AI Commons for One Health`;
       })
       .catch((err) => setError(err instanceof ApiRequestError && err.statusCode === 404 ? 'not-found' : 'failed'));
+    api
+      .getPublicDatasetChanges(id)
+      .then((response) => setChanges(response.entries))
+      .catch(() => setChanges('failed'));
     api
       .getCataloguePreview(id)
       .then(setPreview)
@@ -299,6 +307,26 @@ export default function DatasetPage() {
           </div>
         </section>
       )}
+
+      {/* VERSION HISTORY */}
+      <section id="version-history" aria-labelledby="history-heading" class={`${card} scroll-mt-4`}>
+        <h2 id="history-heading" class={h2}>
+          Version history
+        </h2>
+        <p class="m-0 text-sm leading-[1.55] text-gray-600">
+          What changed in each update, when and why. A breaking change may need you to update code that reads this
+          dataset.
+        </p>
+        {changes === null ? (
+          <p class="m-0 text-sm text-gray-500">Loading…</p>
+        ) : changes === 'failed' ? (
+          <p class="m-0 text-sm text-gray-500">The version history couldn’t be loaded. Please try again in a moment.</p>
+        ) : changes.length === 0 ? (
+          <p class="m-0 text-sm text-gray-500">No changes have been recorded for this dataset.</p>
+        ) : (
+          <DatasetChangeEntries entries={changes} />
+        )}
+      </section>
 
       {/* API */}
       {(!restricted || canDownload) && (

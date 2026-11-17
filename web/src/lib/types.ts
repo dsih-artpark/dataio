@@ -311,6 +311,26 @@ export interface AdminDatasetChange {
   published_at: string | null;
 }
 
+/** A published entry as the public site gets it. For Restricted datasets
+ * `restricted` is true and every row's old/new/note is null. */
+export interface PublicDatasetChange {
+  id: string;
+  dataset_id: string;
+  dataset_title: string | null;
+  restricted: boolean;
+  date: string;
+  type: 'data' | 'metadata';
+  breaking: boolean;
+  summary: string;
+  reason: string;
+  changes: ChangeRow[];
+}
+
+export interface PublicDatasetChangeList {
+  entries: PublicDatasetChange[];
+  total: number;
+}
+
 export interface AdminDatasetChangeList {
   entries: AdminDatasetChange[];
   total: number;

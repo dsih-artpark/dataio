@@ -90,6 +90,12 @@ The preview lists the files that will be archived and the tables that will be re
 
 The dataset ID, collection, access level, user permissions and group memberships are not changed. If a step fails, DataIO tries to restore the old files from the archive and put the dataset's details back. If part of that rollback also fails, the error lists the steps still to do by hand and the archive location; use the archive copy to finish recovery. The archive copy is always kept; remove it once the replacement has been checked.
 
+### Recording what changed
+
+A replace also needs a short changelog entry: what changed (summary), why, whether it is a data or metadata change, and whether it is breaking (users may need to change their code). The apply route takes it as a `changelog_json` form field, and the admin UI asks for it in the **What changed** section; rows for added and removed tables and columns, unit changes and changed allowed values are filled in from the preview. Without a summary and a reason the replace is refused before anything is archived.
+
+The entry is saved as a draft under **Datasets > Dataset changes**. An admin publishes it there, and it then shows in the dataset's **Version history** on its public page and on the public **Dataset changes** page (`/changes`). Old and new values and notes are hidden for Restricted datasets. Entries for metadata-only edits can be added on the same admin page.
+
 ## Dataset Folder Uploads
 
 If a dataset folder contains `manifest.yaml`, the admin SDK upload flow will try to upload it after dataset creation and before table uploads. The upload is validated against the dataset's stored CSVs, which don't exist yet at that point, so it fails. `metadata.yaml` itself is not sent as a manifest. Use Import Dataset Package in the admin UI instead, or upload the manifest after the tables.

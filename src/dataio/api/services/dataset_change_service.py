@@ -8,11 +8,13 @@ are saved. Public output is built from those models, so internal columns
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from dataio.api.database.config import Session as DBSession
 from dataio.api.database.enums import AccessLevel
@@ -21,6 +23,8 @@ from dataio.api.services.base_service import BaseService
 from dataio.api.services.dataset_changes import Change, DatasetChangeInput
 
 CHANGE_STATUSES = ("DRAFT", "PUBLISHED")
+
+logger = logging.getLogger(__name__)
 
 
 def _iso(value) -> Optional[str]:
@@ -39,10 +43,14 @@ def _change_uuid(change_id: str) -> uuid.UUID:
         raise HTTPException(status_code=404, detail="Change entry not found")
 
 
+MAX_OFFSET = 100_000
+
+
 def _check_paging(offset: int) -> None:
-    if offset < 0:
-        # PostgreSQL rejects a negative OFFSET, which would surface as a 500.
-        raise HTTPException(status_code=400, detail="offset must be 0 or more")
+    # PostgreSQL rejects a negative OFFSET or one past bigint, which would
+    # surface as a 500.
+    if not 0 <= offset <= MAX_OFFSET:
+        raise HTTPException(status_code=400, detail=f"offset must be between 0 and {MAX_OFFSET}")
 
 
 class DatasetChangeService(BaseService):
@@ -71,13 +79,18 @@ class DatasetChangeService(BaseService):
         }
 
     @staticmethod
-    def _apply(row: DatasetChangeRecord, body: DatasetChangeInput) -> None:
-        row.change_date = body.date or datetime.now(timezone.utc).date()
+    def _apply(row: DatasetChangeRecord, body: DatasetChangeInput, creating: bool) -> None:
+        """On create, no date means today. On edit, a missing date or a
+        missing `changes` keeps what is stored, so correcting a typo can't
+        move the entry or wipe its rows; `"changes": []` clears them."""
+        if body.date or creating:
+            row.change_date = body.date or datetime.now(timezone.utc).date()
         row.change_type = body.type
         row.breaking = body.breaking
         row.summary = body.summary
         row.reason = body.reason
-        row.changes = [change.model_dump() for change in body.changes]
+        if creating or "changes" in body.model_fields_set:
+            row.changes = [change.model_dump() for change in body.changes]
 
     def _admin_result(self, session, row: DatasetChangeRecord) -> dict:
         title = session.query(Dataset.title).filter(Dataset.ds_id == row.dataset_id).scalar()
@@ -101,7 +114,7 @@ class DatasetChangeService(BaseService):
                 archive_prefix=archive_prefix,
                 created_by=admin_user.email,
             )
-            self._apply(row, body)
+            self._apply(row, body, creating=True)
             session.add(row)
             session.commit()
             session.refresh(row)
@@ -126,7 +139,7 @@ class DatasetChangeService(BaseService):
         session = DBSession()
         try:
             row = self._locked_row(session, change_id)
-            self._apply(row, body)
+            self._apply(row, body, creating=False)
             row.updated_by = admin_user.email
             row.updated_at = datetime.now(timezone.utc)
             session.commit()
@@ -214,8 +227,15 @@ class DatasetChangeService(BaseService):
         access-level change applies to older entries too."""
         restricted = dataset.access_level == AccessLevel.NONE
         changes = []
-        for change in row.changes or []:
-            shown = Change.model_validate(change).model_dump()
+        stored = row.changes if isinstance(row.changes, list) else []
+        for change in stored:
+            # A row that fails the checks (e.g. edited by hand in the DB) is
+            # left out, not shown raw and not allowed to break the page.
+            try:
+                shown = Change.model_validate(change).model_dump()
+            except ValidationError:
+                logger.warning("Skipping a malformed change row in dataset change %s", row.id)
+                continue
             if restricted:
                 shown.update(old=None, new=None, note=None)
             changes.append(shown)

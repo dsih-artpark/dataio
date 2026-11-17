@@ -394,3 +394,49 @@ def test_routes_wire_admin_and_public_calls(db):
         assert len(client.get("/api/v1/web/public/datasets/EP0001DS0001/changes").json()["entries"]) == 1
     finally:
         app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------- review fixes
+
+
+@requires_postgres
+def test_editing_without_a_date_or_rows_keeps_them(db):
+    service, admin = DatasetChangeService(), _user(db, "admin@example.org")
+    entry = service.create_draft(admin, "EP0001DS0001", _body(date="2026-10-01"))
+    body = DatasetChangeInput.model_validate(
+        {"type": "data", "breaking": True, "summary": "Fixed a typo.", "reason": "Typo."}
+    )
+
+    edited = service.update(admin, entry["id"], body)
+
+    assert edited["date"] == "2026-10-01"
+    assert edited["changes"] == entry["changes"] and edited["changes"] != []
+    assert service.update(admin, entry["id"], _body(changes=[]))["changes"] == []
+
+
+@requires_postgres
+def test_a_malformed_stored_row_does_not_break_the_public_lists(db):
+    session = db()
+    try:
+        session.add(_record(status="PUBLISHED", changes=[
+            {"kind": "column_renamed", "table": "t", "old": 10, "linear": "DIO-1"},
+            {"kind": "column_added", "table": "t", "column": "c"},
+        ]))
+        session.add(_record(status="PUBLISHED", change_date="2026-11-21", changes={"not": "a list"}))
+        session.commit()
+    finally:
+        session.close()
+
+    entries = DatasetChangeService().list_public()["entries"]
+
+    assert [e["changes"] for e in entries] == [[], [
+        {"kind": "column_added", "table": "t", "column": "c", "old": None, "new": None, "note": None}]]
+    assert "linear" not in str(entries)
+
+
+@requires_postgres
+def test_a_huge_offset_is_a_400_not_a_500(db):
+    service, admin = DatasetChangeService(), _user(db, "admin@example.org")
+
+    assert _status(lambda: service.list_public(offset=10**20)) == 400
+    assert _status(lambda: service.list_admin(admin, offset=10**20)) == 400

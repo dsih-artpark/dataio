@@ -6,6 +6,7 @@ import type {
   AccessLevel,
   AdminDatasetDetail,
   AdminDatasetPackagePreview,
+  ChangelogDraft,
   AdminDatasetSummary,
   AdminDatasetTablesResponse,
   AdminManifestRecord,
@@ -1044,6 +1045,8 @@ class ApiClient {
     rawDatasetOverride?: Record<string, unknown>;
     bucketType?: string;
     replaceExisting?: boolean;
+    /** Required by the server when replacing: what changed (saved as a draft). */
+    changelog?: ChangelogDraft;
   }) {
     const formData = new FormData();
     formData.append('info_file', params.infoFile);
@@ -1061,6 +1064,9 @@ class ApiClient {
     if (params.replaceExisting) {
       formData.append('replace_existing', 'true');
     }
+    if (params.changelog) {
+      formData.append('changelog_json', JSON.stringify(params.changelog));
+    }
     return this.request<{
       dataset_id: string;
       bucket_type: string;
@@ -1069,6 +1075,7 @@ class ApiClient {
       replaced?: boolean;
       archive_prefix?: string;
       archived_files?: string[];
+      change_id?: string;
     }>('/admin/datasets/import/apply', {
       method: 'POST',
       body: formData,

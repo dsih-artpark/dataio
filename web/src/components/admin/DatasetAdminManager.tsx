@@ -3,7 +3,9 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { marked } from 'marked';
 
 import { ApiRequestError, api } from '../../lib/api';
+import { ChangelogEntryForm, emptyChangelogDraft, isChangelogComplete } from './ChangelogEntryForm';
 import type {
+  ChangelogDraft,
   AdminDatasetDetail,
   AdminDatasetPackagePreview,
   AdminDatasetSummary,
@@ -174,6 +176,8 @@ export default function DatasetAdminManager({
   const [importPreview, setImportPreview] = useState<AdminDatasetPackagePreview | null>(null);
   const [importingPackage, setImportingPackage] = useState(false);
   const [importReplaceExisting, setImportReplaceExisting] = useState(false);
+  // What changed, required when replacing; saved as a draft changelog entry (DIO-53).
+  const [importChangelog, setImportChangelog] = useState<ChangelogDraft>(emptyChangelogDraft());
   const [importReplaceConfirmed, setImportReplaceConfirmed] = useState(false);
   const [deleteVerificationCode, setDeleteVerificationCode] = useState('');
   const [deleteConfirmationDatasetId, setDeleteConfirmationDatasetId] = useState('');
@@ -711,6 +715,10 @@ export default function DatasetAdminManager({
       });
       applyImportPreview(preview);
       setImportReplaceConfirmed(false);
+      if (preview.replace) {
+        const suggested = preview.replace.suggested_changes ?? [];
+        setImportChangelog((current) => ({ ...current, changes: suggested }));
+      }
       setStatusMessage(
         preview.can_import
           ? 'Package preview passed validation and is ready to import.'
@@ -736,13 +744,16 @@ export default function DatasetAdminManager({
         rawDatasetOverride: rawDatasetForm,
         bucketType: STANDARDISED_BUCKET,
         replaceExisting: importReplaceExisting,
+        changelog: importReplaceExisting ? importChangelog : undefined,
       });
       setStatusMessage(
         response.replaced
           ? `Replaced dataset ${response.dataset_id} with ${response.uploaded_tables.length} table(s). ` +
-              `The previous ${response.archived_files?.length ?? 0} file(s) are archived under ${response.archive_prefix}/.`
+              `The previous ${response.archived_files?.length ?? 0} file(s) are archived under ${response.archive_prefix}/. ` +
+              'A changelog draft was saved: review and publish it under Datasets > Dataset changes.'
           : `Imported dataset ${response.dataset_id} with ${response.uploaded_tables.length} table(s).`
       );
+      setImportChangelog(emptyChangelogDraft());
       setSelectedDatasetId(response.dataset_id);
       setImportPreview(null);
       setImportReplaceConfirmed(false);
@@ -1827,7 +1838,10 @@ export default function DatasetAdminManager({
                 importCsvFiles.length === 0 ||
                 importingPackage ||
                 (importReplaceExisting &&
-                  (!importPreview?.replace || !importReplaceConfirmed || replaceTargetChanged))
+                  (!importPreview?.replace ||
+                    !importReplaceConfirmed ||
+                    replaceTargetChanged ||
+                    !isChangelogComplete(importChangelog)))
               }
               class={`w-full rounded-xl px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto ${
                 importReplaceExisting ? 'bg-amber-700' : 'bg-emerald-700'
@@ -1882,6 +1896,21 @@ export default function DatasetAdminManager({
                     The Dataset ID was changed to {createForm.ds_id || '(empty)'} after this preview of{' '}
                     {importPreview.replace.dataset_id}. Preview again before replacing.
                   </p>
+                ) : null}
+              </div>
+            ) : null}
+
+            {importPreview.replace ? (
+              <div class="rounded-2xl border border-slate-200 bg-white p-4">
+                <h4 class="font-semibold text-slate-900">What changed</h4>
+                <p class="mb-4 mt-1 text-sm text-slate-600">
+                  Required before replacing. It is saved as a draft on the Dataset changes page, where an admin publishes it
+                  to the dataset's public Version history. Rows for added and removed tables are filled in from the preview;
+                  add renames, recodes and unit changes yourself.
+                </p>
+                <ChangelogEntryForm value={importChangelog} onChange={setImportChangelog} />
+                {!isChangelogComplete(importChangelog) ? (
+                  <p class="mt-3 text-sm font-medium text-amber-800">Fill in the summary and why to enable Replace Dataset.</p>
                 ) : null}
               </div>
             ) : importReplaceExisting ? (

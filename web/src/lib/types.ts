@@ -252,6 +252,69 @@ export interface AdminDatasetReplacePlan {
   tables_removed: string[];
   archive_location: string;
   access_level_kept: string | null;
+  /** Rows to pre-fill the "What changed" form with (tables added/removed). */
+  suggested_changes: ChangeRow[];
+}
+
+// ---------------------------------------------------------------- changelog (DIO-53)
+
+export type ChangeKind =
+  | 'table_added'
+  | 'table_removed'
+  | 'table_renamed'
+  | 'column_added'
+  | 'column_removed'
+  | 'column_renamed'
+  | 'unit_changed'
+  | 'values_recoded'
+  | 'rows_changed'
+  | 'metadata_updated';
+
+export interface ChangeRow {
+  kind: ChangeKind;
+  table: string;
+  column?: string | null;
+  old?: string | null;
+  new?: string | null;
+  note?: string | null;
+}
+
+/** What an admin fills in: the body for creating or editing an entry. */
+export interface ChangelogDraft {
+  date?: string | null;
+  type: 'data' | 'metadata';
+  breaking: boolean;
+  summary: string;
+  reason: string;
+  changes: ChangeRow[];
+}
+
+export type DatasetChangeStatus = 'DRAFT' | 'PUBLISHED';
+
+export interface AdminDatasetChange {
+  id: string;
+  dataset_id: string;
+  dataset_title: string | null;
+  date: string;
+  type: 'data' | 'metadata';
+  breaking: boolean;
+  summary: string;
+  reason: string;
+  changes: ChangeRow[];
+  status: DatasetChangeStatus;
+  archive_prefix: string | null;
+  created_by: string | null;
+  created_at: string | null;
+  updated_by: string | null;
+  updated_at: string | null;
+  published_by: string | null;
+  published_at: string | null;
+}
+
+export interface AdminDatasetChangeList {
+  entries: AdminDatasetChange[];
+  total: number;
+  drafts: number;
 }
 
 export interface ReservedDatasetId {

@@ -166,7 +166,7 @@ def test_an_admin_creates_a_draft_dated_today_by_default(db):
     entry = DatasetChangeService().create_draft(_user(db, "admin@example.org"), "EP0001DS0001", _body())
 
     assert entry["status"] == "DRAFT"
-    assert entry["date"] == datetime.now(timezone.utc).date().isoformat()
+    assert entry["date"] == datetime.now(change_module.IST).date().isoformat()
     assert entry["created_by"] == "admin@example.org"
     assert entry["dataset_title"] == "Dataset EP0001DS0001"
     assert entry["changes"][0]["old"] == "dist"
@@ -440,3 +440,13 @@ def test_a_huge_offset_is_a_400_not_a_500(db):
 
     assert _status(lambda: service.list_public(offset=10**20)) == 400
     assert _status(lambda: service.list_admin(admin, offset=10**20)) == 400
+
+
+@requires_postgres
+def test_the_default_date_is_today_in_india(db, monkeypatch):
+    # 20:00 UTC on 17 Nov is 01:30 on 18 Nov in India.
+    monkeypatch.setattr(change_module, "_now", lambda: datetime(2026, 11, 17, 20, 0, tzinfo=timezone.utc))
+
+    entry = DatasetChangeService().create_draft(_user(db, "admin@example.org"), "EP0001DS0001", _body())
+
+    assert entry["date"] == "2026-11-18"

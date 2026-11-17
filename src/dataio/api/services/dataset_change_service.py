@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import HTTPException
@@ -25,6 +25,13 @@ from dataio.api.services.dataset_changes import Change, DatasetChangeInput
 CHANGE_STATUSES = ("DRAFT", "PUBLISHED")
 
 logger = logging.getLogger(__name__)
+
+# India has no daylight saving, so a fixed offset is exact (and needs no tzdata).
+IST = timezone(timedelta(hours=5, minutes=30), "IST")
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _iso(value) -> Optional[str]:
@@ -80,11 +87,11 @@ class DatasetChangeService(BaseService):
 
     @staticmethod
     def _apply(row: DatasetChangeRecord, body: DatasetChangeInput, creating: bool) -> None:
-        """On create, no date means today. On edit, a missing date or a
+        """On create, no date means today in India (IST). On edit, a missing date or a
         missing `changes` keeps what is stored, so correcting a typo can't
         move the entry or wipe its rows; `"changes": []` clears them."""
         if body.date or creating:
-            row.change_date = body.date or datetime.now(timezone.utc).date()
+            row.change_date = body.date or _now().astimezone(IST).date()
         row.change_type = body.type
         row.breaking = body.breaking
         row.summary = body.summary

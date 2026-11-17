@@ -26,6 +26,7 @@ const navItems: NavItem[] = [
       { name: 'Download Analytics', href: '/admin/datasets/analytics' },
       { name: 'Metadata Drafts', href: '/admin/datasets/drafts' },
       { name: 'Create / Import', href: '/admin/datasets/new' },
+      { name: 'Dataset changes', href: '/admin/datasets/changes' },
       { name: 'Catalog', href: '/admin/datasets/catalog' },
       { name: 'Reserved IDs', href: '/admin/datasets/reservations' },
       { name: 'Next ID', href: '/admin/datasets/next-id' },

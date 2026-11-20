@@ -622,8 +622,21 @@ class PublicCatalogueService:
                     func.min(
                         cast(func.extract("year", Dataset.temporal_coverage_start_date), Integer)
                     ),
+                    # An open-ended end date (9999-12-31) counts as today.
                     func.max(
-                        cast(func.extract("year", Dataset.temporal_coverage_end_date), Integer)
+                        cast(
+                            func.extract(
+                                "year",
+                                case(
+                                    (
+                                        Dataset.temporal_coverage_end_date >= date(9999, 1, 1),
+                                        func.current_date(),
+                                    ),
+                                    else_=Dataset.temporal_coverage_end_date,
+                                ),
+                            ),
+                            Integer,
+                        )
                     ),
                 )
                 .filter(detailed)

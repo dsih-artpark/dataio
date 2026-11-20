@@ -30,6 +30,14 @@ export interface ThemeInfo {
   description: string;
   /** Tailwind classes for the hero chip. */
   chip: string;
+  /** Theme tile (Rukshat's prototype): soft tint start colour, e.g. 'from-red-50'. */
+  tile: string;
+  /** Icon square and code badge on the tile. */
+  accent: string;
+  /** Short coloured line at the bottom of the tile. */
+  bar: string;
+  /** Inner SVG markup of the tile icon (24x24, stroke). */
+  icon: string;
 }
 
 /** Plain-language names for the catalogue's categories, in wireframe order. */
@@ -39,42 +47,70 @@ export const THEMES: ThemeInfo[] = [
     label: 'Disease surveillance',
     description: 'Case counts and outbreak data: dengue, TB, foot-and-mouth disease and more.',
     chip: 'bg-red-100 text-red-700 border-red-200',
+    tile: 'from-red-50',
+    accent: 'bg-red-100 text-red-700',
+    bar: 'bg-red-300',
+    icon: '<path d="M3 12h4l2-5 4 10 2-5h6"/>',
   },
   {
     id: 'CS',
     label: 'Census & surveys',
     description: 'Population and livestock censuses, national sample surveys, animal husbandry statistics.',
     chip: 'bg-blue-100 text-blue-700 border-blue-200',
+    tile: 'from-blue-50',
+    accent: 'bg-blue-100 text-blue-700',
+    bar: 'bg-blue-300',
+    icon: '<circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.5"/><path d="M15.5 14.5A5 5 0 0 1 21 19"/>',
   },
   {
     id: 'GS',
     label: 'Geospatial',
     description: 'State, district and village boundaries and other map layers.',
     chip: 'bg-orange-100 text-orange-700 border-orange-200',
+    tile: 'from-orange-50',
+    accent: 'bg-orange-100 text-orange-700',
+    bar: 'bg-orange-300',
+    icon: '<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14"/><path d="M15 6v14"/>',
   },
   {
     id: 'MW',
     label: 'Weather & climate',
     description: 'Station records and reanalysis data such as ERA5.',
     chip: 'bg-cyan-100 text-cyan-700 border-cyan-200',
+    tile: 'from-cyan-50',
+    accent: 'bg-cyan-100 text-cyan-700',
+    bar: 'bg-cyan-300',
+    icon: '<path d="M7 18a4 4 0 0 1-.5-8A6 6 0 0 1 18 9a4.5 4.5 0 0 1-.5 9z"/>',
   },
   {
     id: 'ET',
     label: 'Entomological data',
     description: 'Surveys of mosquitoes and other insects that spread disease.',
     chip: 'bg-green-100 text-green-700 border-green-200',
+    tile: 'from-green-50',
+    accent: 'bg-green-100 text-green-700',
+    bar: 'bg-green-300',
+    icon: '<ellipse cx="12" cy="14" rx="4" ry="6"/><path d="M12 8V4"/><path d="m8 10-4-2"/><path d="m16 10 4-2"/><path d="m8 15H3"/><path d="M16 15h5"/>',
   },
   {
     id: 'LU',
     label: 'Land use & land cover',
     description: 'Land use and land cover maps.',
     chip: 'bg-lime-100 text-lime-800 border-lime-200',
+    tile: 'from-lime-50',
+    accent: 'bg-lime-100 text-lime-800',
+    bar: 'bg-lime-300',
+    icon: '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>',
   },
   {
     id: 'ST',
     label: 'Research studies',
     description: 'Data from published studies and research projects.',
     chip: 'bg-purple-100 text-purple-700 border-purple-200',
+    tile: 'from-purple-50',
+    accent: 'bg-purple-100 text-purple-700',
+    bar: 'bg-purple-300',
+    icon: '<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5"/>',
   },
 ];
 
@@ -83,6 +119,10 @@ export const COMING_SOON_THEME = {
   label: 'Environmental surveillance',
   description: 'Wastewater and other environmental monitoring data.',
   chip: 'bg-indigo-100 text-indigo-700 border-indigo-200',
+  tile: 'from-indigo-50',
+  accent: 'bg-indigo-100 text-indigo-700',
+  bar: 'bg-indigo-300',
+  icon: '<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>',
 };
 
 export const POPULAR_SEARCHES = [

@@ -589,6 +589,21 @@ def test_stats_never_reveal_a_restricted_datasets_owner_years_or_kind(session_fa
         session.close()
 
 
+def test_stats_count_open_ended_coverage_as_this_year(session_factory):
+    """An end date of 9999-12-31 means "still ongoing", not the year 9999."""
+    session = session_factory()
+    rainfall = session.query(Dataset).filter(Dataset.ds_id == "WE0001DS0005").one()
+    before = rainfall.temporal_coverage_end_date
+    rainfall.temporal_coverage_end_date = date(9999, 12, 31)
+    session.commit()
+    try:
+        assert service.get_stats()["latest_year"] == date.today().year
+    finally:
+        rainfall.temporal_coverage_end_date = before
+        session.commit()
+        session.close()
+
+
 # ------------------------------------------------------------------ routes
 
 

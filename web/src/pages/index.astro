@@ -7,15 +7,13 @@ import HeroStats from '../components/public/landing/HeroStats';
 import ThemeGrid from '../components/public/landing/ThemeGrid';
 import CoverageMap from '../components/public/landing/CoverageMap';
 import RecentlyUpdated from '../components/public/landing/RecentlyUpdated';
+import ThemeStrip from '../components/public/landing/ThemeStrip.astro';
 import CodeTabs from '../components/public/landing/CodeTabs';
 import { ACCESS_DESCRIPTIONS } from '../lib/catalogue';
-import { COMING_SOON_THEME, POPULAR_SEARCHES, THEMES, datasetsHref } from '../lib/landing';
+import { POPULAR_SEARCHES, datasetsHref } from '../lib/landing';
 import { CONTACT_EMAIL, PLATFORM_NAME } from '../lib/site';
 
 const STANDARDS_URL = 'https://engg.artpark.ai/data_standardisation/workflow.html';
-
-// Hero theme shortcuts: the six themes the wireframe shows.
-const heroThemes = THEMES.filter((theme) => ['EP', 'CS', 'GS', 'MW', 'ET'].includes(theme.id));
 
 const audiences = [
   {
@@ -27,6 +25,11 @@ const audiences = [
       'Download as a spreadsheet-friendly file',
     ],
     link: { label: 'Find data for your region', href: '#coverage' },
+    tone: {
+      icon: 'bg-teal-100 text-teal-700',
+      glow: 'bg-[radial-gradient(circle_at_100%_0%,#ccfbf1_0%,#ffffff_60%)]',
+      bullet: 'marker:text-teal-600',
+    },
     icon: '<path d="M12 21s-7-4.5-7-11a7 7 0 0 1 14 0c0 6.5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>',
   },
   {
@@ -34,6 +37,11 @@ const audiences = [
     text: 'Standardised, versioned datasets with full data dictionaries and sources, so your analysis is reproducible and citable.',
     points: ['Units, methods and sources documented', 'Versions you can cite and come back to', 'Python SDK, CLI and REST API'],
     link: { label: 'Browse the catalogue', href: '/datasets' },
+    tone: {
+      icon: 'bg-purple-100 text-purple-700',
+      glow: 'bg-[radial-gradient(circle_at_100%_0%,#f3e8ff_0%,#ffffff_60%)]',
+      bullet: 'marker:text-purple-600',
+    },
     icon: '<path d="M9 3h6"/><path d="M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3"/>',
   },
   {
@@ -41,6 +49,11 @@ const audiences = [
     text: 'See what evidence exists for a region or issue, where the gaps are, and how shared data infrastructure multiplies the impact of your grants.',
     points: ['Coverage by theme, place and time', 'Data your grantees can reuse', 'Open, public-interest infrastructure'],
     link: { label: 'Support or partner with us', href: '#partner' },
+    tone: {
+      icon: 'bg-orange-100 text-orange-700',
+      glow: 'bg-[radial-gradient(circle_at_100%_0%,#ffedd5_0%,#ffffff_60%)]',
+      bullet: 'marker:text-orange-600',
+    },
     icon: '<path d="M3 20h18"/><path d="M6 16v-5"/><path d="M11 16V7"/><path d="M16 16v-3"/><path d="M20 16V5"/>',
   },
   {
@@ -52,6 +65,11 @@ const audiences = [
       'Share your department’s data with us',
     ],
     link: { label: 'Find or share data', href: '#partner' },
+    tone: {
+      icon: 'bg-green-100 text-green-700',
+      glow: 'bg-[radial-gradient(circle_at_100%_0%,#dcfce7_0%,#ffffff_60%)]',
+      bullet: 'marker:text-green-600',
+    },
     icon: '<path d="M3 21h18"/><path d="M5 21V10"/><path d="M9 21V10"/><path d="M15 21V10"/><path d="M19 21V10"/><path d="M12 3 3 8h18z"/>',
   },
 ];
@@ -70,30 +88,6 @@ const steps: { title: string; text: string; link?: { label: string; href: string
   {
     title: 'Share responsibly',
     text: 'Open where possible, protected where needed. Sensitive data stays restricted and is shared on request.',
-  },
-];
-
-const stories = [
-  {
-    tag: 'Government',
-    title: 'Dengue forecasts for state health departments',
-    text: 'Short-term dengue forecasts built on case, weather and climate data, now live in Karnataka, Andhra Pradesh and Odisha and used in state health dashboards.',
-    href: 'https://www.artpark.in/health-initiatives/dengue-dashboard',
-    placeholder: false,
-  },
-  {
-    tag: 'Research',
-    title: 'Datalab: livestock [story title]',
-    text: '[One or two lines on the livestock study or model]',
-    href: null,
-    placeholder: true,
-  },
-  {
-    tag: 'Research',
-    title: 'APSI / Dharini [story title]',
-    text: '[One or two lines on what the APSI / Dharini programme did with the data, and the outcome]',
-    href: 'https://www.artpark.in/health-initiatives/environmental-survelliance',
-    placeholder: true,
   },
 ];
 
@@ -165,31 +159,11 @@ const textLink = 'font-semibold text-primary-700 hover:text-primary-900';
         }
       </div>
 
-      <ul aria-label="Browse by theme" class="m-0 mt-2 p-0 list-none flex flex-wrap justify-center gap-2">
-        {
-          heroThemes.map((theme) => (
-            <li>
-              <a
-                href={datasetsHref({ category_id: [theme.id] })}
-                class={`inline-flex items-center min-h-[36px] px-3.5 rounded-full border text-sm font-medium hover:brightness-95 ${theme.chip}`}
-              >
-                {theme.label}
-              </a>
-            </li>
-          ))
-        }
-        <li>
-          <span
-            class={`inline-flex items-center min-h-[36px] px-3.5 rounded-full border border-dashed text-sm font-medium opacity-80 ${COMING_SOON_THEME.chip}`}
-          >
-            {COMING_SOON_THEME.label} <span class="ml-1 text-xs">(coming soon)</span>
-          </span>
-        </li>
-      </ul>
-
       <HeroStats client:load />
     </div>
   </section>
+
+  <ThemeStrip />
 
   <!-- WHO IT'S FOR -->
   <section id="audiences" aria-labelledby="audiences-heading" class="py-16 sm:py-20 bg-white scroll-mt-4">
@@ -202,9 +176,17 @@ const textLink = 'font-semibold text-primary-700 hover:text-primary-900';
       </p>
       <div class="grid gap-6 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
         {
-          audiences.map((audience) => (
-            <article class="border border-gray-200 rounded-2xl p-7 flex flex-col gap-3.5 bg-white">
-              <div aria-hidden="true" class="w-12 h-12 rounded-xl bg-primary-100 flex items-center justify-center">
+          audiences.map((audience, index) => (
+            <article
+              class={`group relative border border-gray-200 rounded-2xl p-7 flex flex-col gap-3.5 ${audience.tone.glow} motion-safe:transition motion-safe:hover:-translate-y-1 hover:shadow-md`}
+            >
+              <span aria-hidden="true" class="absolute top-6 right-7 text-sm text-gray-500 tabular-nums">
+                {String(index + 1).padStart(2, '0')}
+              </span>
+              <div
+                aria-hidden="true"
+                class={`w-12 h-12 rounded-xl flex items-center justify-center motion-safe:transition motion-safe:group-hover:-rotate-6 ${audience.tone.icon}`}
+              >
                 <svg
                   width="24"
                   height="24"
@@ -214,13 +196,12 @@ const textLink = 'font-semibold text-primary-700 hover:text-primary-900';
                   stroke-width="2"
                   stroke-linecap="round"
                   stroke-linejoin="round"
-                  class="text-primary-600"
                   set:html={audience.icon}
                 />
               </div>
               <h3 class="m-0 text-[22px] font-bold">{audience.title}</h3>
               <p class="m-0 text-base leading-relaxed text-gray-600">{audience.text}</p>
-              <ul class="m-0 pl-5 list-disc text-[15px] leading-[1.8] text-gray-700">
+              <ul class={`m-0 pl-5 list-disc text-[15px] leading-[1.8] text-gray-700 ${audience.tone.bullet}`}>
                 {audience.points.map((point) => (
                   <li>{point}</li>
                 ))}
@@ -301,36 +282,6 @@ const textLink = 'font-semibold text-primary-700 hover:text-primary-900';
   <!-- DATA FOR YOUR AREA -->
   <section id="coverage" aria-labelledby="coverage-heading" class="py-16 sm:py-[72px] bg-white border-b border-gray-200 scroll-mt-4">
     <CoverageMap client:visible />
-  </section>
-
-  <!-- DATA IN USE -->
-  <section aria-labelledby="stories-heading" class="py-16 sm:py-20 bg-white">
-    <div class="max-w-page mx-auto px-4 sm:px-6">
-      <p class={`${eyebrow} mb-2`}>Data in use</p>
-      <h2 id="stories-heading" class="m-0 mb-8 text-[28px] sm:text-[32px] leading-tight font-bold text-gray-900">
-        What people have done with it
-      </h2>
-      <div class="flex flex-wrap gap-6">
-        {
-          stories.filter((story) => !story.placeholder).map((story) => (
-            <article class="flex-[1_1_320px] min-w-0 border border-gray-200 rounded-2xl overflow-hidden flex flex-col">
-              <div class="p-[22px] flex flex-col gap-2 flex-1">
-                <span class="text-[13px] font-semibold text-primary-700">{story.tag}</span>
-                <h3 class="m-0 text-[19px] font-bold">{story.title}</h3>
-                <p class="m-0 text-[15px] leading-relaxed text-gray-600">{story.text}</p>
-                {story.href ? (
-                  <a href={story.href} target="_blank" rel="noopener noreferrer" class={`mt-auto text-[15px] ${textLink}`}>
-                    Read more on the ARTPARK site →
-                  </a>
-                ) : (
-                  <span class="mt-auto text-[15px] text-gray-500">[Link to come]</span>
-                )}
-              </div>
-            </article>
-          ))
-        }
-      </div>
-    </div>
   </section>
 
   <!-- RECENTLY UPDATED -->

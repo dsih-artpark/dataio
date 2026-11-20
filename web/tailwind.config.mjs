@@ -18,6 +18,10 @@ export default {
           950: '#1e1d4c',
         },
       },
+      maxWidth: {
+        // content width of the public site (wireframe: 1200px)
+        page: '1200px',
+      },
       fontFamily: {
         sans: [
           '-apple-system',

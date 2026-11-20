@@ -554,6 +554,47 @@ def test_manual_uploads_take_the_shared_lock_and_refuse_during_an_import(monkeyp
     assert taken == [False]  # shared, so manual uploads don't block each other
 
 
+# --- package preview: licence ---------------------------------------------------
+
+
+class _NothingInTheDatabase:
+    """Session stand-in: every lookup the package parser makes finds nothing."""
+
+    def query(self, *args):
+        return self
+
+    def filter(self, *args, **kwargs):
+        return self
+
+    def first(self):
+        return None
+
+    def close(self):
+        pass
+
+    def rollback(self):
+        pass
+
+
+PACKAGE_INFO = (
+    "ds_id: CS0007DS0999\ntitle: Foo\ncollection_id: CS0007\ndata_owner_name: Owner\n"
+    "licence: CC-BY-4.0\nspatial_resolution: STATE\ntemporal_resolution: YEAR\n"
+)
+
+
+@pytest.mark.parametrize(
+    "override, expected",
+    [({}, "CC-BY-4.0"), ({"licence": "ODbL"}, "ODbL"), ({"licence": None}, None)],
+)
+def test_package_preview_carries_the_licence(monkeypatch, override, expected):
+    """From info.yml, or the admin's edit, so a re-run or an import keeps it."""
+    monkeypatch.setattr("dataio.api.services.web_admin_service.DBSession", _NothingInTheDatabase)
+
+    preview = _service()._parse_dataset_package(PACKAGE_INFO, "{}", dataset_override=override)
+
+    assert preview["dataset"]["licence"] == expected
+
+
 # --- import_dataset_package(replace_existing=True) ------------------------------
 
 ARCHIVE_PREFIX = "archive/filestore/STANDARDISED/CS0007DS0999/20261015T000000Z"

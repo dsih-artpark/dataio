@@ -17,7 +17,11 @@ class _FakeBucket:
         self.objects = SimpleNamespace(filter=self._filter)
 
     def _filter(self, Prefix: str):
-        return [SimpleNamespace(key=key) for key in sorted(self.store) if key.startswith(Prefix)]
+        return [
+            SimpleNamespace(key=key, size=len(self.store[key]))
+            for key in sorted(self.store)
+            if key.startswith(Prefix)
+        ]
 
     def copy(self, source: dict, key: str) -> None:
         self.store[key] = self.store[source["Key"]]
@@ -156,3 +160,34 @@ def test_restore_of_a_dataset_that_had_no_files_empties_it():
     filestore.restore_dataset_version("CS0007DS0999", VersionType.STANDARDISED, ARCHIVE, [])
 
     assert filestore.bucket.store == {}
+
+
+def test_list_archives_groups_files_by_archive_folder_oldest_first():
+    newer = "archive/filestore/STANDARDISED/CS0007DS0998/20261101T000000Z"
+    filestore = _filestore({
+        f"{ARCHIVE}/table.csv": b"12345",
+        f"{ARCHIVE}/metadata.json": b"{}",
+        f"{newer}/table.csv": b"1",
+        f"{DATASET}/table.csv": b"live files are not archives",
+        "archive/filestore/STANDARDISED/stray.csv": b"",
+    })
+
+    archives, unrecognised = filestore.list_archives()
+
+    assert archives == [
+        {"prefix": ARCHIVE, "version_type": "STANDARDISED", "dataset_id": "CS0007DS0999",
+         "stamp": STAMP, "files": 2, "size": 7},
+        {"prefix": newer, "version_type": "STANDARDISED", "dataset_id": "CS0007DS0998",
+         "stamp": "20261101T000000Z", "files": 1, "size": 1},
+    ]
+    assert unrecognised == ["archive/filestore/STANDARDISED/stray.csv"]
+
+
+def test_list_archives_reports_paths_with_an_empty_folder_name():
+    empty_id = "archive/filestore/STANDARDISED//20261110T000000Z/table.csv"
+    filestore = _filestore({empty_id: b"1"})
+
+    archives, unrecognised = filestore.list_archives()
+
+    assert archives == []
+    assert unrecognised == [empty_id]

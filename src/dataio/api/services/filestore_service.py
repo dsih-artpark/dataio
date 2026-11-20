@@ -440,6 +440,33 @@ class FilestoreService(BaseService):
             copied.append(name)
         return archive_prefix, copied
 
+    def list_archives(self) -> tuple[list[dict], list[str]]:
+        """Groups archived files by archive folder, archive/filestore/<version>/<dataset_id>/<stamp>/.
+
+        Returns the folders (oldest stamp first) and any keys under archive/filestore/
+        that don't fit that layout, so they can be looked at rather than missed."""
+        archives: dict[str, dict] = {}
+        unrecognised = []
+        for obj in self.bucket.objects.filter(Prefix="archive/filestore/"):
+            if obj.key.endswith("/"):
+                continue
+            parts = obj.key.split("/", 5)
+            if len(parts) < 6 or not all(parts[2:6]):
+                unrecognised.append(obj.key)
+                continue
+            prefix = "/".join(parts[:5])
+            entry = archives.setdefault(prefix, {
+                "prefix": prefix,
+                "version_type": parts[2],
+                "dataset_id": parts[3],
+                "stamp": parts[4],
+                "files": 0,
+                "size": 0,
+            })
+            entry["files"] += 1
+            entry["size"] += obj.size
+        return sorted(archives.values(), key=lambda a: (a["stamp"], a["dataset_id"])), unrecognised
+
     def delete_dataset_version(self, dataset_id: str, version_type: VersionType) -> None:
         keys = [{"Key": key} for key in self._list_dataset_objects(dataset_id, version_type)]
         for start in range(0, len(keys), 1000):

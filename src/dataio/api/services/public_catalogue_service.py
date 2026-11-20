@@ -611,10 +611,13 @@ class PublicCatalogueService:
         session = DBSession()
         try:
             listed = Dataset.access_level.in_(PUBLIC_ACCESS_LEVELS)
+            # Restricted datasets count in the totals only: their owner,
+            # coverage years and kind are hidden details.
+            detailed = Dataset.access_level.in_(DETAIL_ACCESS_LEVELS)
 
-            total, sources, earliest, latest = (
+            total = session.query(func.count(Dataset.id)).filter(listed).scalar()
+            sources, earliest, latest = (
                 session.query(
-                    func.count(Dataset.id),
                     func.count(func.distinct(Dataset.data_owner_id)),
                     func.min(
                         cast(func.extract("year", Dataset.temporal_coverage_start_date), Integer)
@@ -623,7 +626,7 @@ class PublicCatalogueService:
                         cast(func.extract("year", Dataset.temporal_coverage_end_date), Integer)
                     ),
                 )
-                .filter(listed)
+                .filter(detailed)
                 .one()
             )
 
@@ -651,11 +654,13 @@ class PublicCatalogueService:
             kind_expr = func.coalesce(Dataset.manifest_json["datasetKind"].astext, "tabular")
             by_kind = dict.fromkeys(DATASET_KINDS, 0)
             for kind, count in (
-                session.query(kind_expr, func.count(Dataset.id)).filter(listed).group_by(kind_expr)
+                session.query(kind_expr, func.count(Dataset.id)).filter(detailed).group_by(kind_expr)
             ):
                 # An unrecognised datasetKind is shown as a table, as on the cards.
                 key = kind if kind in by_kind else "tabular"
                 by_kind[key] += count
+            # Restricted datasets show as tables, as their summary says.
+            by_kind["tabular"] += by_access.get(AccessLevel.NONE.value, 0)
 
             return {
                 "total_datasets": total or 0,

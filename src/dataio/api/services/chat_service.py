@@ -110,6 +110,21 @@ class AIProviderBase(ABC):
         pass
 
 
+def _add_reasoning_delta(block: dict, delta: dict) -> None:
+    """Adds one streamed Converse reasoningContent delta to its block, in the
+    shape Converse expects the block back: reasoningText {text, signature},
+    or redactedContent."""
+    reasoning = block["reasoningContent"]
+    if "redactedContent" in delta:
+        reasoning["redactedContent"] = delta["redactedContent"]
+        return
+    text = reasoning.setdefault("reasoningText", {"text": ""})
+    if "text" in delta:
+        text["text"] += delta["text"]
+    if "signature" in delta:
+        text["signature"] = delta["signature"]
+
+
 class BedrockProvider(AIProviderBase):
     """AWS Bedrock provider implementation."""
 
@@ -145,6 +160,11 @@ class BedrockProvider(AIProviderBase):
         )
 
         current_tool_use = None
+        # The whole reply, block by block, so a tool turn can be sent back
+        # complete: models that think by default (e.g. Claude Haiku 5.5) need
+        # their reasoning blocks, signatures included, returned unchanged
+        # with the tool results.
+        blocks: dict[int, dict] = {}
 
         for event in response.get("stream", []):
             # Content block start
@@ -159,10 +179,19 @@ class BedrockProvider(AIProviderBase):
 
             # Content block delta
             if "contentBlockDelta" in event:
+                index = event["contentBlockDelta"].get("contentBlockIndex", 0)
                 delta = event["contentBlockDelta"]["delta"]
 
                 if "text" in delta:
+                    block = blocks.setdefault(index, {"text": ""})
+                    block["text"] += delta["text"]
                     yield {"type": "text", "content": delta["text"]}
+
+                if "reasoningContent" in delta:
+                    _add_reasoning_delta(
+                        blocks.setdefault(index, {"reasoningContent": {}}),
+                        delta["reasoningContent"],
+                    )
 
                 if "toolUse" in delta and current_tool_use:
                     current_tool_use["input"] += delta["toolUse"].get("input", "")
@@ -176,6 +205,14 @@ class BedrockProvider(AIProviderBase):
                     except json.JSONDecodeError:
                         tool_input = {}
 
+                    index = event["contentBlockStop"].get("contentBlockIndex", len(blocks))
+                    blocks[index] = {
+                        "toolUse": {
+                            "toolUseId": current_tool_use["id"],
+                            "name": current_tool_use["name"],
+                            "input": tool_input,
+                        }
+                    }
                     yield {
                         "type": "tool_call",
                         "id": current_tool_use["id"],
@@ -189,7 +226,10 @@ class BedrockProvider(AIProviderBase):
                 stop_reason = event["messageStop"].get("stopReason")
                 yield {
                     "type": "message_stop",
-                    "stop_reason": "tool_use" if stop_reason == "tool_use" else "end_turn"
+                    "stop_reason": "tool_use" if stop_reason == "tool_use" else "end_turn",
+                    "assistant_content": [
+                        blocks[i] for i in sorted(blocks) if blocks[i].get("text", True) != ""
+                    ],
                 }
 
     def format_tool_result(self, tool_use_id: str, result: dict) -> dict:
@@ -624,9 +664,12 @@ class ChatService(BaseService):
                                     )
                                 )
 
-                            # Add assistant message and tool results to history
-                            # Use provider-specific formatting for assistant content
-                            if hasattr(self.ai_provider, 'format_assistant_content'):
+                            # Add assistant message and tool results to history.
+                            # A provider that reports the whole reply (Bedrock)
+                            # sends it back as is, reasoning blocks included.
+                            if event.get("assistant_content"):
+                                assistant_content = event["assistant_content"]
+                            elif hasattr(self.ai_provider, 'format_assistant_content'):
                                 assistant_content = self.ai_provider.format_assistant_content(tool_calls)
                             else:
                                 assistant_content = [

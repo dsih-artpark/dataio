@@ -562,6 +562,33 @@ def test_stats():
     }
 
 
+def test_stats_never_reveal_a_restricted_datasets_owner_years_or_kind(session_factory):
+    """Give the Restricted survey an owner, start year and kind no other dataset
+    has: none of them may show in the landing-page numbers."""
+    session = session_factory()
+    survey = session.query(Dataset).filter(Dataset.ds_id == "CS0002DS0003").one()
+    before = (survey.data_owner_id, survey.temporal_coverage_start_date, survey.manifest_json)
+    hidden_owner = DataOwner(name="Owner of a restricted survey only")
+    session.add(hidden_owner)
+    session.flush()
+    survey.data_owner_id = hidden_owner.id
+    survey.temporal_coverage_start_date = date(1950, 1, 1)
+    survey.manifest_json = {"datasetKind": "geojson"}
+    session.commit()
+    try:
+        stats = service.get_stats()
+        assert stats["total_datasets"] == 5
+        assert stats["total_sources"] == 3
+        assert stats["earliest_year"] == 1990
+        assert stats["by_dataset_kind"] == {"tabular": 4, "geojson": 1}
+    finally:
+        survey.data_owner_id, survey.temporal_coverage_start_date, survey.manifest_json = before
+        session.flush()
+        session.delete(hidden_owner)
+        session.commit()
+        session.close()
+
+
 # ------------------------------------------------------------------ routes
 
 

@@ -30,7 +30,7 @@ Each dataset has one of three access levels:
 | --- | --- |
 | **Open download** | See its description, tables, columns and a preview of real rows, and download it. No account needed. |
 | **View only** | See its description, tables and columns, and a **synthetic preview** (see section 6). Downloading needs our approval. |
-| **Restricted** | See its title, description, coverage and column names only. Access needs our approval. |
+| **Restricted** | See its ID, title and access level only. Access needs our approval. |
 
 You can ask for access to View only and Restricted datasets with the Request access form. We decide each request, and may approve it, refuse it, or approve it with conditions. We usually reply within 3 working days.
 

@@ -91,9 +91,16 @@ export async function downloadDatasetZip(
       folder.file(`${table.table_name}${isParquet ? '.parquet' : '.csv'}`, blob);
     }),
   );
-  const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
-  if (failures.length === data.tables.length) {
+  // A zip missing some tables would look complete, so any failure stops the download.
+  const failed = data.tables.filter((_, i) => results[i].status === 'rejected').map((t) => t.table_name);
+  if (failed.length === data.tables.length) {
     throw new Error('The files couldn’t be downloaded. The links may have expired: please try again.');
+  }
+  if (failed.length) {
+    throw new Error(
+      `${failed.length} of ${data.tables.length} tables couldn’t be downloaded (${failed.join(', ')}), ` +
+        'so nothing was saved. The links may have expired: please try again.',
+    );
   }
 
   const blob = await zip.generateAsync({ type: 'blob' });

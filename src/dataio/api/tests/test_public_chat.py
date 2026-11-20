@@ -121,6 +121,77 @@ def test_errors_never_show_the_exception_text(monkeypatch):
     assert events == [{"type": "error", "message": chat_module.CHAT_ERROR_MESSAGE}]
 
 
+class _FakeBedrockClient:
+    """Converse stream: reasoning (text then signature), a sentence, a tool call."""
+
+    def __init__(self):
+        self.requests = []
+
+    def converse_stream(self, **request):
+        self.requests.append(request)
+        return {"stream": [
+            {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"reasoningContent": {"text": ""}}}},
+            {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"reasoningContent": {"signature": "sig-1"}}}},
+            {"contentBlockStop": {"contentBlockIndex": 0}},
+            {"contentBlockDelta": {"contentBlockIndex": 1, "delta": {"text": "Let me look."}}},
+            {"contentBlockStop": {"contentBlockIndex": 1}},
+            {"contentBlockStart": {"contentBlockIndex": 2, "start": {"toolUse": {"toolUseId": "t1", "name": "list_categories"}}}},
+            {"contentBlockDelta": {"contentBlockIndex": 2, "delta": {"toolUse": {"input": '{"a": 1}'}}}},
+            {"contentBlockStop": {"contentBlockIndex": 2}},
+            {"messageStop": {"stopReason": "tool_use"}},
+        ]}
+
+
+async def _provider_events(provider) -> list[dict]:
+    return [e async for e in provider.stream_response(messages=[], system_prompt="s", tools=[])]
+
+
+def test_bedrock_reply_keeps_reasoning_text_and_tool_call_in_order():
+    provider = chat_module.BedrockProvider()
+    provider._client = _FakeBedrockClient()
+
+    events = asyncio.run(_provider_events(provider))
+
+    assert events[-1]["assistant_content"] == [
+        {"reasoningContent": {"reasoningText": {"text": "", "signature": "sig-1"}}},
+        {"text": "Let me look."},
+        {"toolUse": {"toolUseId": "t1", "name": "list_categories", "input": {"a": 1}}},
+    ]
+
+
+class _ThinkingThenAnswerProvider:
+    """First call: a reasoning block plus a tool call. Second call: the answer."""
+
+    REPLY = [
+        {"reasoningContent": {"reasoningText": {"text": "", "signature": "sig-1"}}},
+        {"toolUse": {"toolUseId": "t1", "name": "list_categories", "input": {}}},
+    ]
+
+    def __init__(self):
+        self.seen = []
+
+    async def stream_response(self, messages, system_prompt, tools):
+        self.seen.append([dict(m) for m in messages])
+        if len(self.seen) == 1:
+            yield {"type": "tool_call", "id": "t1", "name": "list_categories", "input": {}}
+            yield {"type": "message_stop", "stop_reason": "tool_use", "assistant_content": self.REPLY}
+        else:
+            yield {"type": "text", "content": "Done."}
+            yield {"type": "message_stop", "stop_reason": "end_turn"}
+
+    def format_tool_result(self, tool_id, data):
+        return {"toolResult": {"toolUseId": tool_id, "content": [{"json": data}]}}
+
+
+def test_tool_turn_is_sent_back_with_its_reasoning_blocks(monkeypatch):
+    provider = _ThinkingThenAnswerProvider()
+    asyncio.run(_collect(_service(monkeypatch, provider)))
+
+    second_call = provider.seen[1]
+    assert second_call[-2] == {"role": "assistant", "content": _ThinkingThenAnswerProvider.REPLY}
+    assert second_call[-1]["content"][0]["toolResult"]["toolUseId"] == "t1"
+
+
 # ------------------------------------------------------------------- route
 
 

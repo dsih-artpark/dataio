@@ -889,6 +889,10 @@ async def get_public_regions(
 
 
 # Per-IP limits for signed-out actions (decisions 2, 3 and 8 in the redesign plan).
+# Chat answers are streamed. nginx holds back a proxied response until it ends
+# unless the response opts out, so the answer would appear all at once.
+STREAM_HEADERS = {"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"}
+
 # Signed-out downloads of Open datasets ask visitors to accept the Terms of
 # Use and Privacy Policy, so they stay off until those are approved.
 PUBLIC_DOWNLOADS_ENABLED = os.getenv("PUBLIC_DOWNLOADS_ENABLED", "false").strip().lower() == "true"
@@ -1092,7 +1096,7 @@ async def public_chat_stream(body: PublicChatRequest, request: Request):
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        headers=STREAM_HEADERS,
     )
 
 
@@ -2285,10 +2289,7 @@ async def chat_stream(
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        }
+        headers=STREAM_HEADERS,
     )
 
 

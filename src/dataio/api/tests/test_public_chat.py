@@ -207,6 +207,25 @@ def test_daily_cap_for_all_visitors_has_its_own_message(monkeypatch):
     assert response.json()["detail"].startswith("The assistant has had a lot of questions today")
 
 
+def test_answers_stream_through_nginx_without_buffering(monkeypatch):
+    """nginx holds back a proxied response until it ends unless the response
+    says X-Accel-Buffering: no; without it the answer appears all at once."""
+
+    async def one_word(self, *args, **kwargs):
+        yield {"type": "text", "content": "Hi"}
+        yield {"type": "done"}
+
+    monkeypatch.setattr(security, "enforce_ip_rate_limit", lambda *args, **kwargs: None)
+    monkeypatch.setattr(security, "enforce_rate_limit", lambda *args, **kwargs: None)
+    monkeypatch.setattr(chat_module.ChatService, "chat_stream", one_word)
+    client = TestClient(importlib.import_module("dataio.api").app)
+
+    response = client.post("/api/v1/web/public/chat/stream", json={"message": "hi"})
+
+    assert response.status_code == 200
+    assert response.headers["x-accel-buffering"] == "no"
+
+
 # ------------------------------------------------------------------- tools
 
 

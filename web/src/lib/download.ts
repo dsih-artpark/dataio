@@ -13,6 +13,14 @@ export class ConsentRequiredError extends Error {
   }
 }
 
+/** Signed-out downloads are switched off on the server: the visitor must sign in. */
+export class SignInRequiredError extends Error {
+  constructor() {
+    super('Sign in to download this dataset.');
+    this.name = 'SignInRequiredError';
+  }
+}
+
 /**
  * Links for an Open dataset without signing in. With `email` (from the pop-up)
  * the visitor accepts the terms now; without it, the visitor cookie from an
@@ -32,6 +40,9 @@ async function openDownloadTables(dsId: string, email?: string) {
     return data.tables;
   } catch (err) {
     if (err instanceof ApiRequestError && err.statusCode === 428) throw new ConsentRequiredError();
+    if (err instanceof ApiRequestError && err.statusCode === 403 && err.message === 'sign_in_to_download') {
+      throw new SignInRequiredError();
+    }
     throw err;
   }
 }

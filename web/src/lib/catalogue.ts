@@ -226,7 +226,7 @@ export const ACCESS_LABELS: Record<CatalogueAccessLevel, string> = {
 };
 
 export const ACCESS_DESCRIPTIONS: Record<CatalogueAccessLevel, string> = {
-  DOWNLOAD: 'Download the full dataset straight away. No sign-in needed.',
+  DOWNLOAD: 'Download the full dataset straight away.',
   VIEW: 'See the tables, columns and documentation, with a preview of sample values. Ask us for access to download.',
   NONE: 'Sensitive data. Listed so you know it exists; shared under agreement.',
 };

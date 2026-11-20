@@ -889,6 +889,10 @@ async def get_public_regions(
 
 
 # Per-IP limits for signed-out actions (decisions 2, 3 and 8 in the redesign plan).
+# Signed-out downloads of Open datasets ask visitors to accept the Terms of
+# Use and Privacy Policy, so they stay off until those are approved.
+PUBLIC_DOWNLOADS_ENABLED = os.getenv("PUBLIC_DOWNLOADS_ENABLED", "false").strip().lower() == "true"
+SIGN_IN_TO_DOWNLOAD = "sign_in_to_download"
 PUBLIC_DOWNLOADS_PER_HOUR = int(os.getenv("PUBLIC_DOWNLOADS_PER_HOUR", "30"))
 PUBLIC_PREVIEWS_PER_HOUR = int(os.getenv("PUBLIC_PREVIEWS_PER_HOUR", "120"))
 PUBLIC_ACCESS_REQUESTS_PER_HOUR = int(os.getenv("PUBLIC_ACCESS_REQUESTS_PER_HOUR", "5"))
@@ -919,10 +923,15 @@ async def get_public_download_urls(dataset_id: str, body: PublicDownloadRequest,
     first time); otherwise 428. POST so the email stays out of URLs and logs.
     Links are short-lived. Rate-limited per IP; each download is logged with
     the email, visitor ID and IP (access channel PUBLIC).
+
+    While PUBLIC_DOWNLOADS_ENABLED is off: 403 with detail
+    ``sign_in_to_download``, before anything is read or logged.
     """
     from dataio.api.auth.security import enforce_ip_rate_limit
     from dataio.api.services.public_access_service import PublicAccessService
 
+    if not PUBLIC_DOWNLOADS_ENABLED:
+        raise HTTPException(status_code=403, detail=SIGN_IN_TO_DOWNLOAD)
     enforce_ip_rate_limit(request, "download", PUBLIC_DOWNLOADS_PER_HOUR, 3600)
     user_agent, ip_address = get_client_info(request)
     return PublicAccessService().get_open_download_urls(

@@ -4,10 +4,23 @@
 // kept in the dataio_visitor cookie so later downloads go straight through.
 // Signed-in users never see the pop-up (their account email is recorded).
 import { useEffect, useRef, useState } from 'preact/hooks';
-import type { VNode } from 'preact';
+import type { ComponentChildren, VNode } from 'preact';
 import { createPortal } from 'preact/compat';
 import { currentUser, initAuth } from '../../../lib/auth';
-import { ConsentRequiredError, downloadDatasetZip } from '../../../lib/download';
+import { ConsentRequiredError, SignInRequiredError, downloadDatasetZip } from '../../../lib/download';
+
+/** While signed-out downloads are off: a link to sign in that comes back here. */
+function SignInToDownload(): VNode {
+  const next = encodeURIComponent(window.location.pathname + window.location.search);
+  return (
+    <>
+      <a href={`/login?next=${next}`} class="font-semibold underline">
+        Sign in
+      </a>{' '}
+      to download this dataset.
+    </>
+  );
+}
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -26,6 +39,7 @@ interface DownloadTarget {
 export function useDatasetDownload(dataset: DownloadTarget | null) {
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [signInNeeded, setSignInNeeded] = useState(false);
   const [asking, setAsking] = useState(false);
   const returnFocus = useRef<HTMLElement | null>(null);
 
@@ -33,6 +47,7 @@ export function useDatasetDownload(dataset: DownloadTarget | null) {
     if (!dataset) return false;
     setDownloading(true);
     setError(null);
+    setSignInNeeded(false);
     try {
       await downloadDatasetZip(dataset.ds_id, dataset.title, mode, dataset.readme_md, email);
       return true;
@@ -40,6 +55,10 @@ export function useDatasetDownload(dataset: DownloadTarget | null) {
       if (err instanceof ConsentRequiredError) {
         returnFocus.current = document.activeElement as HTMLElement | null;
         setAsking(true);
+        return false;
+      }
+      if (err instanceof SignInRequiredError) {
+        setSignInNeeded(true);
         return false;
       }
       setError(err instanceof Error ? err.message : 'Download failed');
@@ -73,7 +92,8 @@ export function useDatasetDownload(dataset: DownloadTarget | null) {
   ) : null;
 
   // While the pop-up is open its own message area shows errors.
-  return { downloading, error: asking ? null : error, start, dialog };
+  const message: ComponentChildren = asking ? null : signInNeeded ? <SignInToDownload /> : error;
+  return { downloading, error: message, start, dialog };
 }
 
 interface ConsentDialogProps {

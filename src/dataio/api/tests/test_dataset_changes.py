@@ -1,0 +1,98 @@
+from __future__ import annotations
+
+from datetime import date
+
+import pytest
+from pydantic import ValidationError
+
+from dataio.api.services.dataset_changes import DatasetChange, DatasetChangeInput
+
+
+def _entry(**overrides) -> dict:
+    entry = {
+        "dataset_id": "EP0006DS0097",
+        "date": "2026-11-20",
+        "type": "data",
+        "breaking": True,
+        "summary": "Renamed the district column.",
+        "reason": "Match the v2 naming rules.",
+        "changes": [{"kind": "column_renamed", "table": "district_level",
+                     "old": "dist", "new": "district"}],
+    }
+    entry.update(overrides)
+    return entry
+
+
+def _with_change(**fields) -> dict:
+    return _entry(changes=[{**_entry()["changes"][0], **fields}])
+
+
+def test_a_valid_entry_validates():
+    entry = DatasetChange.model_validate(_entry())
+
+    assert entry.dataset_id == "EP0006DS0097"
+    assert entry.date == date(2026, 11, 20)
+    assert entry.changes[0].old == "dist"
+    assert entry.changes[0].column is None
+
+
+def test_values_are_kept_exactly_as_written():
+    change = DatasetChange.model_validate(_with_change(old="0123", new=" <NA> ")).changes[0]
+
+    assert (change.old, change.new) == ("0123", " <NA> ")
+
+
+@pytest.mark.parametrize("entry, field", [
+    (_entry(summery="x"), "summery"),  # unknown field (also blocks archive paths and internal references)
+    (_with_change(kind="column_moved"), "changes.0.kind"),
+    (_entry(dataset_id="EP06DS97"), "dataset_id"),
+    (_entry(date="20 Nov 2026"), "date"),
+    (_entry(type="schema"), "type"),
+    (_entry(summary="   "), "summary"),
+    (_entry(reason=""), "reason"),
+    (_with_change(old=10), "changes.0.old"),  # a number would lose digits (0.10 -> 0.1)
+    (_with_change(table=""), "changes.0.table"),  # a blank row would show publicly as "— —"
+    (_with_change(table="  "), "changes.0.table"),
+])
+def test_a_bad_entry_is_rejected_naming_the_field(entry, field):
+    with pytest.raises(ValidationError) as err:
+        DatasetChange.model_validate(entry)
+
+    assert field in {".".join(map(str, e["loc"])) for e in err.value.errors()}
+
+
+def test_an_entry_may_have_no_change_rows():
+    assert DatasetChange.model_validate(_entry(changes=[])).changes == []
+
+
+def test_input_without_a_date_has_none():
+    body = {k: v for k, v in _entry().items() if k not in ("dataset_id", "date")}
+
+    assert DatasetChangeInput.model_validate(body).date is None
+
+
+def test_input_rejects_a_dataset_id_field():
+    with pytest.raises(ValidationError):
+        DatasetChangeInput.model_validate({k: v for k, v in _entry().items() if k != "date"})
+
+
+@pytest.mark.parametrize(
+    "entry, field",
+    [
+        (_entry(summary="x" * 301), "summary"),
+        (_entry(reason="x" * 2001), "reason"),
+        (_with_change(old="x" * 501), "old"),
+        (_with_change(note="x" * 501), "note"),
+        (_with_change(table="x" * 501), "table"),
+        (_entry(changes=[_entry()["changes"][0]] * 201), "changes"),
+    ],
+)
+def test_text_and_row_counts_have_limits(entry, field):
+    with pytest.raises(ValidationError) as error:
+        DatasetChange.model_validate(entry)
+    assert field in str(error.value)
+
+
+def test_text_at_the_limits_is_accepted():
+    entry = _entry(summary="x" * 300, reason="x" * 2000, changes=[{**_entry()["changes"][0], "note": "x" * 500}] * 200)
+    assert len(DatasetChange.model_validate(entry).changes) == 200

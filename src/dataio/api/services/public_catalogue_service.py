@@ -146,6 +146,32 @@ def dataset_kind(dataset: Dataset) -> str:
     return kind if kind in DATASET_KINDS else "tabular"
 
 
+def hidden_columns(dataset: Dataset) -> set[tuple[str, str]]:
+    """(table, column) pairs marked ``access: false`` in the dataset's data
+    dictionary: never shown publicly, including on the changelog."""
+    hidden: set[tuple[str, str]] = set()
+    manifest_tables = _manifest_tables(dataset)
+    if isinstance(manifest_tables, dict) and manifest_tables:
+        for table_name, table in manifest_tables.items():
+            dictionary = table.get("dataDictionary") if isinstance(table, dict) else None
+            for column_name, field in (dictionary or {}).items() if isinstance(dictionary, dict) else ():
+                if isinstance(field, dict) and field.get("access") is False:
+                    hidden.add((str(table_name), str(column_name)))
+        return hidden
+    if not dataset.data_dictionary_json:
+        return hidden
+    try:
+        parsed = json.loads(dataset.data_dictionary_json)
+    except (TypeError, ValueError):
+        return hidden
+    for table_name, table in ((parsed or {}).get("tables") or {}).items():
+        dictionary = table.get("data_dictionary") if isinstance(table, dict) else None
+        for column_name, field in (dictionary or {}).items() if isinstance(dictionary, dict) else ():
+            if isinstance(field, dict) and field.get("access") is False:
+                hidden.add((str(table_name), str(column_name)))
+    return hidden
+
+
 def public_columns(dataset: Dataset) -> list[dict]:
     """Tables and their columns, safe to show publicly at any access level.
 

@@ -6,6 +6,11 @@ import type {
   AccessLevel,
   AdminDatasetDetail,
   AdminDatasetPackagePreview,
+  AdminDatasetChange,
+  AdminDatasetChangeList,
+  ChangelogDraft,
+  DatasetChangeStatus,
+  PublicDatasetChangeList,
   AdminDatasetSummary,
   AdminDatasetTablesResponse,
   AdminManifestRecord,
@@ -185,7 +190,12 @@ class ApiClient {
       const message =
         typeof error.detail === 'string'
           ? error.detail
-          : error.detail?.message || 'Request failed';
+          : Array.isArray(error.detail)
+            ? // FastAPI field checks: [{loc, msg}, ...]
+              (error.detail as { loc?: unknown[]; msg?: string }[])
+                .map((item) => [item.loc?.slice(1).join('.'), item.msg].filter(Boolean).join(': '))
+                .join('; ') || 'Request failed'
+            : error.detail?.message || 'Request failed';
       throw new ApiRequestError(message, error.detail, response.status);
     }
 
@@ -553,6 +563,25 @@ class ApiClient {
     return this.request<CatalogueDatasetDetail>(`/public/datasets/${encodeURIComponent(datasetId)}`, {}, false);
   }
 
+  /** A dataset's published changelog ("Version history"), newest first. */
+  async getPublicDatasetChanges(datasetId: string): Promise<PublicDatasetChangeList> {
+    return this.request<PublicDatasetChangeList>(
+      `/public/datasets/${encodeURIComponent(datasetId)}/changes`,
+      {},
+      false
+    );
+  }
+
+  /** All published changelog entries, newest first. */
+  async getPublicDatasetChangeList(params: { datasetId?: string; limit?: number; offset?: number } = {}): Promise<PublicDatasetChangeList> {
+    const query = new URLSearchParams();
+    if (params.datasetId) query.set('dataset_id', params.datasetId);
+    if (params.limit !== undefined) query.set('limit', String(params.limit));
+    if (params.offset !== undefined) query.set('offset', String(params.offset));
+    const suffix = query.toString() ? `?${query}` : '';
+    return this.request<PublicDatasetChangeList>(`/public/dataset-changes${suffix}`, {}, false);
+  }
+
   async getCatalogueStats(): Promise<CatalogueStats> {
     return this.request<CatalogueStats>('/public/stats', {}, false);
   }
@@ -598,6 +627,53 @@ class ApiClient {
     return this.request(`/admin/access-requests/${encodeURIComponent(requestId)}/${decision}`, {
       method: 'POST',
       body: JSON.stringify({ note: note || null }),
+    });
+  }
+
+  // ------------------------------------------------- dataset changelog (DIO-53)
+
+  async adminListDatasetChanges(params: {
+    status?: DatasetChangeStatus;
+    datasetId?: string;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<AdminDatasetChangeList> {
+    const query = new URLSearchParams();
+    if (params.status) query.set('status', params.status);
+    if (params.datasetId) query.set('dataset_id', params.datasetId);
+    if (params.limit !== undefined) query.set('limit', String(params.limit));
+    if (params.offset !== undefined) query.set('offset', String(params.offset));
+    const suffix = query.toString() ? `?${query}` : '';
+    return this.request<AdminDatasetChangeList>(`/admin/dataset-changes${suffix}`);
+  }
+
+  async adminCreateDatasetChange(datasetId: string, body: ChangelogDraft): Promise<AdminDatasetChange> {
+    return this.request<AdminDatasetChange>(`/admin/datasets/${encodeURIComponent(datasetId)}/changes`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  /** Leave out `date` or `changes` to keep the stored ones. */
+  async adminUpdateDatasetChange(
+    changeId: string,
+    body: Omit<ChangelogDraft, 'date' | 'changes'> & Partial<Pick<ChangelogDraft, 'date' | 'changes'>>
+  ): Promise<AdminDatasetChange> {
+    return this.request<AdminDatasetChange>(`/admin/dataset-changes/${encodeURIComponent(changeId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async adminPublishDatasetChange(changeId: string): Promise<AdminDatasetChange> {
+    return this.request<AdminDatasetChange>(`/admin/dataset-changes/${encodeURIComponent(changeId)}/publish`, {
+      method: 'POST',
+    });
+  }
+
+  async adminDeleteDatasetChange(changeId: string): Promise<{ deleted: boolean; id: string }> {
+    return this.request<{ deleted: boolean; id: string }>(`/admin/dataset-changes/${encodeURIComponent(changeId)}`, {
+      method: 'DELETE',
     });
   }
 
@@ -1044,6 +1120,8 @@ class ApiClient {
     rawDatasetOverride?: Record<string, unknown>;
     bucketType?: string;
     replaceExisting?: boolean;
+    /** Required by the server when replacing: what changed (saved as a draft). */
+    changelog?: ChangelogDraft;
   }) {
     const formData = new FormData();
     formData.append('info_file', params.infoFile);
@@ -1061,6 +1139,9 @@ class ApiClient {
     if (params.replaceExisting) {
       formData.append('replace_existing', 'true');
     }
+    if (params.changelog) {
+      formData.append('changelog_json', JSON.stringify(params.changelog));
+    }
     return this.request<{
       dataset_id: string;
       bucket_type: string;
@@ -1069,6 +1150,7 @@ class ApiClient {
       replaced?: boolean;
       archive_prefix?: string;
       archived_files?: string[];
+      change_id?: string;
     }>('/admin/datasets/import/apply', {
       method: 'POST',
       body: formData,

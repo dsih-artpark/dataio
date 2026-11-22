@@ -3,7 +3,9 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { marked } from 'marked';
 
 import { ApiRequestError, api } from '../../lib/api';
+import { ChangelogEntryForm, emptyChangelogDraft, isChangelogComplete, mergeSuggestedRows } from './ChangelogEntryForm';
 import type {
+  ChangelogDraft,
   AdminDatasetDetail,
   AdminDatasetPackagePreview,
   AdminDatasetSummary,
@@ -174,6 +176,10 @@ export default function DatasetAdminManager({
   const [importPreview, setImportPreview] = useState<AdminDatasetPackagePreview | null>(null);
   const [importingPackage, setImportingPackage] = useState(false);
   const [importReplaceExisting, setImportReplaceExisting] = useState(false);
+  // What changed, required when replacing; saved as a draft changelog entry (DIO-53).
+  const [importChangelog, setImportChangelog] = useState<ChangelogDraft>(emptyChangelogDraft());
+  // The dataset the changelog form was filled in for; another dataset starts it fresh.
+  const [importChangelogFor, setImportChangelogFor] = useState<string | null>(null);
   const [importReplaceConfirmed, setImportReplaceConfirmed] = useState(false);
   const [deleteVerificationCode, setDeleteVerificationCode] = useState('');
   const [deleteConfirmationDatasetId, setDeleteConfirmationDatasetId] = useState('');
@@ -712,6 +718,16 @@ export default function DatasetAdminManager({
       });
       applyImportPreview(preview);
       setImportReplaceConfirmed(false);
+      if (preview.replace) {
+        const suggested = preview.replace.suggested_changes ?? [];
+        const sameDataset = preview.replace.dataset_id === importChangelogFor;
+        setImportChangelog((current) =>
+          sameDataset
+            ? { ...current, changes: mergeSuggestedRows(current.changes, suggested) }
+            : { ...emptyChangelogDraft(), changes: suggested }
+        );
+        setImportChangelogFor(preview.replace.dataset_id);
+      }
       setStatusMessage(
         preview.can_import
           ? 'Package preview passed validation and is ready to import.'
@@ -737,13 +753,17 @@ export default function DatasetAdminManager({
         rawDatasetOverride: rawDatasetForm,
         bucketType: STANDARDISED_BUCKET,
         replaceExisting: importReplaceExisting,
+        changelog: importReplaceExisting ? importChangelog : undefined,
       });
       setStatusMessage(
         response.replaced
           ? `Replaced dataset ${response.dataset_id} with ${response.uploaded_tables.length} table(s). ` +
-              `The previous ${response.archived_files?.length ?? 0} file(s) are archived under ${response.archive_prefix}/.`
+              `The previous ${response.archived_files?.length ?? 0} file(s) are archived under ${response.archive_prefix}/. ` +
+              'A changelog draft was saved: review and publish it under Datasets > Dataset changes.'
           : `Imported dataset ${response.dataset_id} with ${response.uploaded_tables.length} table(s).`
       );
+      setImportChangelog(emptyChangelogDraft());
+      setImportChangelogFor(null);
       setSelectedDatasetId(response.dataset_id);
       setImportPreview(null);
       setImportReplaceConfirmed(false);
@@ -888,6 +908,25 @@ export default function DatasetAdminManager({
   const visibleSelectedSyncIds = visibleDocumentationStatuses
     .filter((item) => selectedSyncIds.has(item.ds_id))
     .map((item) => item.ds_id);
+  const allVisibleSyncSelected =
+    visibleDocumentationStatuses.length > 0 &&
+    visibleSelectedSyncIds.length === visibleDocumentationStatuses.length;
+
+  // Ticks (or unticks) every row currently shown, so "Show only outdated" +
+  // "Select all shown" ticks exactly the outdated list.
+  const toggleSelectAllVisibleSync = () => {
+    setSelectedSyncIds((current) => {
+      const next = new Set(current);
+      for (const item of visibleDocumentationStatuses) {
+        if (allVisibleSyncSelected) {
+          next.delete(item.ds_id);
+        } else {
+          next.add(item.ds_id);
+        }
+      }
+      return next;
+    });
+  };
 
   const handleSyncSelectedItems = async () => {
     const ids = visibleSelectedSyncIds;
@@ -1828,7 +1867,10 @@ export default function DatasetAdminManager({
                 importCsvFiles.length === 0 ||
                 importingPackage ||
                 (importReplaceExisting &&
-                  (!importPreview?.replace || !importReplaceConfirmed || replaceTargetChanged))
+                  (!importPreview?.replace ||
+                    !importReplaceConfirmed ||
+                    replaceTargetChanged ||
+                    !isChangelogComplete(importChangelog)))
               }
               class={`w-full rounded-xl px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto ${
                 importReplaceExisting ? 'bg-amber-700' : 'bg-emerald-700'
@@ -1882,6 +1924,27 @@ export default function DatasetAdminManager({
                   <p class="mt-2 font-medium text-red-700">
                     The Dataset ID was changed to {createForm.ds_id || '(empty)'} after this preview of{' '}
                     {importPreview.replace.dataset_id}. Preview again before replacing.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
+            {importPreview.replace ? (
+              <div class="rounded-2xl border border-slate-200 bg-white p-4">
+                <h4 class="font-semibold text-slate-900">What changed</h4>
+                <p class="mb-4 mt-1 text-sm text-slate-600">
+                  Required before replacing. It is saved as a draft on the Dataset changes page, where an admin publishes it
+                  to the dataset's public Version history. Rows for added and removed tables and columns, unit changes and
+                  changed allowed values are filled in from the preview; add renames and other changes yourself.
+                </p>
+                <ChangelogEntryForm
+                  value={importChangelog}
+                  onChange={setImportChangelog}
+                  restricted={importPreview.replace.access_level_kept === 'NONE'}
+                />
+                {!isChangelogComplete(importChangelog) ? (
+                  <p class="mt-3 text-sm font-medium text-amber-800">
+                    Fill in the summary, why and a table name on every row to enable Replace Dataset.
                   </p>
                 ) : null}
               </div>
@@ -2369,14 +2432,25 @@ export default function DatasetAdminManager({
             <p class="text-sm text-slate-600">
               {documentationStatuses.filter((item) => item.needs_update).length} of {documentationStatuses.length} datasets are outdated.
             </p>
-            <label class="flex items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={showOnlyOutdated}
-                onChange={(e) => setShowOnlyOutdated((e.currentTarget as HTMLInputElement).checked)}
-              />
-              Show only outdated
-            </label>
+            <div class="flex flex-wrap items-center gap-4">
+              <label class="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={showOnlyOutdated}
+                  onChange={(e) => setShowOnlyOutdated((e.currentTarget as HTMLInputElement).checked)}
+                />
+                Show only outdated
+              </label>
+              <label class="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={allVisibleSyncSelected}
+                  disabled={visibleDocumentationStatuses.length === 0 || syncingSelectedIds}
+                  onChange={toggleSelectAllVisibleSync}
+                />
+                Select all shown
+              </label>
+            </div>
           </div>
         ) : null}
 

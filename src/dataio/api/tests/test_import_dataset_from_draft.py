@@ -18,6 +18,8 @@ from fastapi import HTTPException
 
 from dataio.api.database.enums import VersionType
 from dataio.api.database.functions import DatasetBusy
+from dataio.api.services.dataset_change_service import DatasetChangeService
+from dataio.api.services.dataset_changes import DatasetChangeInput
 from dataio.api.services.web_admin_service import WebAdminService
 
 ADMIN_USER = SimpleNamespace(email="admin@example.com", is_admin=True, is_group=False)
@@ -377,10 +379,10 @@ class _PackageImport:
         """(args, kwargs) of the first call to step `name`."""
         return next((args, kwargs) for step, args, kwargs in self.calls if step == name)
 
-    def run(self):
+    def run(self, changelog=None):
         info = SimpleNamespace(file=None)
         csv = SimpleNamespace(filename="foo.csv", file=BytesIO(b"a,b\n1,2\n"))
-        return self.service.import_dataset_package(ADMIN_USER, info, info, [csv])
+        return self.service.import_dataset_package(ADMIN_USER, info, info, [csv], changelog=changelog)
 
 
 def test_import_dataset_package_happy_path_undoes_nothing(monkeypatch):
@@ -598,6 +600,7 @@ def test_package_preview_carries_the_licence(monkeypatch, override, expected):
 # --- import_dataset_package(replace_existing=True) ------------------------------
 
 ARCHIVE_PREFIX = "archive/filestore/STANDARDISED/CS0007DS0999/20261015T000000Z"
+DEFAULT_CHANGELOG = DatasetChangeInput(type="data", breaking=False, summary="S.", reason="R.")
 
 
 def _current_dataset():
@@ -639,11 +642,20 @@ class _PackageReplace(_PackageImport):
         monkeypatch.setattr(admin, "update_dataset", self._step("update_dataset"))
         monkeypatch.setattr(admin, "refresh_dataset_documentation_cache", self._step("undo:refresh_cache"))
         monkeypatch.setattr(f"{db}.update_dataset", self._step("undo:restore_dataset"))
+        record = self._step("create_change_draft")
 
-    def run(self):
+        def create_draft(_service, *args, **kwargs):
+            record(*args, **kwargs)
+            return {"id": "chg-1"}
+
+        monkeypatch.setattr(DatasetChangeService, "create_draft", create_draft)
+
+    def run(self, changelog=DEFAULT_CHANGELOG):
         info = SimpleNamespace(file=None)
         csv = SimpleNamespace(filename="foo.csv", file=BytesIO(b"a,b\n1,2\n"))
-        return self.service.import_dataset_package(ADMIN_USER, info, info, [csv], replace_existing=True)
+        return self.service.import_dataset_package(
+            ADMIN_USER, info, info, [csv], replace_existing=True, changelog=changelog
+        )
 
 
 def test_replace_archives_then_swaps_files_and_keeps_the_dataset(monkeypatch):
@@ -653,10 +665,14 @@ def test_replace_archives_then_swaps_files_and_keeps_the_dataset(monkeypatch):
 
     assert package.names() == [
         "archive", "create_raw_dataset", "update_dataset", "delete_version",
-        "create_dataset_table", "upsert_dataset_manifest",
+        "create_dataset_table", "upsert_dataset_manifest", "create_change_draft",
     ]
     assert "create_dataset" not in package.names()
     assert result["replaced"] is True
+    assert result["change_id"] == "chg-1"
+    args, kwargs = package.call("create_change_draft")
+    assert args == (ADMIN_USER, DS_ID, DEFAULT_CHANGELOG)
+    assert kwargs == {"archive_prefix": ARCHIVE_PREFIX}
     assert result["archive_prefix"] == ARCHIVE_PREFIX
     assert result["archived_files"] == ["foo.csv", "metadata.json"]
     assert result["uploaded_tables"] == ["foo"]
@@ -777,6 +793,10 @@ def test_replace_plan_lists_what_will_be_archived_and_changed(monkeypatch):
     assert plan["tables_removed"] == ["old"]
     assert plan["access_level_kept"] == "VIEW"
     assert plan["archive_location"] == f"archive/filestore/STANDARDISED/{DS_ID}/<timestamp>/"
+    assert plan["suggested_changes"] == [
+        {"kind": "table_added", "table": "new"},
+        {"kind": "table_removed", "table": "old"},
+    ]
 
 
 def test_replace_restores_files_when_the_delete_itself_fails_part_way(monkeypatch):
@@ -803,3 +823,196 @@ def test_replace_rollback_passes_every_field_so_empty_ones_are_restored(monkeypa
     assert {"description", "temporal_coverage_start_date", "temporal_coverage_end_date",
             "additional_metadata"} <= previous.model_fields_set
     assert previous.temporal_coverage_start_date is None
+
+
+# ------------------------------------------------- changelog on Replace (DIO-53)
+
+
+def test_replace_without_a_changelog_changes_nothing(monkeypatch):
+    package = _PackageReplace(monkeypatch, s3_has_files=True)
+
+    with pytest.raises(HTTPException) as exc_info:
+        package.run(changelog=None)
+
+    assert exc_info.value.status_code == 422
+    assert "summary and reason" in exc_info.value.detail
+    assert package.names() == [] and package.locks == []
+
+
+def test_a_new_import_rejects_a_changelog(monkeypatch):
+    package = _PackageImport(monkeypatch)
+
+    with pytest.raises(HTTPException) as exc_info:
+        package.run(changelog=DEFAULT_CHANGELOG)
+
+    assert exc_info.value.status_code == 422
+    assert package.names() == []
+
+
+def test_replace_is_undone_when_saving_the_changelog_fails(monkeypatch):
+    package = _PackageReplace(monkeypatch, s3_has_files=True, fail_at={"create_change_draft"})
+
+    with pytest.raises(HTTPException) as exc_info:
+        package.run()
+
+    names = package.names()
+    assert names.index("create_change_draft") < names.index("undo:restore_files")
+    assert "undo:restore_dataset" in names
+    assert exc_info.value.detail["undone"] is True
+
+
+APPLY_FILES = [
+    ("info_file", ("info.yml", b"x")),
+    ("metadata_file", ("m.yml", b"x")),
+    ("csv_files", ("foo.csv", b"a,b")),
+]
+
+
+def _apply(monkeypatch, changelog_json):
+    import importlib
+
+    from fastapi.testclient import TestClient
+
+    from dataio.api.auth.jwt import get_current_web_user
+
+    seen = []
+    app = importlib.import_module("dataio.api").app
+    app.dependency_overrides[get_current_web_user] = lambda: ADMIN_USER
+    monkeypatch.setattr(
+        WebAdminService, "import_dataset_package",
+        lambda self, *args, **kwargs: seen.append(kwargs.get("changelog")) or {"replaced": True},
+    )
+    try:
+        response = TestClient(app).post(
+            "/api/v1/web/admin/datasets/import/apply",
+            files=APPLY_FILES,
+            data={"replace_existing": "true", "changelog_json": changelog_json},
+        )
+    finally:
+        app.dependency_overrides.clear()
+    return response, seen
+
+
+@pytest.mark.parametrize("changelog_json", [
+    "{summary:",
+    json.dumps({"type": "data", "breaking": False, "summary": "  ", "reason": "R."}),
+])
+def test_apply_rejects_an_invalid_changelog(monkeypatch, changelog_json):
+    response, seen = _apply(monkeypatch, changelog_json)
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["message"].startswith("The changelog entry is not valid")
+    assert seen == []
+
+
+def test_the_changelog_error_names_the_field(monkeypatch):
+    response, _ = _apply(monkeypatch, json.dumps({"type": "data", "breaking": False, "summary": "x" * 301, "reason": "R."}))
+
+    assert response.status_code == 422
+    assert "summary" in response.json()["detail"]["message"]
+
+
+def test_apply_passes_a_valid_changelog_to_the_service(monkeypatch):
+    body = {"type": "data", "breaking": True, "summary": "S.", "reason": "R."}
+    response, seen = _apply(monkeypatch, json.dumps(body))
+
+    assert response.status_code == 200
+    assert isinstance(seen[0], DatasetChangeInput) and seen[0].summary == "S."
+
+
+def test_replace_plan_suggests_column_unit_and_value_changes(monkeypatch):
+    service = _service()
+    current = _current_dataset()
+    current.manifest_json = {"datasetTables": {"keep": {"dataDictionary": {
+        "district": {"type": "string"},
+        "dist_code": {"type": "string"},
+        "cases": {"type": "int", "unit": "count"},
+        "sex": {"type": "enum", "allowedValues": ["M", "F"]},
+    }}}}
+    monkeypatch.setattr(
+        "dataio.api.services.web_admin_service.database.get_dataset", lambda ds_id: current
+    )
+    monkeypatch.setattr(
+        service.admin_dataset_service.filestore_service,
+        "list_dataset_version_files",
+        lambda ds_id, bucket_type: ["keep.csv"],
+    )
+    manifest_yaml = (
+        "datasetTables:\n"
+        "  keep:\n"
+        "    dataDictionary:\n"
+        "      district: {type: string}\n"
+        "      district.ID: {type: regionID}\n"
+        "      cases: {type: int, unit: per 1000}\n"
+        "      sex: {type: enum, allowedValues: [male, female]}\n"
+    )
+    preview = {"dataset": {"ds_id": DS_ID}, "tables": [{"table_name": "keep"}], "manifest_yaml": manifest_yaml}
+
+    plan = service._replace_plan(preview, VersionType.STANDARDISED)
+
+    assert plan["suggested_changes"] == [
+        {"kind": "column_added", "table": "keep", "column": "district.ID"},
+        {"kind": "column_removed", "table": "keep", "column": "dist_code"},
+        {"kind": "unit_changed", "table": "keep", "column": "cases", "old": "count", "new": "per 1000"},
+        {"kind": "values_recoded", "table": "keep", "column": "sex",
+         "note": "Allowed values changed: 2 removed, 2 added"},
+    ]
+
+
+def test_replace_plan_without_a_stored_manifest_suggests_only_tables(monkeypatch):
+    service = _service()
+    monkeypatch.setattr(
+        "dataio.api.services.web_admin_service.database.get_dataset", lambda ds_id: _current_dataset()
+    )
+    monkeypatch.setattr(
+        service.admin_dataset_service.filestore_service,
+        "list_dataset_version_files",
+        lambda ds_id, bucket_type: ["keep.csv"],
+    )
+    preview = {"dataset": {"ds_id": DS_ID}, "tables": [{"table_name": "keep"}], "manifest_yaml": "not: [valid"}
+
+    assert service._replace_plan(preview, VersionType.STANDARDISED)["suggested_changes"] == []
+
+
+def _suggest(old_columns: dict, new_columns: dict) -> list[dict]:
+    from dataio.api.services.web_admin_service import _suggested_column_changes
+
+    new_yaml = json.dumps({"datasetTables": {"t": {"dataDictionary": new_columns}}})
+    return _suggested_column_changes({"datasetTables": {"t": {"dataDictionary": old_columns}}}, new_yaml)
+
+
+def test_hidden_columns_are_never_suggested():
+    rows = _suggest(
+        {"secret": {"access": False, "allowedValues": ["a"]}, "gone": {"access": False}},
+        {"secret": {"access": False, "allowedValues": ["b"]}, "new_secret": {"access": False}},
+    )
+
+    assert rows == []
+
+
+@pytest.mark.parametrize("odd", [1, True, "a,c", {"a": 1}, None])
+def test_odd_allowed_values_never_break_the_preview(odd):
+    rows = _suggest({"sex": {"allowedValues": odd}}, {"sex": {"allowedValues": ["male"]}})
+
+    assert rows == []
+
+
+def test_blank_tables_empty_units_and_long_notes():
+    from dataio.api.services.web_admin_service import _suggested_column_changes
+
+    assert _suggested_column_changes(
+        {"datasetTables": {" ": {"dataDictionary": {"a": {}}}}},
+        json.dumps({"datasetTables": {" ": {"dataDictionary": {"b": {}}}}}),
+    ) == []
+    assert _suggest({"cases": {"unit": ""}}, {"cases": {}}) == []
+    many = [f"value-{i:04d}" for i in range(300)]
+    note = _suggest({"code": {"allowedValues": many}}, {"code": {"allowedValues": ["x"]}})[0]["note"]
+    # Counts only, so even a long list stays short and lists no values.
+    assert note == "Allowed values changed: 300 removed, 1 added"
+
+
+def test_a_manifest_with_an_impossible_date_suggests_nothing():
+    from dataio.api.services.web_admin_service import _suggested_column_changes
+
+    # PyYAML raises ValueError (not YAMLError) for 2026-02-30.
+    assert _suggested_column_changes({}, "released: 2026-02-30\n") == []

@@ -1,0 +1,25 @@
+---
+// Dataset changes (/changes): every published changelog entry, newest first
+// (DIO-53). Each dataset page shows its own entries as "Version history".
+import PublicLayout from '../layouts/PublicLayout.astro';
+import DatasetChangesBrowser from '../components/public/datasets/DatasetChangesBrowser';
+---
+
+<PublicLayout
+  title="Dataset changes"
+  description="What changed in each dataset update, when and why."
+  current="datasets"
+  background="white"
+  width="full"
+>
+  <div class="max-w-[860px] mx-auto px-4 sm:px-6 pt-14 pb-20 flex flex-col gap-8">
+    <div class="flex flex-col gap-3">
+      <h1 class="m-0 text-[32px] sm:text-[40px] leading-[1.15] font-bold text-gray-900">Dataset changes</h1>
+      <p class="m-0 text-lg leading-relaxed text-gray-600">
+        When we fix or update a dataset, we record what changed, when and why. A breaking change may need you to update
+        code that reads that dataset. Each dataset page also shows its own changes under Version history.
+      </p>
+    </div>
+    <DatasetChangesBrowser client:load />
+  </div>
+</PublicLayout>

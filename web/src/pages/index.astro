@@ -13,7 +13,7 @@ import { ACCESS_DESCRIPTIONS } from '../lib/catalogue';
 import { POPULAR_SEARCHES, datasetsHref } from '../lib/landing';
 import { CONTACT_EMAIL, PLATFORM_NAME } from '../lib/site';
 
-const STANDARDS_URL = 'https://engg.artpark.ai/data_standardisation/workflow.html';
+const STANDARDS_URL = '/standards';
 
 const audiences = [
   {
@@ -253,12 +253,12 @@ const textLink = 'font-semibold text-primary-700 hover:text-primary-900';
         <div class="flex-[1_1_420px] min-w-0 flex flex-col gap-1.5">
           <h3 class="m-0 text-xl font-bold">Join datasets without the clean-up</h3>
           <p class="m-0 text-[15px] leading-relaxed text-gray-700">
-            Every dataset uses the Government of India’s official LGD (Local Government Directory) codes for states,
-            districts, sub-districts and villages, the same date format and documented units. Census figures, case counts
-            and rainfall for a district line up in a single join.
+            Our datasets use place codes based on the Government of India’s Local Government Directory (LGD) where
+            applicable, and one date format, so census figures, case counts and rainfall for a district can line up in a
+            single join.
           </p>
         </div>
-        <a href={STANDARDS_URL} target="_blank" rel="noopener noreferrer" class={`text-[15px] ${textLink}`}>
+        <a href={STANDARDS_URL} class={`text-[15px] ${textLink}`}>
           Read our data standards →
         </a>
       </div>

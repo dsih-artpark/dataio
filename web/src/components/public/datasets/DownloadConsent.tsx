@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren, VNode } from 'preact';
 import { createPortal } from 'preact/compat';
 import { currentUser, initAuth } from '../../../lib/auth';
+import { LEGAL_PAGES_PUBLISHED } from '../../../lib/site';
 import { ConsentRequiredError, SignInRequiredError, downloadDatasetZip } from '../../../lib/download';
 
 /** While signed-out downloads are off: a link to sign in that comes back here. */
@@ -135,7 +136,13 @@ function ConsentDialog({ dataset, busy, error, onCancel, onSubmit }: ConsentDial
   const submit = (event: Event) => {
     event.preventDefault();
     if (!EMAIL.test(email.trim())) return setProblem('Enter a valid email address, like name@organisation.org');
-    if (!agreed) return setProblem('Please accept the Terms of Use and the dataset’s licence to download.');
+    if (!agreed) {
+      return setProblem(
+        LEGAL_PAGES_PUBLISHED
+          ? 'Please accept the Terms of Use and the dataset’s licence to download.'
+          : 'Please accept the dataset’s licence to download.',
+      );
+    }
     setProblem(null);
     onSubmit(email.trim());
   };
@@ -188,15 +195,22 @@ function ConsentDialog({ dataset, busy, error, onCancel, onSubmit }: ConsentDial
               class="w-[18px] h-[18px] mt-0.5 shrink-0 accent-primary-600"
             />
             <span>
-              I agree to the{' '}
-              <a href="/terms" target="_blank" rel="noopener" class={link}>
-                Terms of Use
-              </a>{' '}
-              and to this dataset’s licence{dataset.licence ? ` (${dataset.licence})` : ''}, and I have read the{' '}
-              <a href="/privacy" target="_blank" rel="noopener" class={link}>
-                Privacy Policy
-              </a>
-              . *
+              {LEGAL_PAGES_PUBLISHED ? (
+                <>
+                  I agree to the{' '}
+                  <a href="/terms" target="_blank" rel="noopener" class={link}>
+                    Terms of Use
+                  </a>{' '}
+                  and to this dataset’s licence{dataset.licence ? ` (${dataset.licence})` : ''}, and I have read the{' '}
+                  <a href="/privacy" target="_blank" rel="noopener" class={link}>
+                    Privacy Policy
+                  </a>
+                  .
+                </>
+              ) : (
+                <>I agree to this dataset’s licence{dataset.licence ? ` (${dataset.licence})` : ''}.</>
+              )}{' '}
+              *
             </span>
           </label>
 

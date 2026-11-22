@@ -82,6 +82,22 @@ def test_synthetic_preview_follows_the_data_dictionary():
         assert 0 <= int(age) <= 99 and 0 <= float(rate) <= 1
 
 
+@pytest.mark.parametrize(
+    "field",
+    [
+        {"type": "int", "min": "n/a", "max": "n/a"},
+        {"type": "float", "range": ["low", "high"]},
+        {"type": "float", "min": "inf", "max": "nan"},
+        {"type": "int", "range": [None, None]},
+        {"type": "int", "min": [1], "max": {}},
+    ],
+)
+def test_synthetic_preview_ignores_numbers_it_cannot_read(field):
+    rows = synthetic_rows("A", {"value": field}, {}, count=3)
+    assert len(rows) == 3
+    assert all(float(row[0]) == float(row[0]) for row in rows)
+
+
 def test_synthetic_preview_is_stable_per_dataset():
     assert synthetic_rows("A", DICTIONARY, ENUMS) == synthetic_rows("A", DICTIONARY, ENUMS)
     assert synthetic_rows("A", DICTIONARY, ENUMS) != synthetic_rows("B", DICTIONARY, ENUMS)

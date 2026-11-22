@@ -37,6 +37,9 @@ DATASET_KINDS = ("tabular", "geojson")
 SORT_OPTIONS = ("relevance", "updated", "newest", "span", "title")
 MAX_PAGE_SIZE = 200
 # Words that carry no meaning in a catalogue search ("rainfall data for Odisha").
+# Each search word adds several database checks, so only this many are used.
+MAX_SEARCH_TERMS = 8
+
 SEARCH_STOP_WORDS = frozenset(
     {
         "a",
@@ -114,13 +117,16 @@ def _like_pattern(term: str) -> str:
 
 
 def search_terms(search: str | None) -> list[str]:
-    """Split a search box value into the words every result must match."""
+    """Split a search box value into the words every result must match.
+
+    Only the first ``MAX_SEARCH_TERMS`` words are used.
+    """
     if not search:
         return []
     words = re.findall(r"[\w\-]+", search.lower())
     terms = [w for w in words if w not in SEARCH_STOP_WORDS and len(w) > 1]
     # A search made only of stop words ("data") still searches for them.
-    return terms or [w for w in words if w]
+    return (terms or [w for w in words if w])[:MAX_SEARCH_TERMS]
 
 
 def _iso(value: date | None) -> str | None:

@@ -35,6 +35,7 @@ from dataio.api.tests.postgres_schema import fresh_schema_engine, requires_postg
 pytestmark = requires_postgres
 
 app = importlib.import_module("dataio.api").app
+web_module = importlib.import_module("dataio.api.routers.web")
 client = TestClient(app)
 
 
@@ -65,6 +66,13 @@ def session_factory():
 @pytest.fixture(autouse=True)
 def use_test_database(session_factory, monkeypatch):
     monkeypatch.setattr(catalogue_module, "DBSession", session_factory)
+
+
+@pytest.fixture(autouse=True)
+def fresh_stats_cache():
+    web_module._public_stats_cache.clear()
+    yield
+    web_module._public_stats_cache.clear()
 
 
 def _seed(factory):
@@ -407,6 +415,11 @@ def test_search_terms_drop_stop_words_but_keep_a_lone_one():
     assert search_terms("   ") == []
 
 
+def test_search_terms_use_only_the_first_few_words():
+    words = [f"word{n}" for n in range(30)]
+    assert search_terms(" ".join(words)) == words[: catalogue_module.MAX_SEARCH_TERMS]
+
+
 def test_relevance_puts_title_matches_first():
     # "district" is in the dengue and boundaries titles, and in the rainfall description
     result = ids(service.list_datasets(search="district", limit=50))
@@ -630,6 +643,25 @@ def test_stats_and_detail_routes():
     assert client.get("/api/v1/web/public/stats").json()["total_datasets"] == 5
     assert client.get("/api/v1/web/public/datasets/CS0002DS0003").json()["readme_md"] is None
     assert client.get("/api/v1/web/public/datasets/XX0000DS0000").status_code == 404
+
+
+def test_stats_route_keeps_the_counts_for_a_minute(monkeypatch):
+    calls = []
+    original = PublicCatalogueService.get_stats
+
+    def counting(self):
+        calls.append(1)
+        return original(self)
+
+    monkeypatch.setattr(PublicCatalogueService, "get_stats", counting)
+    first = client.get("/api/v1/web/public/stats").json()
+    second = client.get("/api/v1/web/public/stats").json()
+    assert first == second
+    assert len(calls) == 1
+    # Once the minute is up the next call asks the database again.
+    web_module._public_stats_cache[0] -= web_module.PUBLIC_STATS_CACHE_SECONDS + 1
+    client.get("/api/v1/web/public/stats")
+    assert len(calls) == 2
 
 
 def test_regions_route_lists_children_a_to_z():

@@ -65,13 +65,23 @@ def _access(dataset: Dataset) -> str:
     return level.value if hasattr(level, "value") else str(level or "NONE")
 
 
+def _number(value, default: float) -> float:
+    """``value`` as a finite number, or ``default`` when it isn't one ("n/a", "inf")."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    return number if math.isfinite(number) else default
+
+
 def _bounds(field: dict) -> tuple[float, float]:
+    """Lowest and highest value for a made-up number; odd dictionary values fall back to 0-100."""
     span = field.get("range")
     if isinstance(span, list) and len(span) == 2:
-        return float(span[0]), float(span[1])
-    low = float(field["min"]) if field.get("min") is not None else 0.0
-    high = float(field["max"]) if field.get("max") is not None else low + 100
-    return low, max(low, high)
+        low = _number(span[0], 0.0)
+        return low, max(low, _number(span[1], low + 100))
+    low = _number(field.get("min"), 0.0)
+    return low, max(low, _number(field.get("max"), low + 100))
 
 
 def _fake_value(rng: random.Random, name: str, field: dict, enums: dict, start: date, end: date) -> str:

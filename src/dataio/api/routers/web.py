@@ -12,6 +12,7 @@ import logging
 import json
 import os
 import secrets
+import time
 from datetime import datetime
 from typing import List, Literal, Optional
 from urllib.parse import urlencode
@@ -824,6 +825,11 @@ async def get_public_datasets(
     )
 
 
+# /public/stats is the same for everyone, so it is kept briefly: [time, result].
+PUBLIC_STATS_CACHE_SECONDS = 60
+_public_stats_cache: list = []
+
+
 @web_router.get("/public/stats", tags=["public"])
 async def get_public_stats(
     catalogue: PublicCatalogueService = Depends(PublicCatalogueService),
@@ -832,9 +838,16 @@ async def get_public_stats(
     Live catalogue counts for the public site: totals, sources, year range,
     datasets per theme, access level and data type, and per state/UT.
 
-    No authentication required.
+    No authentication required. The counts are kept for a minute, since every
+    landing-page load asks for them and they run several queries.
     """
-    return catalogue.get_stats()
+    now = time.monotonic()
+    cached = _public_stats_cache
+    if cached and now - cached[0] < PUBLIC_STATS_CACHE_SECONDS:
+        return cached[1]
+    stats = catalogue.get_stats()
+    _public_stats_cache[:] = [now, stats]
+    return stats
 
 
 @web_router.get("/public/datasets/{dataset_id}", tags=["public"])

@@ -1,8 +1,9 @@
 ---
 // Scrolling band of the catalogue's themes under the landing hero (from
 // Rukshat's prototype); each name links to its datasets. The list is drawn
-// twice so the scroll loops without a gap. Stops for reduced motion, and
-// pauses on hover or while a link has keyboard focus.
+// twice so the scroll loops without a gap. Pauses on hover or while a link has
+// keyboard focus. With reduced motion it doesn't scroll: the names wrap onto
+// as many lines as they need, so every theme can be reached.
 import { THEMES, datasetsHref } from '../../../lib/landing';
 
 // Each copy repeats the themes so it is wider than a 2560 px screen; otherwise
@@ -69,6 +70,17 @@ const items = [...THEMES, ...THEMES].map((theme, index) => ({
   @media (prefers-reduced-motion: reduce) {
     .theme-strip-track {
       animation: none;
+      width: 100%;
+    }
+    .theme-strip-track > ul {
+      flex-wrap: wrap;
+      justify-content: center;
+      flex-shrink: 1;
+    }
+    /* Hide the copies that only exist to make the scroll loop. */
+    .theme-strip-track > ul[aria-hidden='true'],
+    .theme-strip-track li[aria-hidden='true'] {
+      display: none;
     }
   }
 </style>

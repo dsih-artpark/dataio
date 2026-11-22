@@ -9,6 +9,9 @@ const TABS: { status: DatasetChangeStatus | undefined; label: string }[] = [
   { status: 'PUBLISHED', label: 'Published' },
 ];
 
+/** Entries fetched per page; "Show more" fetches the next page. */
+const PAGE_SIZE = 100;
+
 const formatDateTime = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '';
 const formatDay = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-IN', { dateStyle: 'medium' });
@@ -39,13 +42,16 @@ export default function DatasetChangeManager() {
   const [editing, setEditing] = useState<{ id: string; original: ChangelogDraft; draft: ChangelogDraft } | null>(null);
   const [confirming, setConfirming] = useState<{ id: string; action: 'publish' | 'delete' } | null>(null);
   const [adding, setAdding] = useState<{ datasetId: string; draft: ChangelogDraft } | null>(null);
+  // A published entry is public: saving an edit asks once more first.
+  const [confirmingSave, setConfirmingSave] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const load = () => {
     setError(null);
     const filter = datasetFilter.trim().toUpperCase(); // dataset IDs are upper case
     const mine = ++requestNumber.current; // a slower, older response must not win
     api
-      .adminListDatasetChanges({ status, datasetId: filter || undefined, limit: 200 })
+      .adminListDatasetChanges({ status, datasetId: filter || undefined, limit: PAGE_SIZE })
       .then((response) => {
         if (mine !== requestNumber.current) return;
         setEntries(response.entries);
@@ -59,6 +65,22 @@ export default function DatasetChangeManager() {
   };
 
   useEffect(load, [status]);
+
+  const loadMore = () => {
+    if (!entries) return;
+    const mine = requestNumber.current; // a new search or tab replaces the list instead
+    setLoadingMore(true);
+    api
+      .adminListDatasetChanges({ status, datasetId: appliedFilter || undefined, limit: PAGE_SIZE, offset: entries.length })
+      .then((response) => {
+        if (mine !== requestNumber.current) return;
+        const seen = new Set(entries.map((entry) => entry.id));
+        setEntries([...entries, ...response.entries.filter((entry) => !seen.has(entry.id))]);
+        setTotal(response.total);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load more entries'))
+      .finally(() => setLoadingMore(false));
+  };
 
   const run = async (id: string, action: () => Promise<unknown>, done: string) => {
     setBusy(id);
@@ -88,7 +110,15 @@ export default function DatasetChangeManager() {
       ...(draft.date !== original.date ? { date: draft.date } : {}),
       ...(JSON.stringify(draft.changes) !== JSON.stringify(original.changes) ? { changes: draft.changes } : {}),
     };
-    run(id, () => api.adminUpdateDatasetChange(id, body).then(() => setEditing(null)), 'Saved.');
+    run(
+      id,
+      () =>
+        api.adminUpdateDatasetChange(id, body).then(() => {
+          setEditing(null);
+          setConfirmingSave(null);
+        }),
+      'Saved.',
+    );
   };
 
   const saveNew = () => {
@@ -149,8 +179,12 @@ export default function DatasetChangeManager() {
         </button>
       </div>
 
-      {message && <div class="rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-primary-900">{message}</div>}
-      {error && <div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
+      <div role="status" aria-live="polite">
+        {message && <div class="rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-primary-900">{message}</div>}
+      </div>
+      <div role="alert">
+        {error && <div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
+      </div>
 
       {adding ? (
         <section class="space-y-4 rounded-2xl border border-slate-200 bg-white p-4">
@@ -189,9 +223,9 @@ export default function DatasetChangeManager() {
           {status || appliedFilter ? 'No entries match these filters.' : 'No changelog entries yet.'}
         </p>
       )}
-      {entries && total > entries.length && (
+      {entries && entries.length > 0 && (
         <p class="text-sm text-gray-500">
-          Showing the newest {entries.length} of {total}. Filter by dataset to find older entries.
+          Showing {entries.length} of {total}.
         </p>
       )}
 
@@ -290,19 +324,43 @@ export default function DatasetChangeManager() {
                   <p class="text-xs text-amber-800">Summary, why and a table name on every row are needed to save.</p>
                 ) : null}
                 <p class="text-xs text-slate-500">To change the date, pick a new one; clearing it keeps the saved date.</p>
-                <div class="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={saveEdit}
-                    disabled={busy === entry.id || !isChangelogComplete(editing.draft)}
-                    class={`${button} bg-slate-900 text-white`}
-                  >
-                    Save
-                  </button>
-                  <button type="button" onClick={() => setEditing(null)} class={`${button} text-slate-600 hover:bg-slate-100`}>
-                    Cancel
-                  </button>
-                </div>
+                {confirmingSave === entry.id ? (
+                  <div class="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                    <span>This entry is published. Saving changes it on {entry.dataset_id}'s public Version history right away.</span>
+                    <button
+                      type="button"
+                      onClick={saveEdit}
+                      disabled={busy === entry.id}
+                      class={`${button} bg-slate-900 text-white`}
+                    >
+                      Yes, save
+                    </button>
+                    <button type="button" onClick={() => setConfirmingSave(null)} class={`${button} hover:bg-amber-100`}>
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div class="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => (entry.status === 'PUBLISHED' ? setConfirmingSave(entry.id) : saveEdit())}
+                      disabled={busy === entry.id || !isChangelogComplete(editing.draft)}
+                      class={`${button} bg-slate-900 text-white`}
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditing(null);
+                        setConfirmingSave(null);
+                      }}
+                      class={`${button} text-slate-600 hover:bg-slate-100`}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
               </div>
             ) : isOpen ? (
               <div class="space-y-2 border-t border-slate-100 pt-3 text-sm text-slate-700">
@@ -358,6 +416,17 @@ export default function DatasetChangeManager() {
           </article>
         );
       })}
+
+      {entries && total > entries.length ? (
+        <button
+          type="button"
+          onClick={loadMore}
+          disabled={loadingMore}
+          class={`${button} border border-slate-300 text-slate-700 hover:bg-slate-50`}
+        >
+          {loadingMore ? 'Loading…' : `Show more (${total - entries.length} older)`}
+        </button>
+      ) : null}
     </div>
   );
 }

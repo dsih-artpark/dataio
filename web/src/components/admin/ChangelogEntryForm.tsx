@@ -4,6 +4,9 @@ import type { ChangeKind, ChangeRow, ChangelogDraft } from '../../lib/types';
 
 export { CHANGE_KIND_LABELS };
 
+/** Same limits as the server (dataset_changes.py). */
+export const CHANGELOG_LIMITS = { summary: 300, reason: 2000, cell: 500, rows: 200 } as const;
+
 export function emptyChangelogDraft(): ChangelogDraft {
   return { type: 'data', breaking: false, summary: '', reason: '', changes: [] };
 }
@@ -22,7 +25,8 @@ export function isChangelogComplete(draft: ChangelogDraft): boolean {
 export function mergeSuggestedRows(rows: ChangeRow[], suggested: ChangeRow[]): ChangeRow[] {
   const has = (s: ChangeRow) =>
     rows.some((row) => row.kind === s.kind && row.table === s.table && (row.column ?? null) === (s.column ?? null));
-  return [...rows, ...suggested.filter((s) => !has(s))];
+  // Never more rows than the server accepts.
+  return [...rows, ...suggested.filter((s) => !has(s))].slice(0, CHANGELOG_LIMITS.rows);
 }
 
 const input = 'block w-full rounded-xl border border-slate-300 px-3 py-2 text-sm';
@@ -36,6 +40,8 @@ export function ChangelogEntryForm(props: {
   value: ChangelogDraft;
   onChange: (next: ChangelogDraft) => void;
   showDate?: boolean;
+  /** The dataset is Restricted: names are public, values and notes are not. */
+  restricted?: boolean;
 }) {
   const { value, onChange } = props;
   // Each form gets its own radio group, so two open forms can't share one.
@@ -55,6 +61,7 @@ export function ChangelogEntryForm(props: {
           onInput={(e) => set({ summary: field(e) })}
           placeholder="One sentence: what changed"
           class={input}
+          maxLength={CHANGELOG_LIMITS.summary}
           required
         />
       </label>
@@ -66,6 +73,7 @@ export function ChangelogEntryForm(props: {
           placeholder="Why the change was made"
           rows={2}
           class={input}
+          maxLength={CHANGELOG_LIMITS.reason}
           required
         />
       </label>
@@ -110,11 +118,21 @@ export function ChangelogEntryForm(props: {
           <button
             type="button"
             onClick={() => set({ changes: [...value.changes, { kind: 'column_renamed', table: '' }] })}
-            class="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            disabled={value.changes.length >= CHANGELOG_LIMITS.rows}
+            class="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
             Add row
           </button>
         </div>
+        {props.restricted ? (
+          <p class="text-xs text-amber-800">
+            This dataset is Restricted. Table and column names in this entry will be public; old and new values and notes
+            are hidden.
+          </p>
+        ) : null}
+        {value.changes.length >= CHANGELOG_LIMITS.rows ? (
+          <p class="text-xs text-slate-500">An entry can have at most {CHANGELOG_LIMITS.rows} rows.</p>
+        ) : null}
         {value.changes.length === 0 ? (
           <p class="text-xs text-slate-500">No rows. Add one for each renamed, added or removed table or column, unit change or recode.</p>
         ) : (
@@ -139,7 +157,7 @@ export function ChangelogEntryForm(props: {
                         value={row.kind}
                         onChange={(e) => setRow(index, { kind: (e.currentTarget as HTMLSelectElement).value as ChangeKind })}
                         class={cellInput}
-                        aria-label="Change"
+                        aria-label={`Row ${index + 1}: change`}
                       >
                         {(Object.keys(CHANGE_KIND_LABELS) as ChangeKind[]).map((kind) => (
                           <option key={kind} value={kind}>
@@ -149,19 +167,19 @@ export function ChangelogEntryForm(props: {
                       </select>
                     </td>
                     <td class="py-1 pr-2">
-                      <input value={row.table} onInput={(e) => setRow(index, { table: field(e) })} class={mono} aria-label="Table" />
+                      <input value={row.table} onInput={(e) => setRow(index, { table: field(e) })} class={mono} maxLength={CHANGELOG_LIMITS.cell} aria-label={`Row ${index + 1}: table`} />
                     </td>
                     <td class="py-1 pr-2">
-                      <input value={row.column ?? ''} onInput={(e) => setRow(index, { column: orNull(field(e)) })} class={mono} aria-label="Column" />
+                      <input value={row.column ?? ''} onInput={(e) => setRow(index, { column: orNull(field(e)) })} class={mono} maxLength={CHANGELOG_LIMITS.cell} aria-label={`Row ${index + 1}: column`} />
                     </td>
                     <td class="py-1 pr-2">
-                      <input value={row.old ?? ''} onInput={(e) => setRow(index, { old: orNull(field(e)) })} class={mono} aria-label="Old" />
+                      <input value={row.old ?? ''} onInput={(e) => setRow(index, { old: orNull(field(e)) })} class={mono} maxLength={CHANGELOG_LIMITS.cell} aria-label={`Row ${index + 1}: old`} />
                     </td>
                     <td class="py-1 pr-2">
-                      <input value={row.new ?? ''} onInput={(e) => setRow(index, { new: orNull(field(e)) })} class={mono} aria-label="New" />
+                      <input value={row.new ?? ''} onInput={(e) => setRow(index, { new: orNull(field(e)) })} class={mono} maxLength={CHANGELOG_LIMITS.cell} aria-label={`Row ${index + 1}: new`} />
                     </td>
                     <td class="py-1 pr-2">
-                      <input value={row.note ?? ''} onInput={(e) => setRow(index, { note: orNull(field(e)) })} class={cellInput} aria-label="Note" />
+                      <input value={row.note ?? ''} onInput={(e) => setRow(index, { note: orNull(field(e)) })} class={cellInput} maxLength={CHANGELOG_LIMITS.cell} aria-label={`Row ${index + 1}: note`} />
                     </td>
                     <td class="py-1">
                       <button

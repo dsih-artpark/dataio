@@ -1921,9 +1921,17 @@ def admin_apply_dataset_import(
         try:
             changelog = DatasetChangeInput.model_validate_json(changelog_json)
         except ValidationError as err:
+            # Name the fields, so the admin sees what to fix, e.g. "summary: ...".
+            problems = "; ".join(
+                f"{'.'.join(str(part) for part in error['loc']) or 'entry'}: {error['msg']}"
+                for error in err.errors(include_url=False)
+            )
             raise HTTPException(
                 status_code=422,
-                detail={"message": "The changelog entry is not valid", "errors": err.errors(include_url=False)},
+                detail={
+                    "message": f"The changelog entry is not valid ({problems})",
+                    "errors": err.errors(include_url=False),
+                },
             ) from err
     return admin_service.import_dataset_package(
         user,

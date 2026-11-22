@@ -43,7 +43,7 @@ def test_values_are_kept_exactly_as_written():
 
 
 @pytest.mark.parametrize("entry, field", [
-    (_entry(summery="x"), "summery"),  # unknown field (also blocks archive paths / Linear IDs)
+    (_entry(summery="x"), "summery"),  # unknown field (also blocks archive paths and internal references)
     (_with_change(kind="column_moved"), "changes.0.kind"),
     (_entry(dataset_id="EP06DS97"), "dataset_id"),
     (_entry(date="20 Nov 2026"), "date"),
@@ -74,3 +74,25 @@ def test_input_without_a_date_has_none():
 def test_input_rejects_a_dataset_id_field():
     with pytest.raises(ValidationError):
         DatasetChangeInput.model_validate({k: v for k, v in _entry().items() if k != "date"})
+
+
+@pytest.mark.parametrize(
+    "entry, field",
+    [
+        (_entry(summary="x" * 301), "summary"),
+        (_entry(reason="x" * 2001), "reason"),
+        (_with_change(old="x" * 501), "old"),
+        (_with_change(note="x" * 501), "note"),
+        (_with_change(table="x" * 501), "table"),
+        (_entry(changes=[_entry()["changes"][0]] * 201), "changes"),
+    ],
+)
+def test_text_and_row_counts_have_limits(entry, field):
+    with pytest.raises(ValidationError) as error:
+        DatasetChange.model_validate(entry)
+    assert field in str(error.value)
+
+
+def test_text_at_the_limits_is_accepted():
+    entry = _entry(summary="x" * 300, reason="x" * 2000, changes=[{**_entry()["changes"][0], "note": "x" * 500}] * 200)
+    assert len(DatasetChange.model_validate(entry).changes) == 200

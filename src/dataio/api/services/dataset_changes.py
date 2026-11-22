@@ -3,7 +3,7 @@ data or metadata (DIO-53).
 
 These models are the checks for entries recorded through the admin panel and
 served to the dataset page's "Version history". Entries are public, so unknown
-fields are rejected: no archive paths, QC scorecard links or Linear IDs.
+fields are rejected, so archive paths and internal references can't slip in.
 """
 
 from __future__ import annotations
@@ -26,8 +26,15 @@ ChangeKind = Literal[
     "metadata_updated",
 ]
 
+# Entries are public and shown in full, so text and row counts have limits.
+SUMMARY_MAX = 300
+REASON_MAX = 2000
+CELL_MAX = 500
+ROWS_MAX = 200
+
 # Prose fields: surrounding spaces don't count, so blank text is rejected.
-ProseText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+Summary = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=SUMMARY_MAX)]
+Reason = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=REASON_MAX)]
 
 
 class Change(BaseModel):
@@ -37,11 +44,11 @@ class Change(BaseModel):
 
     kind: ChangeKind
     # Not blank: an empty row would show publicly as "— —". Kept as written otherwise.
-    table: str = Field(pattern=r"\S")
-    column: str | None = None
-    old: str | None = None
-    new: str | None = None
-    note: str | None = None
+    table: str = Field(pattern=r"\S", max_length=CELL_MAX)
+    column: str | None = Field(default=None, max_length=CELL_MAX)
+    old: str | None = Field(default=None, max_length=CELL_MAX)
+    new: str | None = Field(default=None, max_length=CELL_MAX)
+    note: str | None = Field(default=None, max_length=CELL_MAX)
 
 
 class DatasetChange(BaseModel):
@@ -51,9 +58,9 @@ class DatasetChange(BaseModel):
     date: datetime.date
     type: Literal["data", "metadata"]
     breaking: bool
-    summary: ProseText
-    reason: ProseText
-    changes: list[Change] = Field(default_factory=list)  # optional: summary + reason are enough
+    summary: Summary
+    reason: Reason
+    changes: list[Change] = Field(default_factory=list, max_length=ROWS_MAX)  # optional: summary + reason are enough
 
 
 class DatasetChangeInput(BaseModel):
@@ -65,6 +72,6 @@ class DatasetChangeInput(BaseModel):
     date: datetime.date | None = None
     type: Literal["data", "metadata"]
     breaking: bool
-    summary: ProseText
-    reason: ProseText
-    changes: list[Change] = Field(default_factory=list)
+    summary: Summary
+    reason: Reason
+    changes: list[Change] = Field(default_factory=list, max_length=ROWS_MAX)

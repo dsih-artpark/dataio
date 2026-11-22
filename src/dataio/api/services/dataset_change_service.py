@@ -53,6 +53,21 @@ def _change_uuid(change_id: str) -> uuid.UUID:
 MAX_OFFSET = 100_000
 
 
+def _refuse_hidden_columns(dataset: Dataset, body: DatasetChangeInput) -> None:
+    """Entries are public: a row may not name a column hidden from the public."""
+    from dataio.api.services.public_catalogue_service import hidden_columns
+
+    hidden = hidden_columns(dataset)
+    named = sorted(
+        {f"{change.table}.{change.column}" for change in body.changes if (change.table, change.column) in hidden}
+    )
+    if named:
+        raise HTTPException(
+            status_code=422,
+            detail=f"These columns are hidden from the public and can't be named in a changelog entry: {', '.join(named)}",
+        )
+
+
 def _check_paging(offset: int) -> None:
     # PostgreSQL rejects a negative OFFSET or one past bigint, which would
     # surface as a 500.
@@ -113,8 +128,10 @@ class DatasetChangeService(BaseService):
         _require_admin(admin_user)
         session = DBSession()
         try:
-            if not session.query(Dataset.ds_id).filter(Dataset.ds_id == dataset_id).first():
+            dataset = session.query(Dataset).filter(Dataset.ds_id == dataset_id).first()
+            if not dataset:
                 raise HTTPException(status_code=404, detail="Dataset not found")
+            _refuse_hidden_columns(dataset, body)
             row = DatasetChangeRecord(
                 dataset_id=dataset_id,
                 status="DRAFT",
@@ -150,6 +167,9 @@ class DatasetChangeService(BaseService):
         session = DBSession()
         try:
             row = self._locked_row(session, change_id)
+            dataset = session.query(Dataset).filter(Dataset.ds_id == row.dataset_id).first()
+            if dataset:
+                _refuse_hidden_columns(dataset, body)
             self._apply(row, body, creating=False)
             row.updated_by = admin_user.email
             row.updated_at = datetime.now(timezone.utc)
@@ -236,7 +256,11 @@ class DatasetChangeService(BaseService):
         """Only the agreed public fields. For Restricted (NONE) datasets the
         old/new values and notes are hidden, decided on every read so a later
         access-level change applies to older entries too."""
+        from dataio.api.services.public_catalogue_service import hidden_columns
+
         restricted = dataset.access_level == AccessLevel.NONE
+        # Read on every call, so a column hidden after publishing drops out too.
+        hidden = hidden_columns(dataset)
         changes = []
         stored = row.changes if isinstance(row.changes, list) else []
         for change in stored:
@@ -246,6 +270,8 @@ class DatasetChangeService(BaseService):
                 shown = Change.model_validate(change).model_dump()
             except ValidationError:
                 logger.warning("Skipping a malformed change row in dataset change %s", row.id)
+                continue
+            if (shown["table"], shown["column"]) in hidden:
                 continue
             if restricted:
                 shown.update(old=None, new=None, note=None)
@@ -287,13 +313,17 @@ class DatasetChangeService(BaseService):
         finally:
             session.close()
 
-    def list_public_for_dataset(self, dataset_id: str) -> dict:
-        """A dataset page's "Version history": all its published entries."""
+    def list_public_for_dataset(self, dataset_id: str, limit: int = 100) -> dict:
+        """A dataset page's "Version history": its newest published entries
+        (at most ``limit``, 1-100) and how many there are in all."""
+        limit = max(1, min(limit, 100))
         session = DBSession()
         try:
             if not session.query(Dataset.ds_id).filter(Dataset.ds_id == dataset_id).first():
                 raise HTTPException(status_code=404, detail="Dataset not found")
-            rows = self._public_query(session).filter(DatasetChangeRecord.dataset_id == dataset_id).all()
-            return {"entries": [self._public_dict(row, ds) for row, ds in rows], "total": len(rows)}
+            query = self._public_query(session).filter(DatasetChangeRecord.dataset_id == dataset_id)
+            total = query.count()
+            rows = query.limit(limit).all()
+            return {"entries": [self._public_dict(row, ds) for row, ds in rows], "total": total}
         finally:
             session.close()

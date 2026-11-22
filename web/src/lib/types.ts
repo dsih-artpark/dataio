@@ -253,7 +253,8 @@ export interface AdminDatasetReplacePlan {
   tables_removed: string[];
   archive_location: string;
   access_level_kept: string | null;
-  /** Rows to pre-fill the "What changed" form with (tables added/removed). */
+  /** Rows to pre-fill the "What changed" form with: tables and columns added or
+   * removed, unit changes and changed allowed values (hidden columns left out). */
   suggested_changes: ChangeRow[];
 }
 

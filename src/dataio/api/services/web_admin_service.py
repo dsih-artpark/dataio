@@ -220,14 +220,13 @@ def _suggested_column_changes(old_manifest, new_manifest_yaml: Optional[str]) ->
         for column in sorted(old.keys() & new.keys()):
             old_values, new_values = _allowed_values(old[column]), _allowed_values(new[column])
             if old_values and new_values and old_values != new_values:
+                # Counts only: the allowed values themselves are not public.
                 parts = []
                 if old_values - new_values:
-                    parts.append(f"removed: {', '.join(sorted(old_values - new_values))}")
+                    parts.append(f"{len(old_values - new_values)} removed")
                 if new_values - old_values:
-                    parts.append(f"added: {', '.join(sorted(new_values - old_values))}")
-                note = "Allowed values " + "; ".join(parts)
-                if len(note) > 500:
-                    note = note[:499] + "…"
+                    parts.append(f"{len(new_values - old_values)} added")
+                note = "Allowed values changed: " + ", ".join(parts)
                 rows.append({"kind": "values_recoded", "table": table, "column": column, "note": note})
     return rows
 

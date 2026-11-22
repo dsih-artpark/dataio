@@ -468,3 +468,80 @@ def test_a_failure_after_saving_leaves_no_draft_behind(db, monkeypatch):
         assert session.query(DatasetChangeRecord).count() == 0
     finally:
         session.close()
+
+
+def _set_manifest(db, dataset_id: str, manifest: dict | None) -> None:
+    session = db()
+    try:
+        session.query(Dataset).filter(Dataset.ds_id == dataset_id).update(
+            {"manifest_json": manifest, "manifest_yaml": None}
+        )
+        session.commit()
+    finally:
+        session.close()
+
+
+HIDDEN_MANIFEST = {
+    "datasetTables": {
+        "cases": {
+            "dataDictionary": {
+                "district": {"type": "string"},
+                "patient_phone": {"type": "string", "access": False},
+            }
+        }
+    }
+}
+
+
+@requires_postgres
+def test_rows_naming_a_hidden_column_are_refused(db):
+    _set_manifest(db, "EP0001DS0001", HIDDEN_MANIFEST)
+    try:
+        service, admin = DatasetChangeService(), _user(db, "admin@example.org")
+        hidden_row = [{"kind": "column_renamed", "table": "cases", "column": "patient_phone"}]
+        assert _status(lambda: service.create_draft(admin, "EP0001DS0001", _body(changes=hidden_row))) == 422
+        draft = service.create_draft(admin, "EP0001DS0001", _body(changes=[]))
+        assert _status(lambda: service.update(admin, draft["id"], _body(changes=hidden_row))) == 422
+        visible_row = [{"kind": "column_renamed", "table": "cases", "column": "district"}]
+        assert service.update(admin, draft["id"], _body(changes=visible_row))["changes"][0]["column"] == "district"
+    finally:
+        _set_manifest(db, "EP0001DS0001", None)
+
+
+@requires_postgres
+def test_a_column_hidden_after_publishing_leaves_the_public_lists(db):
+    _published(db, changes=[
+        {"kind": "column_added", "table": "cases", "column": "patient_phone"},
+        {"kind": "column_added", "table": "cases", "column": "district"},
+        {"kind": "table_added", "table": "cases"},
+    ])
+    _set_manifest(db, "EP0001DS0001", HIDDEN_MANIFEST)
+    try:
+        for listed in (DatasetChangeService().list_public(), DatasetChangeService().list_public_for_dataset("EP0001DS0001")):
+            assert [(c["table"], c["column"]) for c in listed["entries"][0]["changes"]] == [
+                ("cases", "district"),
+                ("cases", None),
+            ]
+    finally:
+        _set_manifest(db, "EP0001DS0001", None)
+
+
+@requires_postgres
+def test_every_admin_action_needs_an_admin(db):
+    service = DatasetChangeService()
+    draft = service.create_draft(_user(db, "admin@example.org"), "EP0001DS0001", _body())
+    known = _user(db, "known@example.org")
+    assert _status(lambda: service.update(known, draft["id"], _body())) == 403
+    assert _status(lambda: service.publish(known, draft["id"])) == 403
+    assert _status(lambda: service.delete_draft(known, draft["id"])) == 403
+
+
+@requires_postgres
+def test_version_history_is_capped_but_counts_everything(db):
+    for day in ("2026-09-01", "2026-10-01", "2026-11-01"):
+        _published(db, date=day)
+
+    listed = DatasetChangeService().list_public_for_dataset("EP0001DS0001", limit=2)
+
+    assert [e["date"] for e in listed["entries"]] == ["2026-11-01", "2026-10-01"]
+    assert listed["total"] == 3

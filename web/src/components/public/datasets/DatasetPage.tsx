@@ -43,6 +43,7 @@ export default function DatasetPage() {
   const [error, setError] = useState<'missing' | 'not-found' | 'failed' | null>(null);
   // Version history (DIO-53): null while loading, 'failed' if it couldn't load.
   const [changes, setChanges] = useState<PublicDatasetChange[] | 'failed' | null>(null);
+  const [changesTotal, setChangesTotal] = useState(0);
   // A signed-in user may have been granted download on a View only / Restricted dataset.
   const [userCanDownload, setUserCanDownload] = useState(false);
   const { downloading, error: downloadError, start: startDownload, dialog: downloadDialog } = useDatasetDownload(dataset);
@@ -63,7 +64,10 @@ export default function DatasetPage() {
       .catch((err) => setError(err instanceof ApiRequestError && err.statusCode === 404 ? 'not-found' : 'failed'));
     api
       .getPublicDatasetChanges(id)
-      .then((response) => setChanges(response.entries))
+      .then((response) => {
+        setChanges(response.entries);
+        setChangesTotal(response.total);
+      })
       .catch(() => setChanges('failed'));
     api
       .getCataloguePreview(id)
@@ -327,7 +331,17 @@ export default function DatasetPage() {
         ) : changes.length === 0 ? (
           <p class="m-0 text-sm text-gray-500">No changes have been recorded for this dataset.</p>
         ) : (
-          <DatasetChangeEntries entries={changes} />
+          <>
+            <DatasetChangeEntries entries={changes} />
+            {changesTotal > changes.length ? (
+              <a
+                href={`/changes?dataset=${encodeURIComponent(dataset.ds_id)}`}
+                class="self-start text-sm font-semibold text-primary-700 hover:text-primary-900"
+              >
+                Showing the latest {changes.length} of {changesTotal}. See all changes →
+              </a>
+            ) : null}
+          </>
         )}
       </section>
 

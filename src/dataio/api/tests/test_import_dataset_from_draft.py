@@ -901,8 +901,15 @@ def test_apply_rejects_an_invalid_changelog(monkeypatch, changelog_json):
     response, seen = _apply(monkeypatch, changelog_json)
 
     assert response.status_code == 422
-    assert response.json()["detail"]["message"] == "The changelog entry is not valid"
+    assert response.json()["detail"]["message"].startswith("The changelog entry is not valid")
     assert seen == []
+
+
+def test_the_changelog_error_names_the_field(monkeypatch):
+    response, _ = _apply(monkeypatch, json.dumps({"type": "data", "breaking": False, "summary": "x" * 301, "reason": "R."}))
+
+    assert response.status_code == 422
+    assert "summary" in response.json()["detail"]["message"]
 
 
 def test_apply_passes_a_valid_changelog_to_the_service(monkeypatch):
@@ -948,7 +955,7 @@ def test_replace_plan_suggests_column_unit_and_value_changes(monkeypatch):
         {"kind": "column_removed", "table": "keep", "column": "dist_code"},
         {"kind": "unit_changed", "table": "keep", "column": "cases", "old": "count", "new": "per 1000"},
         {"kind": "values_recoded", "table": "keep", "column": "sex",
-         "note": "Allowed values removed: F, M; added: female, male"},
+         "note": "Allowed values changed: 2 removed, 2 added"},
     ]
 
 
@@ -1000,7 +1007,8 @@ def test_blank_tables_empty_units_and_long_notes():
     assert _suggest({"cases": {"unit": ""}}, {"cases": {}}) == []
     many = [f"value-{i:04d}" for i in range(300)]
     note = _suggest({"code": {"allowedValues": many}}, {"code": {"allowedValues": ["x"]}})[0]["note"]
-    assert len(note) <= 500 and note.endswith("…")
+    # Counts only, so even a long list stays short and lists no values.
+    assert note == "Allowed values changed: 300 removed, 1 added"
 
 
 def test_a_manifest_with_an_impossible_date_suggests_nothing():

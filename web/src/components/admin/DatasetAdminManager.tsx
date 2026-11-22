@@ -1934,10 +1934,14 @@ export default function DatasetAdminManager({
                 <h4 class="font-semibold text-slate-900">What changed</h4>
                 <p class="mb-4 mt-1 text-sm text-slate-600">
                   Required before replacing. It is saved as a draft on the Dataset changes page, where an admin publishes it
-                  to the dataset's public Version history. Rows for added and removed tables are filled in from the preview;
-                  add renames, recodes and unit changes yourself.
+                  to the dataset's public Version history. Rows for added and removed tables and columns, unit changes and
+                  changed allowed values are filled in from the preview; add renames and other changes yourself.
                 </p>
-                <ChangelogEntryForm value={importChangelog} onChange={setImportChangelog} />
+                <ChangelogEntryForm
+                  value={importChangelog}
+                  onChange={setImportChangelog}
+                  restricted={importPreview.replace.access_level_kept === 'NONE'}
+                />
                 {!isChangelogComplete(importChangelog) ? (
                   <p class="mt-3 text-sm font-medium text-amber-800">
                     Fill in the summary, why and a table name on every row to enable Replace Dataset.

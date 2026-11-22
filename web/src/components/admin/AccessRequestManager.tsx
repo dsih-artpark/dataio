@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { api } from '../../lib/api';
 import { datasetPath, type AccessRequestRecord, type AccessRequestStatus } from '../../lib/catalogue';
 
@@ -28,16 +28,25 @@ export default function AccessRequestManager() {
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<string | null>(null);
 
+  // Only the newest load may update the list: an older response that arrives
+  // late (after a quick tab switch) would show the wrong status's requests.
+  const latestRequestId = useRef(0);
+
   const load = () => {
+    const requestId = ++latestRequestId.current;
     setRequests(null);
     setError(null);
     api
       .getAccessRequests(status)
       .then((response) => {
+        if (latestRequestId.current !== requestId) return;
         setRequests(response.requests);
         setPending(response.pending);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load requests'));
+      .catch((err) => {
+        if (latestRequestId.current !== requestId) return;
+        setError(err instanceof Error ? err.message : 'Failed to load requests');
+      });
   };
 
   useEffect(load, [status]);
@@ -64,13 +73,12 @@ export default function AccessRequestManager() {
 
   return (
     <div class="space-y-4">
-      <div class="flex flex-wrap gap-2" role="tablist" aria-label="Request status">
+      <div class="flex flex-wrap gap-2" role="group" aria-label="Request status">
         {TABS.map((tab) => (
           <button
             key={tab.label}
             type="button"
-            role="tab"
-            aria-selected={status === tab.status}
+            aria-pressed={status === tab.status}
             onClick={() => setStatus(tab.status)}
             class={`px-3 py-1.5 rounded-full text-sm font-medium border ${
               status === tab.status ? 'bg-primary-600 text-white border-primary-600' : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'

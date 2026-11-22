@@ -1,13 +1,33 @@
-import { useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { logout, type User } from '../../lib/auth';
 
 interface UserMenuProps {
   user: User;
 }
 
-/** Signed-in avatar button with the account / admin / sign-out menu. */
+/** Signed-in avatar button with the account / admin / sign-out links.
+ *  A disclosure, not an ARIA menu: Tab moves through the links, Escape closes
+ *  it and returns focus to the button, and tabbing out closes it. */
 export default function UserMenu({ user }: UserMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsOpen(false);
+        toggleRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isOpen]);
+
+  const closeWhenFocusLeaves = (e: FocusEvent) => {
+    const next = e.relatedTarget as Node | null;
+    if (next && !(e.currentTarget as HTMLElement).contains(next)) setIsOpen(false);
+  };
 
   const handleLogout = async () => {
     await logout();
@@ -15,12 +35,13 @@ export default function UserMenu({ user }: UserMenuProps) {
   };
 
   return (
-    <div class="relative">
+    <div class="relative" onFocusOut={closeWhenFocusLeaves}>
       <button
+        ref={toggleRef}
         type="button"
         onClick={() => setIsOpen(!isOpen)}
         aria-expanded={isOpen}
-        aria-haspopup="menu"
+        aria-controls="user-menu-panel"
         class="flex items-center space-x-2 text-gray-700 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 rounded-lg min-h-[44px]"
       >
         <div class="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center">
@@ -44,8 +65,8 @@ export default function UserMenu({ user }: UserMenuProps) {
         <>
           <div class="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
           <div
+            id="user-menu-panel"
             class="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-lg border border-gray-200 py-2 z-50"
-            role="menu"
           >
             <div class="px-4 py-2 border-b border-gray-100">
               <p class="text-sm font-medium text-gray-900 truncate">{user.display_name || 'User'}</p>
@@ -54,7 +75,6 @@ export default function UserMenu({ user }: UserMenuProps) {
             <div class="py-1">
               <a
                 href="/account"
-                role="menuitem"
                 class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
               >
                 <svg
@@ -76,7 +96,6 @@ export default function UserMenu({ user }: UserMenuProps) {
               {user.is_admin && (
                 <a
                   href="/admin"
-                  role="menuitem"
                   class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                 >
                   <svg
@@ -106,7 +125,6 @@ export default function UserMenu({ user }: UserMenuProps) {
             <div class="border-t border-gray-100 pt-1">
               <button
                 type="button"
-                role="menuitem"
                 onClick={handleLogout}
                 class="flex items-center w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50"
               >

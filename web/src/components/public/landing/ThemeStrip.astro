@@ -1,0 +1,86 @@
+---
+// Scrolling band of the catalogue's themes under the landing hero (from
+// Rukshat's prototype); each name links to its datasets. The list is drawn
+// twice so the scroll loops without a gap. Pauses on hover or while a link has
+// keyboard focus. With reduced motion it doesn't scroll: the names wrap onto
+// as many lines as they need, so every theme can be reached.
+import { THEMES, datasetsHref } from '../../../lib/landing';
+
+// Each copy repeats the themes so it is wider than a 2560 px screen; otherwise
+// the band shows an empty stretch before the loop restarts. Only the first
+// set of the first copy is read out and reachable with Tab.
+const items = [...THEMES, ...THEMES].map((theme, index) => ({
+  name: theme.label,
+  href: datasetsHref({ category_id: [theme.id] }),
+  repeat: index >= THEMES.length,
+}));
+---
+
+<div class="theme-strip overflow-hidden bg-gradient-to-r from-[#1e1b4b] to-[#3b2a8a] py-4 sm:py-5">
+  <div class="theme-strip-track flex w-max">
+    {
+      [false, true].map((copy) => (
+        <ul
+          class="m-0 p-0 list-none flex items-center shrink-0"
+          aria-label={copy ? undefined : 'Themes in the catalogue'}
+          aria-hidden={copy ? 'true' : undefined}
+        >
+          {items.map(({ name, href, repeat }) => (
+            <li
+              class="flex items-center whitespace-nowrap text-white text-lg sm:text-[22px] font-medium"
+              aria-hidden={repeat && !copy ? 'true' : undefined}
+            >
+              <a
+                href={href}
+                tabindex={copy || repeat ? -1 : undefined}
+                class="mx-3 sm:mx-5 px-3 py-1 rounded-md text-white no-underline hover:text-teal-300 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-300"
+              >
+                {name}
+              </a>
+              <svg class="w-4 h-4 text-teal-400 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12 0c.6 6.1 5.9 11.4 12 12-6.1.6-11.4 5.9-12 12-.6-6.1-5.9-11.4-12-12C6.1 11.4 11.4 6.1 12 0z" />
+              </svg>
+            </li>
+          ))}
+        </ul>
+      ))
+    }
+  </div>
+</div>
+
+<style>
+  .theme-strip-track {
+    animation: theme-strip-scroll 80s linear infinite;
+  }
+
+  .theme-strip:hover .theme-strip-track,
+  .theme-strip:focus-within .theme-strip-track {
+    animation-play-state: paused;
+  }
+
+  @keyframes theme-strip-scroll {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .theme-strip-track {
+      animation: none;
+      width: 100%;
+    }
+    .theme-strip-track > ul {
+      flex-wrap: wrap;
+      justify-content: center;
+      flex-shrink: 1;
+    }
+    /* Hide the copies that only exist to make the scroll loop. */
+    .theme-strip-track > ul[aria-hidden='true'],
+    .theme-strip-track li[aria-hidden='true'] {
+      display: none;
+    }
+  }
+</style>

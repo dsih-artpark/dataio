@@ -226,7 +226,7 @@ export const ACCESS_LABELS: Record<CatalogueAccessLevel, string> = {
 };
 
 export const ACCESS_DESCRIPTIONS: Record<CatalogueAccessLevel, string> = {
-  DOWNLOAD: 'Download the full dataset straight away. No sign-in needed.',
+  DOWNLOAD: 'Download the full dataset straight away.',
   VIEW: 'See the tables, columns and documentation, with a preview of sample values. Ask us for access to download.',
   NONE: 'Sensitive data. Listed so you know it exists; shared under agreement.',
 };
@@ -292,10 +292,14 @@ function yearOf(isoDate: string | null | undefined): number | null {
   return Number.isFinite(year) ? year : null;
 }
 
-/** "2015–2023", "2019", "From 2015", or null when no dates are recorded. */
+/** An end date of 9999-12-31 means the dataset is still being added to. */
+const OPEN_ENDED_YEAR = 9999;
+
+/** "2015–2023", "2019", "2024 – present", "From 2015", or null when no dates are recorded. */
 export function formatYears(start: string | null | undefined, end: string | null | undefined): string | null {
   const from = yearOf(start);
   const to = yearOf(end);
+  if (to && to >= OPEN_ENDED_YEAR) return from ? `${from} – present` : 'Ongoing';
   if (from && to) return from === to ? String(from) : `${from}–${to}`;
   if (from) return `From ${from}`;
   if (to) return `Until ${to}`;

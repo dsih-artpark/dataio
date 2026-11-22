@@ -500,6 +500,7 @@ export default function DatasetAdminManager({
       temporal_coverage_end_date: payload.temporal_coverage_end_date,
       temporal_resolution: payload.temporal_resolution,
       access_level: payload.access_level,
+      licence: payload.licence,
       additional_metadata: payload.additional_metadata,
       tags: payload.tags,
     };
@@ -551,7 +552,7 @@ export default function DatasetAdminManager({
       temporal_coverage_end_date: preview.dataset.temporal_coverage_end_date ?? '',
       temporal_resolution: preview.dataset.temporal_resolution ?? '',
       access_level: preview.dataset.access_level ?? 'NONE',
-      licence: '',
+      licence: preview.dataset.licence ?? '',
       additional_metadata: JSON.stringify(preview.dataset.additional_metadata ?? {}, null, 2),
       tags: (preview.dataset.tags ?? []).join(', '),
       raw_dataset_ids: preview.dataset.raw_dataset_ids ?? [],
@@ -1205,7 +1206,7 @@ export default function DatasetAdminManager({
         />
       </label>
 
-      <div class="grid gap-4 md:grid-cols-3">
+      <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <label class="block">
           <span class="mb-2 block text-sm font-medium text-slate-700">Access level</span>
           <select

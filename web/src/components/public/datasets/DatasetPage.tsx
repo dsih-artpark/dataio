@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
+import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { api, ApiRequestError } from '../../../lib/api';
 import { currentUser, initAuth } from '../../../lib/auth';
@@ -79,7 +80,9 @@ export default function DatasetPage() {
   }, []);
 
   const readmeHtml = useMemo(
-    () => (dataset?.readme_md ? (marked.parse(dataset.readme_md) as string) : null),
+    // README text comes from the data repository: strip scripts and event
+    // handlers before it is put on the page.
+    () => (dataset?.readme_md ? DOMPurify.sanitize(marked.parse(dataset.readme_md) as string) : null),
     [dataset?.readme_md],
   );
 

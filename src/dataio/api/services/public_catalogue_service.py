@@ -37,6 +37,9 @@ DATASET_KINDS = ("tabular", "geojson")
 SORT_OPTIONS = ("relevance", "updated", "newest", "span", "title")
 MAX_PAGE_SIZE = 200
 # Words that carry no meaning in a catalogue search ("rainfall data for Odisha").
+# Each search word adds several database checks, so only this many are used.
+MAX_SEARCH_TERMS = 8
+
 SEARCH_STOP_WORDS = frozenset(
     {
         "a",
@@ -114,13 +117,16 @@ def _like_pattern(term: str) -> str:
 
 
 def search_terms(search: str | None) -> list[str]:
-    """Split a search box value into the words every result must match."""
+    """Split a search box value into the words every result must match.
+
+    Only the first ``MAX_SEARCH_TERMS`` words are used.
+    """
     if not search:
         return []
     words = re.findall(r"[\w\-]+", search.lower())
     terms = [w for w in words if w not in SEARCH_STOP_WORDS and len(w) > 1]
     # A search made only of stop words ("data") still searches for them.
-    return terms or [w for w in words if w]
+    return (terms or [w for w in words if w])[:MAX_SEARCH_TERMS]
 
 
 def _iso(value: date | None) -> str | None:
@@ -611,19 +617,35 @@ class PublicCatalogueService:
         session = DBSession()
         try:
             listed = Dataset.access_level.in_(PUBLIC_ACCESS_LEVELS)
+            # Restricted datasets count in the totals only: their owner,
+            # coverage years and kind are hidden details.
+            detailed = Dataset.access_level.in_(DETAIL_ACCESS_LEVELS)
 
-            total, sources, earliest, latest = (
+            total = session.query(func.count(Dataset.id)).filter(listed).scalar()
+            sources, earliest, latest = (
                 session.query(
-                    func.count(Dataset.id),
                     func.count(func.distinct(Dataset.data_owner_id)),
                     func.min(
                         cast(func.extract("year", Dataset.temporal_coverage_start_date), Integer)
                     ),
+                    # An open-ended end date (9999-12-31) counts as today.
                     func.max(
-                        cast(func.extract("year", Dataset.temporal_coverage_end_date), Integer)
+                        cast(
+                            func.extract(
+                                "year",
+                                case(
+                                    (
+                                        Dataset.temporal_coverage_end_date >= date(9999, 1, 1),
+                                        func.current_date(),
+                                    ),
+                                    else_=Dataset.temporal_coverage_end_date,
+                                ),
+                            ),
+                            Integer,
+                        )
                     ),
                 )
-                .filter(listed)
+                .filter(detailed)
                 .one()
             )
 
@@ -651,11 +673,13 @@ class PublicCatalogueService:
             kind_expr = func.coalesce(Dataset.manifest_json["datasetKind"].astext, "tabular")
             by_kind = dict.fromkeys(DATASET_KINDS, 0)
             for kind, count in (
-                session.query(kind_expr, func.count(Dataset.id)).filter(listed).group_by(kind_expr)
+                session.query(kind_expr, func.count(Dataset.id)).filter(detailed).group_by(kind_expr)
             ):
                 # An unrecognised datasetKind is shown as a table, as on the cards.
                 key = kind if kind in by_kind else "tabular"
                 by_kind[key] += count
+            # Restricted datasets show as tables, as their summary says.
+            by_kind["tabular"] += by_access.get(AccessLevel.NONE.value, 0)
 
             return {
                 "total_datasets": total or 0,

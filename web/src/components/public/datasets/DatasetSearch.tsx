@@ -558,7 +558,7 @@ export default function DatasetSearch() {
             </div>
           )}
 
-          <div class={`flex flex-col gap-4 ${loading && results ? 'opacity-60' : ''}`} aria-busy={loading}>
+          <div class={`grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4 ${loading && results ? 'opacity-60' : ''}`} aria-busy={loading}>
             {!results && loading
               ? Array.from({ length: 4 }, (_, index) => <div key={index} class="h-[220px] rounded-[14px] bg-white border border-gray-200 animate-pulse" />)
               : results?.datasets.map((dataset) => (

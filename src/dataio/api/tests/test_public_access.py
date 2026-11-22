@@ -82,6 +82,22 @@ def test_synthetic_preview_follows_the_data_dictionary():
         assert 0 <= int(age) <= 99 and 0 <= float(rate) <= 1
 
 
+@pytest.mark.parametrize(
+    "field",
+    [
+        {"type": "int", "min": "n/a", "max": "n/a"},
+        {"type": "float", "range": ["low", "high"]},
+        {"type": "float", "min": "inf", "max": "nan"},
+        {"type": "int", "range": [None, None]},
+        {"type": "int", "min": [1], "max": {}},
+    ],
+)
+def test_synthetic_preview_ignores_numbers_it_cannot_read(field):
+    rows = synthetic_rows("A", {"value": field}, {}, count=3)
+    assert len(rows) == 3
+    assert all(float(row[0]) == float(row[0]) for row in rows)
+
+
 def test_synthetic_preview_is_stable_per_dataset():
     assert synthetic_rows("A", DICTIONARY, ENUMS) == synthetic_rows("A", DICTIONARY, ENUMS)
     assert synthetic_rows("A", DICTIONARY, ENUMS) != synthetic_rows("B", DICTIONARY, ENUMS)
@@ -302,8 +318,32 @@ def test_view_only_and_restricted_never_get_download_links(db, ds_id):
     assert error.value.status_code == 403
 
 
+@pytest.fixture()
+def downloads_on(monkeypatch):
+    monkeypatch.setattr(importlib.import_module("dataio.api.routers.web"), "PUBLIC_DOWNLOADS_ENABLED", True)
+
+
+def test_download_route_asks_to_sign_in_while_signed_out_downloads_are_off(monkeypatch):
+    web_module = importlib.import_module("dataio.api.routers.web")
+    monkeypatch.setattr(web_module, "PUBLIC_DOWNLOADS_ENABLED", False)
+
+    def must_not_run(*args, **kwargs):
+        raise AssertionError("nothing may be read or logged while downloads are off")
+
+    monkeypatch.setattr(web_module, "get_client_info", must_not_run)
+    client = TestClient(importlib.import_module("dataio.api").app)
+
+    response = client.post(
+        "/api/v1/web/public/datasets/EP0001DS0001/download-urls",
+        json={"email": "asha@example.org", "accept_terms": True},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == web_module.SIGN_IN_TO_DOWNLOAD
+
+
 @requires_postgres
-def test_download_route_answers_403_for_view_only(db):
+def test_download_route_answers_403_for_view_only(db, downloads_on):
     client = TestClient(importlib.import_module("dataio.api").app)
     response = client.post(
         "/api/v1/web/public/datasets/EP0001DS0002/download-urls",
@@ -314,7 +354,7 @@ def test_download_route_answers_403_for_view_only(db):
 
 
 @requires_postgres
-def test_download_route_takes_the_email_in_the_body(db):
+def test_download_route_takes_the_email_in_the_body(db, downloads_on):
     client = TestClient(importlib.import_module("dataio.api").app)
     url = "/api/v1/web/public/datasets/EP0001DS0001/download-urls"
     assert client.post(url, json={}).status_code == 428

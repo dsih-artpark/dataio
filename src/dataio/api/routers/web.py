@@ -12,6 +12,7 @@ import logging
 import json
 import os
 import secrets
+import time
 from datetime import datetime
 from typing import List, Literal, Optional
 from urllib.parse import urlencode
@@ -825,6 +826,11 @@ async def get_public_datasets(
     )
 
 
+# /public/stats is the same for everyone, so it is kept briefly: [time, result].
+PUBLIC_STATS_CACHE_SECONDS = 60
+_public_stats_cache: list = []
+
+
 @web_router.get("/public/stats", tags=["public"])
 async def get_public_stats(
     catalogue: PublicCatalogueService = Depends(PublicCatalogueService),
@@ -833,9 +839,16 @@ async def get_public_stats(
     Live catalogue counts for the public site: totals, sources, year range,
     datasets per theme, access level and data type, and per state/UT.
 
-    No authentication required.
+    No authentication required. The counts are kept for a minute, since every
+    landing-page load asks for them and they run several queries.
     """
-    return catalogue.get_stats()
+    now = time.monotonic()
+    cached = _public_stats_cache
+    if cached and now - cached[0] < PUBLIC_STATS_CACHE_SECONDS:
+        return cached[1]
+    stats = catalogue.get_stats()
+    _public_stats_cache[:] = [now, stats]
+    return stats
 
 
 @web_router.get("/public/datasets/{dataset_id}", tags=["public"])
@@ -890,6 +903,14 @@ async def get_public_regions(
 
 
 # Per-IP limits for signed-out actions (decisions 2, 3 and 8 in the redesign plan).
+# Chat answers are streamed. nginx holds back a proxied response until it ends
+# unless the response opts out, so the answer would appear all at once.
+STREAM_HEADERS = {"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"}
+
+# Signed-out downloads of Open datasets ask visitors to accept the Terms of
+# Use and Privacy Policy, so they stay off until those are approved.
+PUBLIC_DOWNLOADS_ENABLED = os.getenv("PUBLIC_DOWNLOADS_ENABLED", "false").strip().lower() == "true"
+SIGN_IN_TO_DOWNLOAD = "sign_in_to_download"
 PUBLIC_DOWNLOADS_PER_HOUR = int(os.getenv("PUBLIC_DOWNLOADS_PER_HOUR", "30"))
 PUBLIC_PREVIEWS_PER_HOUR = int(os.getenv("PUBLIC_PREVIEWS_PER_HOUR", "120"))
 PUBLIC_ACCESS_REQUESTS_PER_HOUR = int(os.getenv("PUBLIC_ACCESS_REQUESTS_PER_HOUR", "5"))
@@ -920,10 +941,15 @@ async def get_public_download_urls(dataset_id: str, body: PublicDownloadRequest,
     first time); otherwise 428. POST so the email stays out of URLs and logs.
     Links are short-lived. Rate-limited per IP; each download is logged with
     the email, visitor ID and IP (access channel PUBLIC).
+
+    While PUBLIC_DOWNLOADS_ENABLED is off: 403 with detail
+    ``sign_in_to_download``, before anything is read or logged.
     """
     from dataio.api.auth.security import enforce_ip_rate_limit
     from dataio.api.services.public_access_service import PublicAccessService
 
+    if not PUBLIC_DOWNLOADS_ENABLED:
+        raise HTTPException(status_code=403, detail=SIGN_IN_TO_DOWNLOAD)
     enforce_ip_rate_limit(request, "download", PUBLIC_DOWNLOADS_PER_HOUR, 3600)
     user_agent, ip_address = get_client_info(request)
     return PublicAccessService().get_open_download_urls(
@@ -1084,7 +1110,7 @@ async def public_chat_stream(body: PublicChatRequest, request: Request):
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        headers=STREAM_HEADERS,
     )
 
 
@@ -2380,10 +2406,7 @@ async def chat_stream(
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        }
+        headers=STREAM_HEADERS,
     )
 
 

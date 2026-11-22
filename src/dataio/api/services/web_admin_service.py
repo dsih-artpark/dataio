@@ -430,6 +430,7 @@ class WebAdminService(BaseService):
                 "temporal_coverage_end_date": dataset_override.get("temporal_coverage_end_date") if "temporal_coverage_end_date" in dataset_override else info.get("temporal_coverage_end_date"),
                 "temporal_resolution": dataset_override.get("temporal_resolution") or info.get("temporal_resolution"),
                 "access_level": dataset_override.get("access_level") or info.get("access_level") or "NONE",
+                "licence": dataset_override.get("licence") if "licence" in dataset_override else info.get("licence"),
                 "additional_metadata": dataset_override.get("additional_metadata") if "additional_metadata" in dataset_override else info.get("additional_metadata"),
                 "tags": dataset_override.get("tags") if "tags" in dataset_override else info.get("tags", []),
             }

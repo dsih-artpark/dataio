@@ -13,6 +13,14 @@ export class ConsentRequiredError extends Error {
   }
 }
 
+/** Signed-out downloads are switched off on the server: the visitor must sign in. */
+export class SignInRequiredError extends Error {
+  constructor() {
+    super('Sign in to download this dataset.');
+    this.name = 'SignInRequiredError';
+  }
+}
+
 /**
  * Links for an Open dataset without signing in. With `email` (from the pop-up)
  * the visitor accepts the terms now; without it, the visitor cookie from an
@@ -32,6 +40,9 @@ async function openDownloadTables(dsId: string, email?: string) {
     return data.tables;
   } catch (err) {
     if (err instanceof ApiRequestError && err.statusCode === 428) throw new ConsentRequiredError();
+    if (err instanceof ApiRequestError && err.statusCode === 403 && err.message === 'sign_in_to_download') {
+      throw new SignInRequiredError();
+    }
     throw err;
   }
 }
@@ -91,9 +102,16 @@ export async function downloadDatasetZip(
       folder.file(`${table.table_name}${isParquet ? '.parquet' : '.csv'}`, blob);
     }),
   );
-  const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
-  if (failures.length === data.tables.length) {
+  // A zip missing some tables would look complete, so any failure stops the download.
+  const failed = data.tables.filter((_, i) => results[i].status === 'rejected').map((t) => t.table_name);
+  if (failed.length === data.tables.length) {
     throw new Error('The files couldn’t be downloaded. The links may have expired: please try again.');
+  }
+  if (failed.length) {
+    throw new Error(
+      `${failed.length} of ${data.tables.length} tables couldn’t be downloaded (${failed.join(', ')}), ` +
+        'so nothing was saved. The links may have expired: please try again.',
+    );
   }
 
   const blob = await zip.generateAsync({ type: 'blob' });

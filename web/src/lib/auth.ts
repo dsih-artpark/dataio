@@ -5,7 +5,7 @@
 import { signal } from '@preact/signals';
 import { api } from './api';
 
-interface User {
+export interface User {
   email: string;
   display_name: string | null;
   is_admin: boolean;

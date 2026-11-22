@@ -39,10 +39,14 @@ AIProvider = Literal["bedrock", "openrouter"]
 # Configuration
 CHAT_PROVIDER = os.getenv("CHAT_PROVIDER", "bedrock").lower()
 MAX_TOOL_ITERATIONS = int(os.getenv("CHAT_MAX_TOOL_ITERATIONS", "10"))
+# Shown instead of the raw exception, which can carry provider or internal details.
+CHAT_ERROR_MESSAGE = "The assistant couldn’t answer just now. Please try again in a moment."
+TOO_MANY_STEPS_MESSAGE = "That needed more lookups than the assistant allows for one question. Try asking about one dataset or topic at a time."
 
 # Bedrock configuration
 BEDROCK_REGION = os.getenv("AWS_BEDROCK_REGION", "us-east-1")
-BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")
+# US cross-region inference profile; Claude 3.5 Sonnet v2 reached end of life on Bedrock.
+BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-haiku-5-5")
 
 # OpenRouter configuration
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
@@ -66,7 +70,12 @@ When helping users:
 4. Offer to get more details on specific datasets if they're interested
 5. Be transparent about access restrictions - some datasets require permissions
 
-Always be concise and helpful. If the user doesn't have access to a dataset, explain how they might request access through the platform."""
+Access levels work like the website:
+- Open download: anyone can see the details and download the files.
+- View only: anyone can see the description, tables and columns, but the files need access.
+- Restricted: only the title is shared; nothing else about it is known until access is granted.
+
+Always be concise and helpful. If the user doesn't have access to a dataset, explain how they might request access through the platform (the "Request access" button on the dataset's page)."""
 
 
 # =============================================================================
@@ -99,6 +108,21 @@ class AIProviderBase(ABC):
     def format_tool_result(self, tool_use_id: str, result: dict) -> dict:
         """Format a tool result for the provider's expected format."""
         pass
+
+
+def _add_reasoning_delta(block: dict, delta: dict) -> None:
+    """Adds one streamed Converse reasoningContent delta to its block, in the
+    shape Converse expects the block back: reasoningText {text, signature},
+    or redactedContent."""
+    reasoning = block["reasoningContent"]
+    if "redactedContent" in delta:
+        reasoning["redactedContent"] = delta["redactedContent"]
+        return
+    text = reasoning.setdefault("reasoningText", {"text": ""})
+    if "text" in delta:
+        text["text"] += delta["text"]
+    if "signature" in delta:
+        text["signature"] = delta["signature"]
 
 
 class BedrockProvider(AIProviderBase):
@@ -136,6 +160,11 @@ class BedrockProvider(AIProviderBase):
         )
 
         current_tool_use = None
+        # The whole reply, block by block, so a tool turn can be sent back
+        # complete: models that think by default (e.g. Claude Haiku 5.5) need
+        # their reasoning blocks, signatures included, returned unchanged
+        # with the tool results.
+        blocks: dict[int, dict] = {}
 
         for event in response.get("stream", []):
             # Content block start
@@ -150,10 +179,19 @@ class BedrockProvider(AIProviderBase):
 
             # Content block delta
             if "contentBlockDelta" in event:
+                index = event["contentBlockDelta"].get("contentBlockIndex", 0)
                 delta = event["contentBlockDelta"]["delta"]
 
                 if "text" in delta:
+                    block = blocks.setdefault(index, {"text": ""})
+                    block["text"] += delta["text"]
                     yield {"type": "text", "content": delta["text"]}
+
+                if "reasoningContent" in delta:
+                    _add_reasoning_delta(
+                        blocks.setdefault(index, {"reasoningContent": {}}),
+                        delta["reasoningContent"],
+                    )
 
                 if "toolUse" in delta and current_tool_use:
                     current_tool_use["input"] += delta["toolUse"].get("input", "")
@@ -167,6 +205,14 @@ class BedrockProvider(AIProviderBase):
                     except json.JSONDecodeError:
                         tool_input = {}
 
+                    index = event["contentBlockStop"].get("contentBlockIndex", len(blocks))
+                    blocks[index] = {
+                        "toolUse": {
+                            "toolUseId": current_tool_use["id"],
+                            "name": current_tool_use["name"],
+                            "input": tool_input,
+                        }
+                    }
                     yield {
                         "type": "tool_call",
                         "id": current_tool_use["id"],
@@ -180,7 +226,10 @@ class BedrockProvider(AIProviderBase):
                 stop_reason = event["messageStop"].get("stopReason")
                 yield {
                     "type": "message_stop",
-                    "stop_reason": "tool_use" if stop_reason == "tool_use" else "end_turn"
+                    "stop_reason": "tool_use" if stop_reason == "tool_use" else "end_turn",
+                    "assistant_content": [
+                        blocks[i] for i in sorted(blocks) if blocks[i].get("text", True) != ""
+                    ],
                 }
 
     def format_tool_result(self, tool_use_id: str, result: dict) -> dict:
@@ -513,9 +562,13 @@ class ChatService(BaseService):
         conversation_history: list[dict],
         user_email: str,
         session_id: str | None = None,
+        max_model_calls: int | None = None,
     ) -> AsyncGenerator[dict, None]:
         """
         Process a chat message and stream the response.
+
+        ``max_model_calls`` caps the calls to the AI provider for this message
+        (default MAX_TOOL_ITERATIONS); each tool round trip is one call.
 
         Yields dicts with different event types:
         - {"type": "text", "content": "..."} - Text content
@@ -545,7 +598,8 @@ class ChatService(BaseService):
 
         # Agentic loop
         iteration = 0
-        while iteration < MAX_TOOL_ITERATIONS:
+        limit = max_model_calls or MAX_TOOL_ITERATIONS
+        while iteration < limit:
             iteration += 1
 
             try:
@@ -610,9 +664,12 @@ class ChatService(BaseService):
                                     )
                                 )
 
-                            # Add assistant message and tool results to history
-                            # Use provider-specific formatting for assistant content
-                            if hasattr(self.ai_provider, 'format_assistant_content'):
+                            # Add assistant message and tool results to history.
+                            # A provider that reports the whole reply (Bedrock)
+                            # sends it back as is, reasoning blocks included.
+                            if event.get("assistant_content"):
+                                assistant_content = event["assistant_content"]
+                            elif hasattr(self.ai_provider, 'format_assistant_content'):
                                 assistant_content = self.ai_provider.format_assistant_content(tool_calls)
                             else:
                                 assistant_content = [
@@ -638,13 +695,13 @@ class ChatService(BaseService):
                             yield {"type": "done"}
                             return
 
-            except Exception as e:
+            except Exception:
                 logger.exception("Error in chat stream")
-                yield {"type": "error", "message": str(e)}
+                yield {"type": "error", "message": CHAT_ERROR_MESSAGE}
                 return
 
         # Hit max iterations
-        yield {"type": "error", "message": "Maximum tool iterations reached"}
+        yield {"type": "error", "message": TOO_MANY_STEPS_MESSAGE}
 
     async def chat(
         self,

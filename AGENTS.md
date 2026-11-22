@@ -173,7 +173,7 @@ CHAT_MAX_TOOL_ITERATIONS=10
 
 # AWS Bedrock (when CHAT_PROVIDER=bedrock)
 AWS_BEDROCK_REGION=us-east-1
-BEDROCK_MODEL_ID=anthropic.claude-3-5-sonnet-20241022-v2:0
+BEDROCK_MODEL_ID=us.anthropic.claude-haiku-5-5
 
 # OpenRouter (when CHAT_PROVIDER=openrouter)
 OPENROUTER_API_KEY=<your-api-key>
@@ -238,7 +238,7 @@ The chat service supports multiple AI providers via an abstraction layer:
 
 - **AWS Bedrock** (default): Uses boto3 with the Converse API
   - Requires AWS credentials with Bedrock access
-  - Model: `anthropic.claude-3-5-sonnet-20241022-v2:0` (configurable)
+  - Model: `us.anthropic.claude-haiku-5-5` (configurable)
 
 - **OpenRouter**: OpenAI-compatible API supporting 100+ models
   - Requires API key from https://openrouter.ai/keys

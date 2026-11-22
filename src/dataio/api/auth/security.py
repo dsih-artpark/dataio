@@ -7,10 +7,11 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
+from sqlalchemy import text
 
 from dataio.api.database.config import Session as DBSession
-from dataio.api.database.models import AuthAuditLog, AuthRateLimit, User
+from dataio.api.database.models import AuthAuditLog, User
 
 logger = logging.getLogger(__name__)
 
@@ -76,75 +77,132 @@ def record_auth_event(
         session.close()
 
 
+# One statement, so two requests at the same moment can't both read the old
+# count (or both try to create the bucket) and slip under the limit. While a
+# bucket is blocked it is left as it is; once its window has passed it starts
+# again at 1; otherwise the count goes up by one and, over the limit, the
+# bucket is blocked.
+_COUNT_ATTEMPT_SQL = text(
+    """
+    INSERT INTO auth_rate_limits (action, subject, attempt_count, window_started_at, created_at, updated_at)
+    VALUES (:action, :subject, 1, :now, :now, :now)
+    ON CONFLICT (action, subject) DO UPDATE SET
+        attempt_count = CASE
+            WHEN auth_rate_limits.blocked_until > :now THEN auth_rate_limits.attempt_count
+            WHEN auth_rate_limits.window_started_at <= :window_cutoff THEN 1
+            ELSE auth_rate_limits.attempt_count + 1
+        END,
+        window_started_at = CASE
+            WHEN auth_rate_limits.blocked_until > :now THEN auth_rate_limits.window_started_at
+            WHEN auth_rate_limits.window_started_at <= :window_cutoff THEN :now
+            ELSE auth_rate_limits.window_started_at
+        END,
+        blocked_until = CASE
+            WHEN auth_rate_limits.blocked_until > :now THEN auth_rate_limits.blocked_until
+            WHEN auth_rate_limits.window_started_at <= :window_cutoff THEN NULL
+            WHEN auth_rate_limits.attempt_count + 1 > :limit THEN :block_until
+            ELSE NULL
+        END,
+        updated_at = :now
+    RETURNING blocked_until
+    """
+)
+RATE_LIMIT_UNAVAILABLE_MESSAGE = "This is temporarily unavailable. Please try again in a few minutes."
+
+
 def enforce_rate_limit(
     action: str,
     subject: str,
     limit: int,
     window_seconds: int = AUTH_RATE_LIMIT_WINDOW_SECONDS,
     block_seconds: int = AUTH_RATE_LIMIT_BLOCK_SECONDS,
+    fail_closed: bool = False,
 ) -> None:
-    """Increment a DB-backed rate limit bucket and raise if blocked."""
-    now = datetime.now(timezone.utc)
+    """Count one attempt in a DB-backed rate limit bucket and raise 429 if blocked.
+
+    If the counter can't be read or written, the call is let through, or
+    with ``fail_closed`` refused with 503 (for public actions that cost
+    money or send email, where an unlimited burst is worse than a pause).
+    """
+    # The columns are timestamp without time zone, holding UTC.
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     session = DBSession()
     try:
-        bucket = (
-            session.query(AuthRateLimit)
-            .filter(
-                AuthRateLimit.action == action,
-                AuthRateLimit.subject == subject,
-            )
-            .first()
-        )
-
-        if not bucket:
-            bucket = AuthRateLimit(
-                action=action,
-                subject=subject,
-                attempt_count=1,
-                window_started_at=now,
-                created_at=now,
-                updated_at=now,
-            )
-            session.add(bucket)
-            session.commit()
-            return
-
-        blocked_until = bucket.blocked_until
-        if blocked_until and blocked_until.tzinfo is None:
-            blocked_until = blocked_until.replace(tzinfo=timezone.utc)
-        if blocked_until and blocked_until > now:
-            retry_after = max(1, int((blocked_until - now).total_seconds()))
-            raise HTTPException(
-                status_code=429,
-                detail=f"Too many attempts. Try again in {retry_after} seconds.",
-            )
-
-        window_started_at = bucket.window_started_at
-        if window_started_at.tzinfo is None:
-            window_started_at = window_started_at.replace(tzinfo=timezone.utc)
-
-        if window_started_at + timedelta(seconds=window_seconds) <= now:
-            bucket.attempt_count = 0
-            bucket.window_started_at = now
-            bucket.blocked_until = None
-
-        bucket.attempt_count += 1
-        bucket.updated_at = now
-
-        if bucket.attempt_count > limit:
-            bucket.blocked_until = now + timedelta(seconds=block_seconds)
-            session.commit()
-            raise HTTPException(
-                status_code=429,
-                detail=f"Too many attempts. Try again in {block_seconds} seconds.",
-            )
-
+        blocked_until = session.execute(
+            _COUNT_ATTEMPT_SQL,
+            {
+                "action": action,
+                "subject": subject,
+                "now": now,
+                "window_cutoff": now - timedelta(seconds=window_seconds),
+                "block_until": now + timedelta(seconds=block_seconds),
+                "limit": limit,
+            },
+        ).scalar_one()
         session.commit()
-    except HTTPException:
-        session.rollback()
-        raise
     except Exception as exc:
         session.rollback()
         logger.warning("Failed to enforce rate limit %s/%s: %s", action, subject, exc)
+        if fail_closed:
+            raise HTTPException(status_code=503, detail=RATE_LIMIT_UNAVAILABLE_MESSAGE) from exc
+        return
     finally:
         session.close()
+
+    if blocked_until is not None and blocked_until > now:
+        retry_after = max(1, int((blocked_until - now).total_seconds()))
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many attempts. Try again in {retry_after} seconds.",
+        )
+
+
+def get_client_ip(request: Request) -> Optional[str]:
+    """The caller's IP address.
+
+    Proxy headers are only trusted when TRUST_PROXY_HEADERS=true, i.e. when
+    the API is reachable only through our nginx proxy; otherwise anyone could
+    pick their own address. Only headers nginx writes itself are used:
+    X-Real-IP (nginx sets it to the connecting address, replacing anything
+    the visitor sent), else the LAST X-Forwarded-For entry (the one nginx
+    appended; earlier entries come from the visitor). CF-Connecting-IP is
+    deliberately ignored: there is no Cloudflare in front, and nginx passes
+    that header through unchanged, so a visitor could set it to any IP.
+    """
+    ip_address = request.client.host if request.client else None
+    if os.getenv("TRUST_PROXY_HEADERS", "false").lower() == "true":
+        real_ip = (request.headers.get("x-real-ip") or "").strip()
+        forwarded_for = [part.strip() for part in request.headers.get("x-forwarded-for", "").split(",")]
+        forwarded_for = [part for part in forwarded_for if part]
+        if real_ip:
+            ip_address = real_ip
+        elif forwarded_for:
+            ip_address = forwarded_for[-1]
+    return ip_address
+
+
+def enforce_ip_rate_limit(
+    request: Request,
+    action: str,
+    limit: int,
+    window_seconds: int,
+    block_seconds: Optional[int] = None,
+) -> None:
+    """Per-IP limit for public (signed-out) actions such as open downloads,
+    the assistant and request forms.
+
+    Allows ``limit`` calls per ``window_seconds`` from one IP address, then
+    answers 429 for ``block_seconds`` (default: one window). Counters share
+    the auth_rate_limits table under the action ``public:<action>``. Unlike
+    the sign-in limits, it refuses the call (503) if the counter can't be
+    read or written.
+    """
+    ip_address = get_client_ip(request) or "unknown"
+    enforce_rate_limit(
+        action=f"public:{action}",
+        subject=f"ip:{ip_address}",
+        limit=limit,
+        window_seconds=window_seconds,
+        block_seconds=block_seconds if block_seconds is not None else window_seconds,
+        fail_closed=True,
+    )

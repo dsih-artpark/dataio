@@ -26,6 +26,9 @@ def _download_row(user_email, dataset_id, channel="WEB", ua="Mozilla/5.0 (Window
         access_channel=channel,
         ip_address="127.0.0.1",
         user_agent=ua,
+        visitor_email=None,
+        visitor_id=None,
+        terms_accepted_at=None,
         downloaded_at=None,
     )
 
@@ -137,7 +140,13 @@ def test_get_download_metrics_returns_summary_and_parsed_downloads(monkeypatch):
 
     result = service.get_download_metrics(SimpleNamespace(email="admin@example.com", is_admin=True, is_group=False))
 
-    assert result["summary"] == {"total_downloads": 3, "unique_users": 3, "unique_datasets": 3}
+    # The fake query answers every distinct-count with its row count.
+    assert result["summary"] == {
+        "total_downloads": 3,
+        "unique_users": 3,
+        "unique_datasets": 3,
+        "unique_visitors": 3,
+    }
     by_id = {d["dataset_id"]: d for d in result["downloads"]}
 
     # Dataset row exists -> real title used.
@@ -199,7 +208,12 @@ def test_get_download_metrics_degrades_gracefully_before_migration(monkeypatch):
 
     result = service.get_download_metrics(SimpleNamespace(email="admin@example.com", is_admin=True, is_group=False))
 
-    assert result["summary"] == {"total_downloads": 0, "unique_users": 0, "unique_datasets": 0}
+    assert result["summary"] == {
+        "total_downloads": 0,
+        "unique_users": 0,
+        "unique_datasets": 0,
+        "unique_visitors": 0,
+    }
     assert result["downloads"] == []
     assert "warning" in result
 
@@ -343,3 +357,23 @@ def test_get_dataset_download_urls_does_not_log_when_no_files(monkeypatch):
 
     assert result["tables"] == []
     assert session.added == []
+
+
+def test_get_download_metrics_returns_signed_out_visitor_details(monkeypatch):
+    service = object.__new__(WebAdminService)
+    service.logger = logging.getLogger(__name__)
+    service._require_admin = lambda _user: None
+
+    row = _download_row(None, "TS0001DS0001", channel="PUBLIC")
+    row.visitor_email = "asha@example.org"
+    row.visitor_id = "22222222-2222-2222-2222-222222222222"
+    session = MetricsSessionStub(FakeDownloadQuery([row]))
+    monkeypatch.setattr("dataio.api.services.web_admin_service.DBSession", lambda: session)
+
+    result = service.get_download_metrics(SimpleNamespace(email="admin@example.com", is_admin=True, is_group=False))
+
+    item = result["downloads"][0]
+    assert item["user_email"] is None
+    assert item["visitor_email"] == "asha@example.org"
+    assert item["visitor_id"] == "22222222-2222-2222-2222-222222222222"
+    assert item["terms_accepted_at"] is None

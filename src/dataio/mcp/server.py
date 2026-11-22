@@ -9,6 +9,8 @@ import logging
 from contextlib import contextmanager
 from typing import Any
 
+from sqlalchemy import and_, or_
+
 from dataio.api.database.config import Session as DBSession
 from dataio.api.database.models import Dataset, Collection, DataOwner, Tag, User, UserPermission, UserGroup
 from dataio.api.database.enums import AccessLevel
@@ -82,6 +84,31 @@ def check_dataset_access(session, user_email: str, dataset_id: str) -> bool:
             return True
 
     return False
+
+
+def can_download(session, user_context: UserContext | None, dataset: Dataset) -> bool:
+    """Open download datasets for everyone; others only with a grant (or for admins)."""
+    if user_context is None:
+        return dataset.access_level == AccessLevel.DOWNLOAD
+    return check_dataset_access(session, user_context.email, dataset.ds_id)
+
+
+def shows_details(session, user_context: UserContext | None, dataset: Dataset) -> bool:
+    """Same as the public website: Open and View only details are visible to anyone;
+    a Restricted dataset shows only its title unless the user may download it."""
+    if dataset.access_level in (AccessLevel.DOWNLOAD, AccessLevel.VIEW):
+        return True
+    return can_download(session, user_context, dataset)
+
+
+def _is_admin(user_context: UserContext | None) -> bool:
+    return bool(user_context and user_context.is_admin)
+
+
+RESTRICTED_NOTE = (
+    "Restricted dataset: only its title is shared. Details, columns and files are "
+    "available after access is granted; use 'Request access' on the dataset's page."
+)
 
 
 class DataIOMCPServer:
@@ -246,7 +273,7 @@ class DataIOMCPServer:
             elif tool_name == ToolName.LIST_CATEGORIES:
                 return await self._list_categories()
             elif tool_name == ToolName.LIST_DATA_OWNERS:
-                return await self._list_data_owners()
+                return await self._list_data_owners(user_context)
             elif tool_name == ToolName.GET_DOWNLOAD_INFO:
                 return await self._get_download_info(tool_input, user_context)
             elif tool_name == ToolName.GET_DATASET_SCHEMA:
@@ -274,14 +301,28 @@ class DataIOMCPServer:
 
         with get_db_session() as session:
             q = session.query(Dataset)
+            # A Restricted dataset must not match on details it hides (description,
+            # category, owner, tags); admins see everything.
+            hide_restricted = not _is_admin(user_context)
 
             # Text search
             if query:
                 search_pattern = f"%{query}%"
+                description_match = Dataset.description.ilike(search_pattern)
+                if hide_restricted:
+                    description_match = and_(
+                        Dataset.access_level != AccessLevel.NONE, description_match
+                    )
                 q = q.filter(
-                    (Dataset.title.ilike(search_pattern)) |
-                    (Dataset.description.ilike(search_pattern))
+                    or_(
+                        Dataset.title.ilike(search_pattern),
+                        Dataset.ds_id.ilike(search_pattern),
+                        description_match,
+                    )
                 )
+
+            if hide_restricted and (category or data_owner or tags):
+                q = q.filter(Dataset.access_level != AccessLevel.NONE)
 
             # Category filter
             if category:
@@ -300,31 +341,31 @@ class DataIOMCPServer:
                 for tag in tags:
                     q = q.filter(Dataset.tags.any(Tag.tag_name.ilike(f"%{tag}%")))
 
-            # Apply access control if user context provided
-            # For now, only show public datasets or datasets user has access to
+            # Every dataset is listed, as on the website; Restricted ones by title only.
             datasets = q.limit(limit).all()
 
             results = []
             for ds in datasets:
-                # Check access if user context is provided
-                if user_context:
-                    has_access = check_dataset_access(
-                        session, user_context.email, ds.ds_id
-                    )
-                else:
-                    # No user context - only show public datasets
-                    has_access = ds.access_level.value == "public"
-
-                if has_access or ds.access_level.value == "public":
+                downloadable = can_download(session, user_context, ds)
+                if not shows_details(session, user_context, ds):
                     results.append({
                         "dataset_id": ds.ds_id,
                         "title": ds.title,
-                        "description": ds.description[:200] + "..." if ds.description and len(ds.description) > 200 else ds.description,
-                        "category": ds.collection.category_name if ds.collection else None,
-                        "data_owner": ds.data_owner.name if ds.data_owner else None,
                         "access_level": ds.access_level.value,
-                        "tags": [t.tag_name for t in ds.tags]
+                        "can_download": False,
+                        "note": RESTRICTED_NOTE,
                     })
+                    continue
+                results.append({
+                    "dataset_id": ds.ds_id,
+                    "title": ds.title,
+                    "description": ds.description[:200] + "..." if ds.description and len(ds.description) > 200 else ds.description,
+                    "category": ds.collection.category_name if ds.collection else None,
+                    "data_owner": ds.data_owner.name if ds.data_owner else None,
+                    "access_level": ds.access_level.value,
+                    "can_download": downloadable,
+                    "tags": [t.tag_name for t in ds.tags]
+                })
 
             return ToolResult(
                 success=True,
@@ -358,18 +399,19 @@ class DataIOMCPServer:
             if not dataset:
                 return ToolResult(success=False, error=f"Dataset not found: {dataset_id}")
 
-            # Check access
-            if user_context:
-                has_access = check_dataset_access(session, user_context.email, dataset_id)
-            else:
-                has_access = dataset.access_level.value == "public"
-
-            if not has_access:
+            if not shows_details(session, user_context, dataset):
                 return ToolResult(
-                    success=False,
-                    error="You don't have access to this dataset"
+                    success=True,
+                    data={
+                        "dataset_id": dataset.ds_id,
+                        "title": dataset.title,
+                        "access_level": dataset.access_level.value,
+                        "can_download": False,
+                        "note": RESTRICTED_NOTE,
+                    },
                 )
 
+            owner = dataset.data_owner
             return ToolResult(
                 success=True,
                 data={
@@ -378,9 +420,11 @@ class DataIOMCPServer:
                     "description": dataset.description,
                     "category": dataset.collection.category_name if dataset.collection else None,
                     "collection": dataset.collection.collection_name if dataset.collection else None,
+                    "can_download": can_download(session, user_context, dataset),
                     "data_owner": {
-                        "name": dataset.data_owner.name if dataset.data_owner else None,
-                        "contact": dataset.data_owner.contact_person if dataset.data_owner else None,
+                        "name": owner.name if owner else None,
+                        # A named person: shown to admins only, as on the website.
+                        **({"contact": owner.contact_person if owner else None} if _is_admin(user_context) else {}),
                     },
                     "spatial_coverage": {
                         "region": dataset.spatial_coverage_region.region_name if dataset.spatial_coverage_region else None,
@@ -416,19 +460,17 @@ class DataIOMCPServer:
                 }
             )
 
-    async def _list_data_owners(self) -> ToolResult:
-        """List all data owners."""
+    async def _list_data_owners(self, user_context: UserContext | None = None) -> ToolResult:
+        """List all data owners (contact people for admins only)."""
         with get_db_session() as session:
             owners = session.query(DataOwner).all()
+            admin = _is_admin(user_context)
 
             return ToolResult(
                 success=True,
                 data={
                     "data_owners": [
-                        {
-                            "name": o.name,
-                            "contact_person": o.contact_person,
-                        }
+                        {"name": o.name, **({"contact_person": o.contact_person} if admin else {})}
                         for o in owners
                     ]
                 }
@@ -452,13 +494,7 @@ class DataIOMCPServer:
             if not dataset:
                 return ToolResult(success=False, error=f"Dataset not found: {dataset_id}")
 
-            # Check access
-            if user_context:
-                has_access = check_dataset_access(session, user_context.email, dataset_id)
-            else:
-                has_access = dataset.access_level.value == "public"
-
-            if not has_access:
+            if not can_download(session, user_context, dataset):
                 return ToolResult(
                     success=False,
                     error="You don't have access to download this dataset. Please request access through the DataIO platform."
@@ -498,17 +534,9 @@ class DataIOMCPServer:
             if not dataset:
                 return ToolResult(success=False, error=f"Dataset not found: {dataset_id}")
 
-            # Check access for schema (might be more permissive than download)
-            if user_context:
-                has_access = check_dataset_access(session, user_context.email, dataset_id)
-            else:
-                has_access = dataset.access_level.value == "public"
-
-            if not has_access:
-                return ToolResult(
-                    success=False,
-                    error="You don't have access to this dataset's schema"
-                )
+            # Columns are public for Open and View only datasets, as on the website.
+            if not shows_details(session, user_context, dataset):
+                return ToolResult(success=False, error=RESTRICTED_NOTE)
 
             # Prefer normalized manifest JSON, then fall back to legacy metadata.json.
             schema_data = None

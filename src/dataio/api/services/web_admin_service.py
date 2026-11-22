@@ -351,6 +351,7 @@ class WebAdminService(BaseService):
                 "temporal_coverage_end_date": dataset_override.get("temporal_coverage_end_date") if "temporal_coverage_end_date" in dataset_override else info.get("temporal_coverage_end_date"),
                 "temporal_resolution": dataset_override.get("temporal_resolution") or info.get("temporal_resolution"),
                 "access_level": dataset_override.get("access_level") or info.get("access_level") or "NONE",
+                "licence": dataset_override.get("licence") if "licence" in dataset_override else info.get("licence"),
                 "additional_metadata": dataset_override.get("additional_metadata") if "additional_metadata" in dataset_override else info.get("additional_metadata"),
                 "tags": dataset_override.get("tags") if "tags" in dataset_override else info.get("tags", []),
             }
@@ -2740,6 +2741,7 @@ class WebAdminService(BaseService):
                 pattern = f"%{search}%"
                 query = query.filter(
                     (DatasetDownload.user_email.ilike(pattern))
+                    | (DatasetDownload.visitor_email.ilike(pattern))
                     | (DatasetDownload.dataset_id.ilike(pattern))
                 )
 
@@ -2753,6 +2755,8 @@ class WebAdminService(BaseService):
             # search-filtered download list that only touches 1 of them.
             unique_users = query.with_entities(func.count(func.distinct(DatasetDownload.user_email))).scalar() or 0
             unique_datasets = query.with_entities(func.count(func.distinct(DatasetDownload.dataset_id))).scalar() or 0
+            # Signed-out downloaders (migration 031): one per browser cookie.
+            unique_visitors = query.with_entities(func.count(func.distinct(DatasetDownload.visitor_id))).scalar() or 0
 
             # Paginated log entries
             downloads = (
@@ -2815,6 +2819,7 @@ class WebAdminService(BaseService):
                     "total_downloads": total,
                     "unique_users": unique_users,
                     "unique_datasets": unique_datasets,
+                    "unique_visitors": unique_visitors,
                 },
                 "downloads": [
                     {
@@ -2826,6 +2831,9 @@ class WebAdminService(BaseService):
                         "device_info": _parse_device(d.user_agent),
                         "ip_address": d.ip_address,
                         "user_agent": d.user_agent,
+                        "visitor_email": d.visitor_email,
+                        "visitor_id": str(d.visitor_id) if d.visitor_id else None,
+                        "terms_accepted_at": d.terms_accepted_at.isoformat() if d.terms_accepted_at else None,
                         "downloaded_at": d.downloaded_at.isoformat() if d.downloaded_at else None,
                     }
                     for d in downloads
@@ -2845,6 +2853,7 @@ class WebAdminService(BaseService):
                         "total_downloads": 0,
                         "unique_users": 0,
                         "unique_datasets": 0,
+                        "unique_visitors": 0,
                     },
                     "downloads": [],
                     "total": 0,

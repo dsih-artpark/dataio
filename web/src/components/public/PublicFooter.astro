@@ -5,7 +5,13 @@ import { CONTACT_EMAIL } from '../../lib/site';
 
 const year = new Date().getFullYear();
 
-const columns = [
+interface FooterLink {
+  label: string;
+  href: string;
+  external?: boolean;
+}
+
+const columns: { heading: string; links: FooterLink[] }[] = [
   {
     heading: 'Platform',
     links: [
@@ -13,11 +19,7 @@ const columns = [
       { label: 'Our approach', href: '/#approach' },
       { label: 'How we check quality', href: '/quality' },
       { label: 'Dataset changes', href: '/changes' },
-      {
-        label: 'Data standards',
-        href: 'https://engg.artpark.ai/data_standardisation/workflow.html',
-        external: true,
-      },
+      { label: 'Data standards', href: '/standards' },
     ],
   },
   {

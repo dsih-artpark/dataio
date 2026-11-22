@@ -1,0 +1,106 @@
+---
+// Data standards (/standards): the rules we standardise datasets to, in plain words,
+// summarised from the team's standard (Data_Standardisation_Docs/
+// Data_Standardisation_Overview.md). The steps from source to published
+// dataset live on /quality.
+import PublicLayout from '../layouts/PublicLayout.astro';
+import { CONTACT_EMAIL } from '../lib/site';
+
+interface Rule {
+  title: string;
+  text: string;
+  /** Short sample values shown under the text. */
+  examples: string[];
+}
+
+const rules: Rule[] = [
+  {
+    title: 'Official place codes',
+    text: 'States, districts, sub-districts and villages use official place codes based on the Government of India’s Local Government Directory (LGD) where applicable, with the matching official name.',
+    examples: ['state_29', 'district_525', 'KARNATAKA'],
+  },
+  {
+    title: 'Every place comes with a year',
+    text: 'Boundaries change over time, so any data tied to a place also says which year it refers to.',
+    examples: ['district_525 + 2019'],
+  },
+  {
+    title: 'One way to write dates',
+    text: 'Dates are written year first. Times should include the time zone.',
+    examples: ['2024', '2024-03', '2024-03-15'],
+  },
+  {
+    title: 'Every column is described',
+    text: 'Each column has a plain description of what it measures, a type (number, date, place, text and so on), and whether it can be empty.',
+    examples: ['count: number, cannot be empty'],
+  },
+  {
+    title: 'Fixed lists instead of free text',
+    text: 'Where possible, a column that can only hold certain values uses a fixed list of allowed values, so the same thing is always written the same way.',
+    examples: ['MALE', 'FEMALE', 'UNKNOWN'],
+  },
+  {
+    title: 'What every dataset tells you',
+    text: 'A title, a description of what it contains, where it came from and, where known, the places and years it covers.',
+    examples: ['Source', 'Coverage', 'Description'],
+  },
+];
+---
+
+<PublicLayout
+  title="Data standards"
+  description="The rules we standardise datasets to: place codes, dates, column descriptions and allowed values."
+  current="approach"
+  background="white"
+  width="full"
+>
+  <div class="max-w-[860px] mx-auto px-4 sm:px-6 pt-14 pb-20 flex flex-col gap-8">
+    <a href="/#approach" class="self-start text-sm font-semibold text-primary-700 hover:text-primary-900">← Our approach</a>
+
+    <div class="flex flex-col gap-3">
+      <p class="m-0 text-[13px] font-semibold tracking-[0.08em] uppercase text-primary-700">Standardise</p>
+      <h1 class="m-0 text-[32px] sm:text-[40px] leading-[1.15] font-bold text-gray-900">Data standards</h1>
+      <p class="m-0 text-lg leading-relaxed text-gray-600">
+        Data comes to us from many sources, each with its own names, codes and formats. We bring our datasets to the
+        same rules, so that data from different sources lines up and can be joined.
+      </p>
+    </div>
+
+    <section aria-labelledby="rules-heading" class="flex flex-col gap-4">
+      <h2 id="rules-heading" class="m-0 text-[26px] font-bold text-gray-900">The rules we standardise datasets to</h2>
+      <ul class="list-none m-0 p-0 grid gap-3 grid-cols-[repeat(auto-fit,minmax(240px,1fr))]">
+        {
+          rules.map((rule) => (
+            <li class="p-5 rounded-[14px] border border-gray-200 bg-white flex flex-col gap-2">
+              <h3 class="m-0 text-base font-bold text-gray-900">{rule.title}</h3>
+              <p class="m-0 text-sm leading-normal text-gray-600">{rule.text}</p>
+              <p class="m-0 mt-auto pt-1 flex flex-wrap gap-1.5">
+                <span class="sr-only">For example: </span>
+                {rule.examples.map((example) => (
+                  <code class="px-2 py-0.5 rounded-md bg-gray-100 text-[13px] text-gray-800">{example}</code>
+                ))}
+              </p>
+            </li>
+          ))
+        }
+      </ul>
+    </section>
+
+    <section aria-labelledby="journey-heading" class="flex flex-col gap-2">
+      <h2 id="journey-heading" class="m-0 text-[26px] font-bold text-gray-900">How a dataset gets here</h2>
+      <p class="m-0 text-base leading-relaxed text-gray-700">
+        Each dataset is taken from its source, brought to these rules and checked before it is published.
+      </p>
+      <a href="/quality" class="self-start text-[15px] font-semibold text-primary-700 hover:text-primary-900">
+        How we check quality →
+      </a>
+    </section>
+
+    <p class="m-0 text-[15px] text-gray-600">
+      Found data that doesn’t follow these rules?{' '}
+      <a href={`mailto:${CONTACT_EMAIL}`} class="font-semibold text-primary-700 hover:text-primary-900">
+        Tell us at {CONTACT_EMAIL}
+      </a>
+    </p>
+  </div>
+</PublicLayout>

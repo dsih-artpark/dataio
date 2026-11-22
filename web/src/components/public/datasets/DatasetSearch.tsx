@@ -18,9 +18,48 @@ import {
 import { STATE_TILES, THEMES, loadCatalogueStats, themeCounts } from '../../../lib/landing';
 import { CONTACT_EMAIL } from '../../../lib/site';
 import { openAssistant } from '../../../lib/assistant';
+import { readDatasetView, saveDatasetView, type DatasetView } from '../../../lib/datasetView';
 import DatasetCard from './DatasetCard';
 
 const PAGE_SIZE = 20;
+
+const iconProps = {
+  'aria-hidden': true,
+  width: 16,
+  height: 16,
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  'stroke-width': 2,
+  'stroke-linecap': 'round',
+  'stroke-linejoin': 'round',
+} as const;
+
+/** The two ways to show results: a grid of tiles or one card per row. */
+const VIEW_OPTIONS: { view: DatasetView; label: string; icon: preact.JSX.Element }[] = [
+  {
+    view: 'tile',
+    label: 'Tiles',
+    icon: (
+      <svg {...iconProps}>
+        <rect x="3" y="3" width="7" height="7" rx="1" />
+        <rect x="14" y="3" width="7" height="7" rx="1" />
+        <rect x="3" y="14" width="7" height="7" rx="1" />
+        <rect x="14" y="14" width="7" height="7" rx="1" />
+      </svg>
+    ),
+  },
+  {
+    view: 'card',
+    label: 'Cards',
+    icon: (
+      <svg {...iconProps}>
+        <rect x="3" y="4" width="18" height="6" rx="1" />
+        <rect x="3" y="14" width="18" height="6" rx="1" />
+      </svg>
+    ),
+  },
+];
 const INDIA = 'country_IN';
 const SOURCES_SHOWN = 5;
 
@@ -64,6 +103,13 @@ function readFilters(): CatalogueFilters {
 export default function DatasetSearch() {
   const [filters, setFilters] = useState<CatalogueFilters>({});
   const [ready, setReady] = useState(false);
+  // Tiles until the saved choice is read after the first render.
+  const [view, setView] = useState<DatasetView>('tile');
+  useEffect(() => setView(readDatasetView()), []);
+  const chooseView = (next: DatasetView) => {
+    setView(next);
+    saveDatasetView(next);
+  };
   const [searchText, setSearchText] = useState('');
   const [results, setResults] = useState<{ datasets: CatalogueDataset[]; total: number } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -532,6 +578,22 @@ export default function DatasetSearch() {
                 </svg>
                 <span aria-live="polite">{copied ? 'Link copied' : 'Copy link to this search'}</span>
               </button>
+              <div role="group" aria-label="Show results as" class="hidden sm:inline-flex rounded-lg border border-gray-300 bg-white p-0.5">
+                {VIEW_OPTIONS.map((option) => (
+                  <button
+                    key={option.view}
+                    type="button"
+                    aria-pressed={view === option.view}
+                    onClick={() => chooseView(option.view)}
+                    class={`inline-flex items-center gap-1.5 min-h-[36px] px-3 rounded-md text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 ${
+                      view === option.view ? 'bg-primary-50 text-primary-800 font-semibold' : 'text-gray-700 hover:text-gray-900'
+                    }`}
+                  >
+                    {option.icon}
+                    {option.label}
+                  </button>
+                ))}
+              </div>
               <label class="flex items-center gap-2 text-sm text-gray-700">
                 Sort by
                 <select
@@ -558,11 +620,19 @@ export default function DatasetSearch() {
             </div>
           )}
 
-          <div class={`grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4 ${loading && results ? 'opacity-60' : ''}`} aria-busy={loading}>
+          <div
+            class={`${view === 'card' ? 'flex flex-col gap-3' : 'grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4'} ${loading && results ? 'opacity-60' : ''}`}
+            aria-busy={loading}
+          >
             {!results && loading
-              ? Array.from({ length: 4 }, (_, index) => <div key={index} class="h-[220px] rounded-[14px] bg-white border border-gray-200 animate-pulse" />)
+              ? Array.from({ length: 4 }, (_, index) => (
+                  <div
+                    key={index}
+                    class={`${view === 'card' ? 'h-[120px]' : 'h-[220px]'} rounded-[14px] bg-white border border-gray-200 animate-pulse`}
+                  />
+                ))
               : results?.datasets.map((dataset) => (
-                  <DatasetCard key={dataset.ds_id} dataset={dataset} search={filters.search} />
+                  <DatasetCard key={dataset.ds_id} dataset={dataset} search={filters.search} view={view} />
                 ))}
           </div>
 

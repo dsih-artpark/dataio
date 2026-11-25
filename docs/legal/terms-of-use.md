@@ -1,14 +1,7 @@
-# Terms of Use — DRAFT
-
-> **Draft for internal review. Not approved, not published, not legal advice.**
-> Drafted with an AI assistant from how the platform works today (code on branch `ui-redesign`, 3 Nov 2026).
-> Items marked **[TO CONFIRM]** need a decision or a fact we could not check from the code.
-> The signed-out download pop-up (email + cookie) described here is built (3 Nov 2026).
+# Terms of Use
 
 **Data and AI Commons for One Health**
-Run by ARTPARK (AI & Robotics Technology Park), IISc Bengaluru. **[TO CONFIRM: legal entity name and registered address]**
-
-Last updated: **[date of approval]**
+Run by ARTPARK (AI & Robotics Technology Park), IISc Bengaluru.
 
 ---
 
@@ -36,13 +29,13 @@ You can ask for access to View only and Restricted datasets with the Request acc
 
 ## 3. Downloading without an account
 
-To download an Open dataset without an account, we ask for your **email address** and your agreement to these terms and to the dataset's licence. We then save a cookie on your browser so you aren't asked again. Our [Privacy Policy](privacy-policy.md) explains how we use them.
+To download an Open dataset without an account, we ask for your **email address** and send a code to it to confirm it is yours. We also ask for your agreement to these terms and to the dataset's licence. We then save a cookie on your browser so you aren't asked again. Our [Privacy Policy](privacy-policy.md) explains how we use them.
 
 You agree to give a real email address that you control.
 
 ## 4. Accounts and API keys
 
-- You can sign in with an email code, Google, GitHub or a passkey. **[TO CONFIRM: which sign-in methods are switched on in production]**
+- You can sign in with an email code, Google, GitHub or a passkey.
 - Keep your account and API keys to yourself. Don't share them, or put them in public code or notebooks. You are responsible for what happens with your keys.
 - Tell us at **onehealth@artpark.in** if you think a key has leaked. You can revoke and create keys on your account page.
 - Access we grant you is personal to you, or to your organisation if the grant says so. Don't pass data you were given access to on to anyone else, unless its licence or our written approval allows it.
@@ -50,8 +43,7 @@ You agree to give a real email address that you control.
 ## 5. Dataset licences and credit
 
 - **Each dataset has its own licence**, shown on its page, for example CC BY 4.0. That licence controls how you may use, share and adapt the data. These terms add to it but don't replace it.
-- Some datasets show **"Licence: not yet specified"**. **[TO CONFIRM: what applies until a licence is set. Suggested: research and non-commercial use only, with credit, until the licence is published.]**
-- **Credit the source** named on the dataset page, and this platform, when you publish or share work that uses the data. Suggested wording: *"Source: [data source], via the Data and AI Commons for One Health (ARTPARK, IISc)."*
+- **Credit the source** named on the dataset page, and this platform, when you publish or share work that uses the data. Example wording: *"Source: [data source], via the Data and AI Commons for One Health (ARTPARK, IISc)."*
 - Many datasets come from government departments and other organisations. Their own terms may also apply. Where we know of them, we link to them on the dataset page.
 - The platform's **software** is open source under the GNU Affero General Public License v3.0 (AGPL-3.0). That licence covers the code, not the data.
 
@@ -88,7 +80,7 @@ The platform and all data are provided **"as is"**, without any promise that the
 
 ## 10. Liability
 
-As far as the law allows, ARTPARK and IISc are not liable for any loss or damage from using, or not being able to use, the platform or its data, including indirect or consequential loss and lost data or profits. **[TO CONFIRM with legal: liability cap and wording]**
+As far as the law allows, ARTPARK and IISc are not liable for any loss or damage from using, or not being able to use, the platform or its data, including indirect or consequential loss and lost data or profits.
 
 ## 11. Changes
 
@@ -98,10 +90,9 @@ We may also change, pause or stop parts of the platform, or remove datasets, for
 
 ## 12. Law and disputes
 
-These terms are governed by the laws of India. Disputes are subject to the courts of Bengaluru, Karnataka. **[TO CONFIRM]**
+These terms are governed by the laws of India. Disputes are subject to the courts of Bengaluru, Karnataka.
 
 ## 13. Contact
 
 Data and AI Commons for One Health, ARTPARK, IISc Bengaluru
 Email: **onehealth@artpark.in**
-**[TO CONFIRM: postal address]**

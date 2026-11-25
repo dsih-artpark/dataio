@@ -165,54 +165,17 @@ const textLink = 'font-semibold text-primary-700 hover:text-primary-900';
 
   <ThemeStrip />
 
-  <!-- WHO IT'S FOR -->
-  <section id="audiences" aria-labelledby="audiences-heading" class="py-16 sm:py-20 bg-white scroll-mt-4">
+  <!-- BROWSE BY THEME -->
+  <section aria-labelledby="themes-heading" class="py-16 sm:py-20 bg-white">
     <div class="max-w-page mx-auto px-4 sm:px-6">
-      <p class={`${eyebrow} mb-2`}>Who it’s for</p>
-      <h2 id="audiences-heading" class={`${h2} mb-3`}>One place to start, whatever your role</h2>
-      <p class={`${intro} mb-10`}>
-        Every dataset is cleaned, documented and described the same way, so you spend less time finding and fixing data
-        and more time using it.
-      </p>
-      <div class="grid gap-6 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
-        {
-          audiences.map((audience, index) => (
-            <article
-              class={`group relative border border-gray-200 rounded-2xl p-7 flex flex-col gap-3.5 ${audience.tone.glow} motion-safe:transition motion-safe:hover:-translate-y-1 hover:shadow-md`}
-            >
-              <span aria-hidden="true" class="absolute top-6 right-7 text-sm text-gray-500 tabular-nums">
-                {String(index + 1).padStart(2, '0')}
-              </span>
-              <div
-                aria-hidden="true"
-                class={`w-12 h-12 rounded-xl flex items-center justify-center motion-safe:transition motion-safe:group-hover:-rotate-6 ${audience.tone.icon}`}
-              >
-                <svg
-                  width="24"
-                  height="24"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  set:html={audience.icon}
-                />
-              </div>
-              <h3 class="m-0 text-[22px] font-bold">{audience.title}</h3>
-              <p class="m-0 text-base leading-relaxed text-gray-600">{audience.text}</p>
-              <ul class={`m-0 pl-5 list-disc text-[15px] leading-[1.8] text-gray-700 ${audience.tone.bullet}`}>
-                {audience.points.map((point) => (
-                  <li>{point}</li>
-                ))}
-              </ul>
-              <a href={audience.link.href} class={`mt-auto text-[15px] ${textLink}`}>
-                {audience.link.label} →
-              </a>
-            </article>
-          ))
-        }
+      <div class="flex flex-wrap justify-between items-end gap-4 mb-8">
+        <div>
+          <p class={`${eyebrow} mb-2`}>Browse by theme</p>
+          <h2 id="themes-heading" class="m-0 text-[28px] sm:text-[32px] font-bold text-gray-900">What’s in the catalogue</h2>
+        </div>
+        <a href="/datasets" class={`text-[15px] ${textLink}`}>See all datasets →</a>
       </div>
+      <ThemeGrid client:visible />
     </div>
   </section>
 
@@ -265,17 +228,54 @@ const textLink = 'font-semibold text-primary-700 hover:text-primary-900';
     </div>
   </section>
 
-  <!-- BROWSE BY THEME -->
-  <section aria-labelledby="themes-heading" class="py-16 sm:py-[72px] bg-gray-50 border-y border-gray-200">
+  <!-- WHO IT'S FOR -->
+  <section id="audiences" aria-labelledby="audiences-heading" class="py-16 sm:py-[72px] bg-gray-50 border-y border-gray-200 scroll-mt-4">
     <div class="max-w-page mx-auto px-4 sm:px-6">
-      <div class="flex flex-wrap justify-between items-end gap-4 mb-8">
-        <div>
-          <p class={`${eyebrow} mb-2`}>Browse by theme</p>
-          <h2 id="themes-heading" class="m-0 text-[28px] sm:text-[32px] font-bold text-gray-900">What’s in the catalogue</h2>
-        </div>
-        <a href="/datasets" class={`text-[15px] ${textLink}`}>See all datasets →</a>
+      <p class={`${eyebrow} mb-2`}>Who it’s for</p>
+      <h2 id="audiences-heading" class={`${h2} mb-3`}>One place to start, whatever your role</h2>
+      <p class={`${intro} mb-10`}>
+        Every dataset is cleaned, documented and described the same way, so you spend less time finding and fixing data
+        and more time using it.
+      </p>
+      <div class="grid gap-6 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
+        {
+          audiences.map((audience, index) => (
+            <article
+              class={`group relative border border-gray-200 rounded-2xl p-7 flex flex-col gap-3.5 ${audience.tone.glow} motion-safe:transition motion-safe:hover:-translate-y-1 hover:shadow-md`}
+            >
+              <span aria-hidden="true" class="absolute top-6 right-7 text-sm text-gray-500 tabular-nums">
+                {String(index + 1).padStart(2, '0')}
+              </span>
+              <div
+                aria-hidden="true"
+                class={`w-12 h-12 rounded-xl flex items-center justify-center motion-safe:transition motion-safe:group-hover:-rotate-6 ${audience.tone.icon}`}
+              >
+                <svg
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  set:html={audience.icon}
+                />
+              </div>
+              <h3 class="m-0 text-[22px] font-bold">{audience.title}</h3>
+              <p class="m-0 text-base leading-relaxed text-gray-600">{audience.text}</p>
+              <ul class={`m-0 pl-5 list-disc text-[15px] leading-[1.8] text-gray-700 ${audience.tone.bullet}`}>
+                {audience.points.map((point) => (
+                  <li>{point}</li>
+                ))}
+              </ul>
+              <a href={audience.link.href} class={`mt-auto text-[15px] ${textLink}`}>
+                {audience.link.label} →
+              </a>
+            </article>
+          ))
+        }
       </div>
-      <ThemeGrid client:visible />
     </div>
   </section>
 

@@ -72,7 +72,7 @@ def test_every_purpose_the_app_creates_is_allowed_by_the_database():
     used = _purposes_used_in_code()
 
     # guards the scan itself: these are the known create_otp callers
-    assert {"login", "registration", "account_deletion", "dataset_deletion:CS0007DS0113"} <= used
+    assert {"login", "registration", "account_deletion", "download", "dataset_deletion:CS0007DS0113"} <= used
     assert [p for p in sorted(used) if not _is_allowed(p)] == []
 
 

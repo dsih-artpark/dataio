@@ -24,6 +24,7 @@ MIGRATIONS_AFTER_SCHEMA = [
     "030_access_requests.sql",
     "031_public_download_consent.sql",
     "032_dataset_changes.sql",
+    "033_otp_download_purpose.sql",
 ]
 
 requires_postgres = pytest.mark.skipif(

@@ -12,7 +12,7 @@ import json
 import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 import yaml
@@ -28,6 +28,7 @@ os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
 from sqlalchemy.orm import sessionmaker
 
+from dataio.api.auth import otp as otp_module
 from dataio.api.auth import security
 from dataio.api.database.enums import AccessLevel, ResourceType, SpatialResolution, TemporalResolution
 from dataio.api.database.models import (
@@ -36,6 +37,7 @@ from dataio.api.database.models import (
     DataOwner,
     Dataset,
     DatasetDownload,
+    OTPToken,
     User,
     UserPermission,
 )
@@ -44,6 +46,8 @@ from dataio.api.services import filestore_service as filestore_module
 from dataio.api.services import public_access_service as access_module
 from dataio.api.services import web_admin_service as admin_module
 from dataio.api.services.public_access_service import (
+    DOWNLOAD_CODE_NEEDED,
+    DOWNLOAD_CODE_WRONG,
     SAMPLE_TEXT,
     PublicAccessService,
     count_words,
@@ -191,6 +195,7 @@ class FakeEmail:
 @pytest.fixture()
 def db(session_factory, monkeypatch):
     monkeypatch.setattr(access_module, "DBSession", session_factory)
+    monkeypatch.setattr(otp_module, "DBSession", session_factory)
     monkeypatch.setattr(filestore_module, "FilestoreService", FakeFilestore)
     monkeypatch.setattr(email_module, "EmailService", FakeEmail)
     monkeypatch.setattr(security, "enforce_ip_rate_limit", lambda *args, **kwargs: None)
@@ -198,6 +203,7 @@ def db(session_factory, monkeypatch):
     session = session_factory()
     session.query(AccessRequest).delete()
     session.query(DatasetDownload).delete()
+    session.query(OTPToken).delete()
     session.query(UserPermission).delete()
     session.query(User).filter(User.email.notin_(["admin@example.org", "known@example.org"])).delete()
     session.commit()
@@ -231,10 +237,21 @@ def _request(**overrides) -> dict:
 # ------------------------------------------------------------ downloads
 
 
+def _code(email: str = "asha@example.org") -> str:
+    """A download code for the address, as send_download_code would email it."""
+    code, _ = otp_module.create_otp(email, purpose="download")
+    return code
+
+
 @requires_postgres
 def test_open_dataset_download_is_logged_with_the_visitor(db):
     result = PublicAccessService().get_open_download_urls(
-        "EP0001DS0001", "203.0.113.7", "pytest", email=" Asha@Example.org ", accept_terms=True
+        "EP0001DS0001",
+        "203.0.113.7",
+        "pytest",
+        email=" Asha@Example.org ",
+        accept_terms=True,
+        code=_code("asha@example.org"),
     )
     assert [t["table_name"] for t in result["tables"]] == ["main"]
     visitor_id = uuid.UUID(result["visitor_id"])
@@ -253,7 +270,9 @@ def test_open_dataset_download_is_logged_with_the_visitor(db):
 @requires_postgres
 def test_returning_visitor_downloads_with_only_the_cookie_id(db):
     service = PublicAccessService()
-    first = service.get_open_download_urls("EP0001DS0001", email="asha@example.org", accept_terms=True)
+    first = service.get_open_download_urls(
+        "EP0001DS0001", email="asha@example.org", accept_terms=True, code=_code()
+    )
     again = service.get_open_download_urls("EP0001DS0001", visitor_id=first["visitor_id"])
     assert again["visitor_id"] == first["visitor_id"]
     assert again["tables"]
@@ -270,7 +289,7 @@ def test_returning_visitor_downloads_with_only_the_cookie_id(db):
 def test_given_visitor_id_is_kept_for_a_new_email(db):
     visitor_id = str(uuid.uuid4())
     result = PublicAccessService().get_open_download_urls(
-        "EP0001DS0001", email="asha@example.org", visitor_id=visitor_id, accept_terms=True
+        "EP0001DS0001", email="asha@example.org", visitor_id=visitor_id, accept_terms=True, code=_code()
     )
     assert result["visitor_id"] == visitor_id
 
@@ -359,12 +378,148 @@ def test_download_route_takes_the_email_in_the_body(db, downloads_on):
     url = "/api/v1/web/public/datasets/EP0001DS0001/download-urls"
     assert client.post(url, json={}).status_code == 428
     assert client.post(url, json={"email": "not-an-email", "accept_terms": True}).status_code == 422
-    response = client.post(url, json={"email": "asha@example.org", "accept_terms": True})
+    assert client.post(url, json={"email": "asha@example.org", "accept_terms": True}).status_code == 400
+    response = client.post(url, json={"email": "asha@example.org", "accept_terms": True, "code": _code()})
     assert response.status_code == 200
     assert response.json()["tables"][0]["download_url"].endswith("/main.csv")
     # The old GET form is gone, so emails never end up in URLs.
     assert client.get(url).status_code == 405
 
+
+
+# -------------------------------------------------------- download codes
+
+
+def _downloads(factory) -> int:
+    session = factory()
+    try:
+        return session.query(DatasetDownload).count()
+    finally:
+        session.close()
+
+
+@requires_postgres
+def test_download_code_is_emailed_and_opens_the_first_download(db):
+    service = PublicAccessService()
+    assert service.send_download_code("EP0001DS0001", " Asha@Example.org ", accept_terms=True)["sent"]
+
+    [mail] = FakeEmail.sent
+    assert mail["to"] == "asha@example.org"
+    code = next(word for word in mail["text"].split() if word.isdigit() and len(word) == otp_module.OTP_LENGTH)
+    assert code in mail["subject"] and code in mail["html"]
+
+    result = service.get_open_download_urls("EP0001DS0001", email="asha@example.org", accept_terms=True, code=code)
+    assert result["tables"]
+    assert _downloads(db) == 1
+
+
+@requires_postgres
+@pytest.mark.parametrize(
+    "code, detail",
+    [(None, DOWNLOAD_CODE_NEEDED), ("  ", DOWNLOAD_CODE_NEEDED), ("000000x", DOWNLOAD_CODE_WRONG)],
+)
+def test_first_download_needs_the_right_code(db, code, detail):
+    _code()
+    with pytest.raises(HTTPException) as error:
+        PublicAccessService().get_open_download_urls(
+            "EP0001DS0001", email="asha@example.org", accept_terms=True, code=code
+        )
+    assert (error.value.status_code, error.value.detail) == (400, detail)
+    assert _downloads(db) == 0
+
+
+@requires_postgres
+def test_code_works_once_and_only_for_its_own_address(db):
+    service = PublicAccessService()
+    code = _code("asha@example.org")
+    with pytest.raises(HTTPException):
+        service.get_open_download_urls("EP0001DS0001", email="ravi@example.org", accept_terms=True, code=code)
+    service.get_open_download_urls("EP0001DS0001", email="asha@example.org", accept_terms=True, code=code)
+    with pytest.raises(HTTPException) as error:
+        service.get_open_download_urls("EP0001DS0001", email="asha@example.org", accept_terms=True, code=code)
+    assert error.value.detail == DOWNLOAD_CODE_WRONG
+    assert _downloads(db) == 1
+
+
+@requires_postgres
+def test_expired_code_is_refused(db):
+    code = _code()
+    session = db()
+    session.query(OTPToken).update({"expires_at": datetime.now(timezone.utc) - timedelta(minutes=1)})
+    session.commit()
+    session.close()
+    with pytest.raises(HTTPException) as error:
+        PublicAccessService().get_open_download_urls(
+            "EP0001DS0001", email="asha@example.org", accept_terms=True, code=code
+        )
+    assert error.value.detail == DOWNLOAD_CODE_WRONG
+
+
+@requires_postgres
+def test_code_stops_working_after_too_many_wrong_tries(db):
+    service = PublicAccessService()
+    code = _code()
+    wrong = "1" * len(code) if code != "1" * len(code) else "2" * len(code)
+    for _ in range(otp_module.OTP_MAX_ATTEMPTS):
+        with pytest.raises(HTTPException):
+            service.get_open_download_urls("EP0001DS0001", email="asha@example.org", accept_terms=True, code=wrong)
+    with pytest.raises(HTTPException) as error:
+        service.get_open_download_urls("EP0001DS0001", email="asha@example.org", accept_terms=True, code=code)
+    assert error.value.detail == DOWNLOAD_CODE_WRONG
+    assert _downloads(db) == 0
+
+
+@requires_postgres
+def test_download_code_refusals(db):
+    service = PublicAccessService()
+    for ds_id in ("EP0001DS0002", "EP0001DS0003"):  # View only, Restricted
+        with pytest.raises(HTTPException) as error:
+            service.send_download_code(ds_id, "asha@example.org", accept_terms=True)
+        assert error.value.status_code == 403
+    with pytest.raises(HTTPException) as error:
+        service.send_download_code("EP0001DS0001", "asha@example.org", accept_terms=False)
+    assert error.value.status_code == 400
+    with pytest.raises(HTTPException) as error:
+        service.send_download_code("NOPE", "asha@example.org", accept_terms=True)
+    assert error.value.status_code == 404
+    assert FakeEmail.sent == []
+
+    service.send_download_code("EP0001DS0001", "asha@example.org", accept_terms=True)
+    with pytest.raises(HTTPException) as error:  # same address again within a minute
+        service.send_download_code("EP0001DS0001", "asha@example.org", accept_terms=True)
+    assert error.value.status_code == 429
+    assert len(FakeEmail.sent) == 1
+
+
+@requires_postgres
+def test_failed_email_is_reported(db, monkeypatch):
+    monkeypatch.setattr(FakeEmail, "send_email", lambda self, **kwargs: False)
+    with pytest.raises(HTTPException) as error:
+        PublicAccessService().send_download_code("EP0001DS0001", "asha@example.org", accept_terms=True)
+    assert error.value.status_code == 502
+
+
+def test_download_code_route_asks_to_sign_in_while_signed_out_downloads_are_off(monkeypatch):
+    web_module = importlib.import_module("dataio.api.routers.web")
+    monkeypatch.setattr(web_module, "PUBLIC_DOWNLOADS_ENABLED", False)
+    client = TestClient(importlib.import_module("dataio.api").app)
+    response = client.post(
+        "/api/v1/web/public/datasets/EP0001DS0001/download-code",
+        json={"email": "asha@example.org", "accept_terms": True},
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"] == web_module.SIGN_IN_TO_DOWNLOAD
+
+
+@requires_postgres
+def test_download_code_route(db, downloads_on):
+    client = TestClient(importlib.import_module("dataio.api").app)
+    url = "/api/v1/web/public/datasets/EP0001DS0001/download-code"
+    assert client.post(url, json={"email": "not-an-email", "accept_terms": True}).status_code == 422
+    response = client.post(url, json={"email": "asha@example.org", "accept_terms": True})
+    assert response.status_code == 200
+    assert response.json()["sent"] is True
+    assert [mail["to"] for mail in FakeEmail.sent] == ["asha@example.org"]
 
 @requires_postgres
 def test_unknown_dataset_is_404(db):

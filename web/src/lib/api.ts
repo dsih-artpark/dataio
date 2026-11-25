@@ -600,6 +600,15 @@ class ApiClient {
     );
   }
 
+  /** Email a code that confirms the visitor's address before their first signed-out download. */
+  async sendDownloadCode(datasetId: string, email: string): Promise<{ sent: boolean; expires_in_minutes: number }> {
+    return this.request(
+      `/public/datasets/${encodeURIComponent(datasetId)}/download-code`,
+      { method: 'POST', body: JSON.stringify({ email, accept_terms: true }) },
+      false
+    );
+  }
+
   async getPublicRegions(parentId: string): Promise<{ parent_id: string; regions: RegionOption[] }> {
     return this.request(`/public/regions?parent_id=${encodeURIComponent(parentId)}`, {}, false);
   }

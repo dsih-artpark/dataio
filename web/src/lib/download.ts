@@ -21,12 +21,19 @@ export class SignInRequiredError extends Error {
   }
 }
 
+/** From the pop-up: the visitor's email and the code we emailed to it. */
+export interface OpenDownloadProof {
+  email: string;
+  code: string;
+}
+
 /**
- * Links for an Open dataset without signing in. With `email` (from the pop-up)
- * the visitor accepts the terms now; without it, the visitor cookie from an
- * earlier download stands in. Throws ConsentRequiredError when neither works.
+ * Links for an Open dataset without signing in. With `proof` (from the pop-up)
+ * the visitor accepts the terms now and confirms their email with the code;
+ * without it, the visitor cookie from an earlier download stands in. Throws
+ * ConsentRequiredError when neither works.
  */
-async function openDownloadTables(dsId: string, email?: string) {
+async function openDownloadTables(dsId: string, proof?: OpenDownloadProof) {
   const visitorId = getVisitorId() ?? undefined;
   // Ask the API even without an email or visitor ID: it answers "no files yet"
   // (404) before asking for consent (428), so the pop-up only shows when there
@@ -34,7 +41,9 @@ async function openDownloadTables(dsId: string, email?: string) {
   try {
     const data = await api.getOpenDownloadUrls(
       dsId,
-      email ? { email, accept_terms: true, visitor_id: visitorId } : { visitor_id: visitorId },
+      proof
+        ? { email: proof.email, code: proof.code, accept_terms: true, visitor_id: visitorId }
+        : { visitor_id: visitorId },
     );
     saveVisitorId(data.visitor_id);
     return data.tables;
@@ -60,7 +69,7 @@ export function datasetFileStem(dsId: string, title: string): string {
 
 /**
  * open: Open download dataset, no sign-in (README from the public page);
- *   `email` is set when the visitor has just filled in the pop-up.
+ *   `proof` is set when the visitor has just filled in the pop-up.
  * signed-in: a dataset the user may download (README and manifest come with the links).
  */
 export async function downloadDatasetZip(
@@ -68,7 +77,7 @@ export async function downloadDatasetZip(
   title: string,
   mode: 'open' | 'signed-in',
   readmeMd?: string | null,
-  email?: string,
+  proof?: OpenDownloadProof,
 ): Promise<void> {
   let tables: { table_name: string; download_url: string }[];
   let manifest: Record<string, unknown> | null = null;
@@ -78,7 +87,7 @@ export async function downloadDatasetZip(
     readmeMd = data.readme_md ?? readmeMd;
     manifest = data.manifest_json;
   } else {
-    tables = await openDownloadTables(dsId, email);
+    tables = await openDownloadTables(dsId, proof);
   }
   const data = { tables };
   if (!data.tables.length) {

@@ -289,7 +289,7 @@ class OTPToken(Base):
     email = Column(Text, nullable=False)
     code = Column(Text, nullable=False)
     # 'login', 'registration', 'account_deletion', 'dataset_deletion:<ds_id>', ...
-    # (allowed values: otp_tokens_purpose_check, migrations 010 and 025)
+    # (allowed values: otp_tokens_purpose_check, migrations 010, 025 and 033)
     purpose = Column(Text, nullable=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     expires_at = Column(DateTime, nullable=False)

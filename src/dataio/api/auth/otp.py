@@ -60,9 +60,9 @@ def create_otp(
     Args:
         email: The email address to associate with the OTP
         purpose: The purpose of the OTP: 'login', 'registration',
-            'account_deletion', 'verify_email', 'invite', or
+            'account_deletion', 'verify_email', 'invite', 'download', or
             'dataset_deletion:<dataset id>'. The database only accepts
-            these (otp_tokens_purpose_check, migrations 010 and 025); a new
+            these (otp_tokens_purpose_check, migrations 010, 025 and 033); a new
             purpose needs a migration, or the insert fails.
         expires_minutes: How long the OTP is valid
 

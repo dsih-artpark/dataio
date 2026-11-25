@@ -48,6 +48,10 @@ PURPOSE_MAX_WORDS = 250
 PREVIEW_ROWS = 5
 # 428 detail when a signed-out download needs the email + terms pop-up first.
 CONSENT_REQUIRED = "Enter your email and accept the terms to download."
+# A first signed-out download confirms the email with a code sent to it.
+DOWNLOAD_CODE_NEEDED = "Enter the code we emailed you."
+DOWNLOAD_CODE_WRONG = "That code is wrong or has expired. Check the email, or ask for a new code."
+TERMS_NOT_ACCEPTED = "Please accept the Terms of Use and the dataset's licence to download."
 
 # Shown for free-text and untyped columns in a synthetic preview.
 SAMPLE_TEXT = "Sample text"
@@ -183,28 +187,83 @@ class PublicAccessService(BaseService):
             raise HTTPException(status_code=404, detail="Dataset not found")
         return dataset
 
+    def send_download_code(self, dataset_id: str, email: str, accept_terms: bool) -> dict:
+        """Email a code that confirms the visitor owns the address (first signed-out download).
+
+        Only for Open download datasets (403 otherwise) and only once the terms
+        are accepted (400). The same address can ask again after a minute
+        (429); the route also limits codes per IP, so the form can't be used
+        to send our email to strangers. The email carries only the code.
+        """
+        from dataio.api.auth import otp as otp_module
+        from dataio.api.services.email_service import EmailService
+
+        if not accept_terms:
+            raise HTTPException(status_code=400, detail=TERMS_NOT_ACCEPTED)
+        session = DBSession()
+        try:
+            dataset = self._get_dataset(session, dataset_id)
+            if _access(dataset) != AccessLevel.DOWNLOAD.value:
+                raise HTTPException(
+                    status_code=403,
+                    detail="This dataset isn't open for download. Request access to it instead.",
+                )
+        finally:
+            session.close()
+
+        email = email.strip().lower()
+        try:
+            code, _ = otp_module.create_otp(email, purpose="download")
+        except ValueError as error:
+            raise HTTPException(status_code=429, detail=str(error))
+
+        minutes = otp_module.OTP_EXPIRY_MINUTES
+        text = (
+            f"Your code to download a dataset from the Data and AI Commons for One Health is:\n\n{code}\n\n"
+            f"It expires in {minutes} minutes. If you didn't ask for it, you can ignore this email.\n"
+        )
+        html_body = (
+            "<p>Your code to download a dataset from the Data and AI Commons for One Health is:</p>"
+            f"<p style='font-size:28px;font-weight:bold;letter-spacing:6px'>{html.escape(code)}</p>"
+            f"<p>It expires in {minutes} minutes. If you didn't ask for it, you can ignore this email.</p>"
+        )
+        if not EmailService().send_email(
+            to_email=email,
+            subject=f"Your download code: {code}",
+            html_body=html_body,
+            text_body=text,
+        ):
+            self.logger.error("Failed to send a download code email")
+            raise HTTPException(status_code=502, detail="We couldn't send the code. Please try again.")
+        return {"sent": True, "expires_in_minutes": minutes}
+
     def _resolve_visitor(
         self,
         session,
         email: Optional[str],
         visitor_id: Optional[str],
         accept_terms: bool,
+        code: Optional[str] = None,
     ) -> tuple[str, uuid.UUID, datetime]:
         """Email, visitor ID and terms-accepted time for a signed-out download.
 
-        A first-time visitor gives an email and ticks the terms box; a returning
-        one sends only the visitor ID from their cookie, which is matched to
-        their earlier signed-out download. Otherwise 428, and the site shows
-        the pop-up.
+        A first-time visitor gives an email, ticks the terms box and enters
+        the code we emailed (send_download_code); a returning one sends only
+        the visitor ID from their cookie, which is matched to their earlier
+        signed-out download. Otherwise 428, and the site shows the pop-up.
         """
+        from dataio.api.auth import otp as otp_module
+
         parsed_id = _parse_uuid(visitor_id)
         if email and email.strip():
             if not accept_terms:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Please accept the Terms of Use and the dataset's licence to download.",
-                )
-            return email.strip().lower(), parsed_id or uuid.uuid4(), datetime.now(timezone.utc)
+                raise HTTPException(status_code=400, detail=TERMS_NOT_ACCEPTED)
+            email = email.strip().lower()
+            if not code or not code.strip():
+                raise HTTPException(status_code=400, detail=DOWNLOAD_CODE_NEEDED)
+            if not otp_module.verify_otp(email, code.strip(), purpose="download"):
+                raise HTTPException(status_code=400, detail=DOWNLOAD_CODE_WRONG)
+            return email, parsed_id or uuid.uuid4(), datetime.now(timezone.utc)
         if parsed_id:
             previous = (
                 session.query(DatasetDownload.visitor_email, DatasetDownload.terms_accepted_at)
@@ -227,12 +286,14 @@ class PublicAccessService(BaseService):
         email: Optional[str] = None,
         visitor_id: Optional[str] = None,
         accept_terms: bool = False,
+        code: Optional[str] = None,
     ) -> dict:
         """Short-lived presigned links for an Open download dataset, no sign-in.
 
         View only and Restricted datasets answer 403. The visitor must have
-        given an email and accepted the terms, now or on an earlier download
-        from the same browser (visitor ID); otherwise 428. The download is
+        given an email confirmed with the emailed code and accepted the terms,
+        now or on an earlier download from the same browser (visitor ID);
+        otherwise 428 (pop-up) or 400 (missing or wrong code). The download is
         logged with no user (access_channel PUBLIC) but with the visitor's
         email, ID and IP, once there is something to download.
         """
@@ -276,7 +337,7 @@ class PublicAccessService(BaseService):
                 )
 
             visitor_email, visitor_uuid, terms_accepted_at = self._resolve_visitor(
-                session, email, visitor_id, accept_terms
+                session, email, visitor_id, accept_terms, code
             )
             try:
                 session.add(

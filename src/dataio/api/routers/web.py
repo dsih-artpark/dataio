@@ -923,12 +923,41 @@ PUBLIC_CHAT_HISTORY_MESSAGES = 10
 PUBLIC_CHAT_MESSAGE_CHARS = 2000
 
 
+PUBLIC_DOWNLOAD_CODES_PER_HOUR = int(os.getenv("PUBLIC_DOWNLOAD_CODES_PER_HOUR", "10"))
+
+
 class PublicDownloadRequest(BaseModel):
-    # First download from this browser: email + accept_terms. Later ones: the
-    # visitor_id from the dataio_visitor cookie is enough.
+    # First download from this browser: email + accept_terms + the code emailed
+    # to that address. Later ones: the visitor_id from the dataio_visitor cookie
+    # is enough.
     email: Optional[EmailStr] = None
     visitor_id: Optional[str] = Field(None, max_length=64)
     accept_terms: bool = False
+    code: Optional[str] = Field(None, max_length=12)
+
+
+class PublicDownloadCodeRequest(BaseModel):
+    email: EmailStr
+    accept_terms: bool = False
+
+
+@web_router.post("/public/datasets/{dataset_id}/download-code", tags=["public"])
+async def send_public_download_code(dataset_id: str, body: PublicDownloadCodeRequest, request: Request):
+    """
+    Email a code that confirms the visitor's address before their first
+    signed-out download of an Open dataset.
+
+    403 for datasets that aren't Open download, 400 without accept_terms,
+    429 when asked again too soon for the same address or too often from one
+    IP. Off (403 ``sign_in_to_download``) while PUBLIC_DOWNLOADS_ENABLED is.
+    """
+    from dataio.api.auth.security import enforce_ip_rate_limit
+    from dataio.api.services.public_access_service import PublicAccessService
+
+    if not PUBLIC_DOWNLOADS_ENABLED:
+        raise HTTPException(status_code=403, detail=SIGN_IN_TO_DOWNLOAD)
+    enforce_ip_rate_limit(request, "download_code", PUBLIC_DOWNLOAD_CODES_PER_HOUR, 3600)
+    return PublicAccessService().send_download_code(dataset_id, str(body.email), body.accept_terms)
 
 
 @web_router.post("/public/datasets/{dataset_id}/download-urls", tags=["public"])
@@ -937,8 +966,9 @@ async def get_public_download_urls(dataset_id: str, body: PublicDownloadRequest,
     Presigned download links for an Open download dataset, without signing in.
 
     Only for datasets with access level DOWNLOAD (403 otherwise). The visitor
-    gives an email and accepts the terms (or sends the visitor ID they got the
-    first time); otherwise 428. POST so the email stays out of URLs and logs.
+    gives an email, accepts the terms and sends the code emailed by
+    ``download-code`` (or sends the visitor ID they got the first time);
+    otherwise 428, or 400 for a missing or wrong code. POST so the email stays out of URLs and logs.
     Links are short-lived. Rate-limited per IP; each download is logged with
     the email, visitor ID and IP (access channel PUBLIC).
 
@@ -959,6 +989,7 @@ async def get_public_download_urls(dataset_id: str, body: PublicDownloadRequest,
         email=str(body.email) if body.email else None,
         visitor_id=body.visitor_id,
         accept_terms=body.accept_terms,
+        code=body.code,
     )
 
 

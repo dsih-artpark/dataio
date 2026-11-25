@@ -96,6 +96,8 @@ export interface OpenDownloadConsent {
   email?: string;
   visitor_id?: string;
   accept_terms?: boolean;
+  /** The code emailed to `email` (first download from this browser). */
+  code?: string;
 }
 
 export interface RegionOption {
